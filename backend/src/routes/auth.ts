@@ -1,41 +1,84 @@
-import type { FastifyInstance } from 'fastify';
-import jwt from 'jsonwebtoken';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../config';
 import { prisma } from '../db';
+import { checkLnuIdentity, verifyIdToken } from '../lib/google';
+import {
+  consumeRefreshToken,
+  issueRefreshToken,
+  revokeRefreshToken,
+  signAccessToken,
+} from '../lib/tokens';
 
-// F1: вхід. Справжню перевірку Google-токена додасте окремим PR.
+const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+
+async function startSession(userId: string, deviceId: string) {
+  return {
+    accessToken: signAccessToken(userId),
+    refreshToken: await issueRefreshToken(userId, deviceId),
+  };
+}
+
+function publicUser(u: { id: string; email: string; role: string; groupId: string | null }) {
+  return { id: u.id, email: u.email, role: u.role, groupId: u.groupId };
+}
+
+// F1: вхід через Google, оновлення і вихід
 export async function authRoutes(app: FastifyInstance) {
-  app.post('/auth/google', async (req, reply) => {
-    const { idToken } = (req.body ?? {}) as { idToken?: string };
-
-    if (!config.fakeAuth) {
-      return reply.code(501).send({ error: 'REAL_GOOGLE_AUTH_NOT_IMPLEMENTED' });
+  app.post('/auth/google', async (req, reply: FastifyReply) => {
+    const { idToken, deviceId } = (req.body ?? {}) as { idToken?: unknown; deviceId?: unknown };
+    if (!isNonEmptyString(idToken)) return reply.code(400).send({ error: 'ID_TOKEN_REQUIRED' });
+    if (!isNonEmptyString(deviceId)) return reply.code(400).send({ error: 'DEVICE_ID_REQUIRED' });
+    if (!config.fakeAuth && !config.googleClientId) {
+      return reply.code(503).send({ error: 'AUTH_NOT_CONFIGURED' });
     }
-    if (!idToken || !idToken.startsWith('test:')) {
+
+    let identity;
+    try {
+      identity = await verifyIdToken(idToken);
+    } catch {
       return reply.code(401).send({ error: 'INVALID_TOKEN' });
     }
 
-    const email = idToken.slice('test:'.length).toLowerCase();
-    if (!email.endsWith(config.allowedEmailDomain)) {
-      return reply.code(403).send({ error: 'NOT_LNU_EMAIL' });
-    }
+    const denied = checkLnuIdentity(identity);
+    if (denied) return reply.code(403).send({ error: denied });
 
     const user = await prisma.user.upsert({
-      where: { email },
-      update: {},
+      where: { email: identity.email },
+      update: { googleSub: identity.sub },
       create: {
-        email,
-        googleSub: `test-${email}`,
-        fullName: email.split('@')[0],
+        email: identity.email,
+        googleSub: identity.sub,
+        fullName: identity.name ?? identity.email.split('@')[0],
       },
     });
 
-    const accessToken = jwt.sign({ sub: user.id }, config.jwtSecret, {
-      expiresIn: config.accessTokenTtl,
-    });
     return {
-      accessToken,
-      user: { id: user.id, email: user.email, role: user.role, groupId: user.groupId },
+      ...(await startSession(user.id, deviceId)),
+      user: publicUser(user),
+      needsOnboarding: user.groupId === null,
     };
+  });
+
+  app.post('/auth/refresh', async (req, reply) => {
+    const { refreshToken, deviceId } = (req.body ?? {}) as {
+      refreshToken?: unknown;
+      deviceId?: unknown;
+    };
+    if (!isNonEmptyString(refreshToken) || !isNonEmptyString(deviceId)) {
+      return reply.code(400).send({ error: 'REFRESH_TOKEN_AND_DEVICE_REQUIRED' });
+    }
+    const session = await consumeRefreshToken(refreshToken, deviceId);
+    if (!session) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+
+    const user = await prisma.user.findUnique({ where: { id: session.userId } });
+    if (!user) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+
+    return startSession(user.id, deviceId);
+  });
+
+  app.post('/auth/logout', async (req, reply) => {
+    const { refreshToken } = (req.body ?? {}) as { refreshToken?: unknown };
+    if (isNonEmptyString(refreshToken)) await revokeRefreshToken(refreshToken);
+    return reply.code(204).send();
   });
 }
