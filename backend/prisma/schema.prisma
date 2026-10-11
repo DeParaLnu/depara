@@ -1,0 +1,194 @@
+// ДеПара: схема БД (PostgreSQL / Supabase). Prisma 6.
+// Поля в коді camelCase, у БД snake_case через @map / @@map.
+// DATABASE_URL: pooler-рядок Supabase (для застосунку), DIRECT_URL: пряме підключення (для міграцій).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  STUDENT
+  HEADMAN
+  ADMIN
+}
+
+enum LessonType {
+  LECTURE  // (Л)
+  PRACTICE // (ПрС)
+  LAB      // (Лаб)
+  EXAM
+  OTHER    // пари без типу в розкладі
+}
+
+// Кому адресована пара. Підгрупа визначається окремо полем lesson.subgroup.
+enum Audience {
+  STREAM   // «Потік»: усі студенти спеціальності
+  COMBINED // «Збірна група»: студенти з різних груп
+  GROUP    // звичайна пара групи (або її підгрупи)
+}
+
+enum SubstitutionKind {
+  CANCELLED
+  REPLACED
+  MOVED
+  ROOM_CHANGED
+}
+
+model Faculty {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  shortName String       @map("short_name")
+  groups    StudyGroup[]
+
+  @@map("faculty")
+}
+
+model StudyGroup {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   // наприклад ПМІ-31
+  course    Int
+  facultyId String   @map("faculty_id") @db.Uuid
+  faculty   Faculty  @relation(fields: [facultyId], references: [id])
+  users     User[]
+  lessons   Lesson[]
+
+  @@unique([facultyId, code])
+  @@map("study_group")
+}
+
+// "user" це зарезервоване слово в Postgres, тому таблиця app_user.
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  email           String   @unique
+  googleSub       String   @unique @map("google_sub") // зайве, якщо візьмете Supabase Auth
+  fullName        String   @map("full_name")
+  role            Role     @default(STUDENT)
+  groupId         String?  @map("group_id") @db.Uuid
+  subgroup        Int      @default(0) // 0 = бачити всі підгрупи
+  reminderMinutes Int      @default(0) @map("reminder_minutes") // 0, 10, 15
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  group         StudyGroup?         @relation(fields: [groupId], references: [id])
+  tokens        NotificationToken[]
+  substitutions Substitution[]
+
+  @@map("app_user")
+}
+
+model NotificationToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  fcmToken   String   @unique @map("fcm_token")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notification_token")
+}
+
+model Building {
+  id         String      @id @default(uuid()) @db.Uuid
+  code       String      @unique // літера з розкладу: «Б» (Драгоманова), «Т» (Тарнавського)
+  name       String
+  address    String
+  classrooms Classroom[]
+
+  @@map("building")
+}
+
+model Classroom {
+  id         String   @id @default(uuid()) @db.Uuid
+  buildingId String   @map("building_id") @db.Uuid
+  number     String   // рядок: «406», «N10», «129а», «№9»
+  floor      Int?
+  building   Building @relation(fields: [buildingId], references: [id])
+
+  lessons       Lesson[]
+  substitutions Substitution[]
+
+  @@unique([buildingId, number])
+  @@map("classroom")
+}
+
+model Teacher {
+  id       String  @id @default(uuid()) @db.Uuid
+  fullName String  @unique @map("full_name")
+  position String? // доцент, асистент, ...
+
+  lessons       Lesson[]
+  substitutions Substitution[]
+
+  @@map("teacher")
+}
+
+// Дзвінок один на весь ЛНУ: 5 рядків, змінюються в одному місці.
+model PairTime {
+  pairNumber Int      @id @map("pair_number")
+  startTime  DateTime @map("start_time") @db.Time(0)
+  endTime    DateTime @map("end_time") @db.Time(0)
+
+  lessons       Lesson[]
+  substitutions Substitution[]
+
+  @@map("pair_time")
+}
+
+// Одна пара = один запис на групу (лекція потоку дублюється в кожну групу).
+model Lesson {
+  id          String     @id @default(uuid()) @db.Uuid
+  groupId     String     @map("group_id") @db.Uuid
+  date        DateTime   @db.Date
+  pairNumber  Int        @map("pair_number")
+  subject     String
+  teacherId   String?    @map("teacher_id") @db.Uuid
+  type        LessonType @default(OTHER)
+  audience    Audience   @default(GROUP)
+  subgroup    Int        @default(0) // 0 = уся група, 1/2 = підгрупа
+  classroomId String?    @map("classroom_id") @db.Uuid
+  onlineUrl   String?    @map("online_url")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  group        StudyGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  pair         PairTime      @relation(fields: [pairNumber], references: [pairNumber])
+  teacher      Teacher?      @relation(fields: [teacherId], references: [id])
+  classroom    Classroom?    @relation(fields: [classroomId], references: [id])
+  substitution Substitution?
+
+  // Ключ для ідемпотентного імпорту (повторний імпорт оновлює, а не дублює).
+  @@unique([groupId, date, pairNumber, subgroup, subject])
+  @@index([groupId, date])
+  @@map("lesson")
+}
+
+// Заміна стосується конкретної пари з датою, тому окремого поля date немає.
+model Substitution {
+  id             String           @id @default(uuid()) @db.Uuid
+  lessonId       String           @unique @map("lesson_id") @db.Uuid // одна активна заміна на пару
+  kind           SubstitutionKind
+  newTeacherId   String?          @map("new_teacher_id") @db.Uuid
+  newClassroomId String?          @map("new_classroom_id") @db.Uuid
+  newDate        DateTime?        @map("new_date") @db.Date // для MOVED
+  newPairNumber  Int?             @map("new_pair_number") // для MOVED
+  comment        String?
+  createdById    String           @map("created_by") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  lesson       Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  newTeacher   Teacher?   @relation(fields: [newTeacherId], references: [id])
+  newClassroom Classroom? @relation(fields: [newClassroomId], references: [id])
+  newPair      PairTime?  @relation(fields: [newPairNumber], references: [pairNumber])
+  createdBy    User       @relation(fields: [createdById], references: [id])
+
+  @@map("substitution")
+}
