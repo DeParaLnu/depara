@@ -15,3 +15,5 @@ depara/
     package.json
   .env.example           
   README.md
+
+node_modules/
