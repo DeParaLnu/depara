@@ -42,13 +42,16 @@ export async function authRoutes(app: FastifyInstance) {
     const denied = checkLnuIdentity(identity);
     if (denied) return reply.code(403).send({ error: denied });
 
+    // Пошти зі змінної ADMIN_EMAILS отримують роль ADMIN (так з'являється перший адмін)
+    const isBootstrapAdmin = config.adminEmails.includes(identity.email);
     const user = await prisma.user.upsert({
       where: { email: identity.email },
-      update: { googleSub: identity.sub },
+      update: { googleSub: identity.sub, ...(isBootstrapAdmin ? { role: 'ADMIN' } : {}) },
       create: {
         email: identity.email,
         googleSub: identity.sub,
         fullName: identity.name ?? identity.email.split('@')[0],
+        role: isBootstrapAdmin ? 'ADMIN' : 'STUDENT',
       },
     });
 

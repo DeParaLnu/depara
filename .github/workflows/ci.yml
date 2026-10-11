@@ -61,6 +61,7 @@ jobs:
       REDIS_URL: redis://localhost:6379
       NODE_ENV: test
       AUTH_MODE: fake
+      ADMIN_EMAILS: e2e.admin@lnu.edu.ua
       JWT_SECRET: ci-only-secret
     steps:
       - uses: actions/checkout@v4
