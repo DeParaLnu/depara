@@ -1,11 +1,17 @@
 export const API = process.env.API_URL ?? 'http://localhost:3000';
 
-export async function loginRaw(email: string): Promise<Response> {
-  return fetch(`${API}/auth/google`, {
+export const DEVICE = 'e2e-device';
+
+export function postJson(path: string, body: unknown): Promise<Response> {
+  return fetch(`${API}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ idToken: `test:${email}` }),
+    body: JSON.stringify(body),
   });
+}
+
+export function loginRaw(email: string, deviceId: string | undefined = DEVICE): Promise<Response> {
+  return postJson('/auth/google', { idToken: `test:${email}`, deviceId });
 }
 
 export function authHeaders(token: string) {

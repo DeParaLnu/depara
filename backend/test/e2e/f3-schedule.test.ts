@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API, authHeaders, setupStudent } from './helpers';
+import { API, authHeaders, loginRaw, setupStudent } from './helpers';
 
 describe('F3: розклад на тиждень', () => {
   it('повертає пари групи з часом, а повторний запит з ETag дає 304', async () => {
@@ -29,11 +29,7 @@ describe('F3: розклад на тиждень', () => {
   });
 
   it('користувач без групи отримує 409 GROUP_NOT_SET', async () => {
-    const login = await fetch(`${API}/auth/google`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ idToken: 'test:nogroup@lnu.edu.ua' }),
-    });
+    const login = await loginRaw('nogroup@lnu.edu.ua');
     const { accessToken } = (await login.json()) as { accessToken: string };
     const res = await fetch(`${API}/schedule/week`, { headers: authHeaders(accessToken) });
     expect(res.status).toBe(409);
