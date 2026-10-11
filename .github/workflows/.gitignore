@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+
+# React Native / Android
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/ios/Pods/
+*.apk
+*.aab
+
+# ОС і редактори
+.DS_Store
+.idea/
+.vscode/
