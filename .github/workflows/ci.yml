@@ -5,13 +5,11 @@ on:
   push:
     branches: [develop, main]
 
-# Новий коміт у ту саму гілку скасовує попередній запуск і економить хвилини
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Статичні перевірки: це не тести, а швидкий фільтр помилок
   backend-lint-typecheck:
     runs-on: ubuntu-latest
     defaults:
