@@ -63,6 +63,14 @@ describe('F1: вхід', () => {
   });
 });
 
+describe('демо-консоль', () => {
+  it('сторінка /dev доступна в тестовому режимі', async () => {
+    const res = await fetch(`${API}/dev`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('ДеПара');
+  });
+});
+
 describe('F1: refresh і вихід', () => {
   it('refresh видає нову пару токенів, а старий refresh більше не працює', async () => {
     const first = await login('f1.refresh@lnu.edu.ua');

@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import Fastify from 'fastify';
+import { config } from './config';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { classroomRoutes } from './routes/classrooms';
@@ -21,6 +23,13 @@ export function buildApp() {
   });
 
   app.get('/health', async () => ({ status: 'ok' }));
+
+  // Демо-консоль для ручного тестування в браузері. Існує лише при AUTH_MODE=fake (тестовий режим).
+  if (config.fakeAuth) {
+    const consoleHtml = readFileSync(new URL('./dev/console.html', import.meta.url), 'utf8');
+    app.get('/dev', async (_req, reply) => reply.type('text/html; charset=utf-8').send(consoleHtml));
+    app.get('/', async (_req, reply) => reply.redirect('/dev'));
+  }
 
   app.register(authRoutes);
   app.register(profileRoutes);

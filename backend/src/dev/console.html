@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ДеПара · демо-консоль</title>
+<style>
+  :root { --bg:#f4f5f9; --card:#fff; --ink:#1b2033; --muted:#6b7288; --brand:#1d3a8a; --line:#e3e6ef; --warn:#f5b800; --bad:#c0392b; --ok:#1e8e5a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#dfe3ee; font:15px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; color:var(--ink); }
+  #app { max-width:440px; min-height:100vh; margin:0 auto; background:var(--bg); display:flex; flex-direction:column; position:relative; }
+  header { background:var(--brand); color:#fff; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; }
+  header b { font-size:17px; } header small { opacity:.8; }
+  main { flex:1; padding:12px 12px 80px; }
+  nav { position:sticky; bottom:0; display:flex; background:var(--card); border-top:1px solid var(--line); }
+  nav button { flex:1; border:0; background:none; padding:12px 4px; font-size:13px; color:var(--muted); cursor:pointer; }
+  nav button.on { color:var(--brand); font-weight:600; box-shadow:inset 0 2px 0 var(--brand); }
+  .card { background:var(--card); border-radius:12px; padding:12px; margin:8px 0; border:1px solid var(--line); }
+  .lesson { border-left:5px solid var(--brand); }
+  .lesson.sub { border-left-color:var(--warn); }
+  .lesson.cancelled { border-left-color:#aaa; opacity:.6; }
+  .lesson.now { box-shadow:0 0 0 2px var(--ok); }
+  .row { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+  .time { font-weight:600; font-size:13px; color:var(--brand); }
+  .subject { font-weight:600; margin:2px 0; }
+  .meta { color:var(--muted); font-size:13px; }
+  .old { text-decoration:line-through; color:var(--muted); }
+  .new { color:#8a5a00; font-weight:600; background:#fff4cc; padding:0 4px; border-radius:4px; }
+  .badge { font-size:11px; padding:2px 7px; border-radius:20px; background:#e8ecf8; color:var(--brand); white-space:nowrap; }
+  .badge.warn { background:var(--warn); color:#3a2c00; font-weight:600; }
+  .badge.gray { background:#ddd; color:#444; }
+  .day { font-weight:700; margin:16px 4px 4px; text-transform:capitalize; }
+  h3 { margin:12px 4px 6px; }
+  input, select, textarea, button.btn { font:inherit; padding:9px 10px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; margin:4px 0; }
+  textarea { min-height:140px; font-family:ui-monospace, Menlo, monospace; font-size:12px; }
+  button.btn { background:var(--brand); color:#fff; border:0; cursor:pointer; font-weight:600; }
+  button.btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  button.btn.danger { background:var(--bad); }
+  button.small { width:auto; padding:5px 10px; font-size:12px; margin:6px 6px 0 0; }
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:70px; max-width:400px; padding:10px 14px; border-radius:10px; color:#fff; z-index:20; }
+  .toast.err { background:var(--bad); } .toast.ok { background:var(--ok); }
+  .modal { position:fixed; inset:0; background:rgba(10,15,40,.5); display:flex; align-items:flex-end; justify-content:center; z-index:10; }
+  .sheet { background:#fff; width:100%; max-width:440px; border-radius:18px 18px 0 0; padding:16px; max-height:90vh; overflow:auto; }
+  .hint { color:var(--muted); font-size:12px; margin:4px 2px; }
+  .bar { height:4px; background:var(--line); border-radius:4px; margin-top:6px; overflow:hidden; } .bar i { display:block; height:100%; background:var(--ok); }
+  .center { text-align:center; margin-top:40px; }
+  .pill { display:inline-block; margin:2px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header><b>ДеПара</b><small id="who"></small></header>
+  <main id="view"></main>
+  <nav id="nav"></nav>
+</div>
+<div id="toast"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const DEVICE = 'dev-console';
+const KIND = { CANCELLED:'Скасовано', REPLACED:'Заміна викладача', MOVED:'Перенесено', ROOM_CHANGED:'Нова аудиторія' };
+const TYPE = { LECTURE:'Лекція', PRACTICE:'Практика', LAB:'Лабораторна', EXAM:'Іспит', OTHER:'' };
+const S = { token: null, refresh: null, me: null, tab: 'schedule', date: null, week: null };
+
+const load = () => { try { S.token = localStorage.getItem('dc_t'); S.refresh = localStorage.getItem('dc_r'); } catch {} };
+const save = () => { try { S.token ? (localStorage.setItem('dc_t', S.token), localStorage.setItem('dc_r', S.refresh)) : (localStorage.removeItem('dc_t'), localStorage.removeItem('dc_r')); } catch {} };
+
+function toast(msg, ok = false) {
+  $('#toast').innerHTML = `<div class="toast ${ok ? 'ok' : 'err'}">${esc(msg)}</div>`;
+  setTimeout(() => ($('#toast').innerHTML = ''), 3500);
+}
+
+async function api(method, path, body, raw) {
+  const headers = {};
+  if (S.token) headers.authorization = 'Bearer ' + S.token;
+  if (body !== undefined && !raw) headers['content-type'] = 'application/json';
+  if (raw) headers['content-type'] = raw;
+  let res = await fetch(path, { method, headers, body: raw ? body : body === undefined ? undefined : JSON.stringify(body) });
+  let data = null; try { data = await res.json(); } catch {}
+  if (res.status === 401 && data?.error === 'TOKEN_EXPIRED' && S.refresh && path !== '/auth/refresh') {
+    const r = await fetch('/auth/refresh', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: S.refresh, deviceId: DEVICE }) });
+    if (r.ok) { const t = await r.json(); S.token = t.accessToken; S.refresh = t.refreshToken; save(); return api(method, path, body, raw); }
+  }
+  return { ok: res.ok, status: res.status, data };
+}
+const fail = (r) => toast(`${r.status} ${r.data?.error ?? ''}${r.data?.details ? ': ' + r.data.details.slice(0,3).join('; ') : ''}`);
+
+// ---------- Вхід ----------
+function renderLogin() {
+  $('#nav').innerHTML = ''; $('#who').textContent = '';
+  $('#view').innerHTML = `
+    <div class="card center"><h2>Увійти через ЛНУ</h2>
+      <div class="hint">Демо-режим: Google замінено на ввід пошти. Лише домен @lnu.edu.ua.</div>
+      <input id="email" placeholder="name@lnu.edu.ua" value="student1@lnu.edu.ua">
+      <button class="btn" id="go">Увійти</button>
+      <div class="hint">Швидкий вибір:</div>
+      <span class="pill"><button class="btn ghost small" data-e="student1@lnu.edu.ua">студент</button></span>
+      <span class="pill"><button class="btn ghost small" data-e="headman1@lnu.edu.ua">староста*</button></span>
+      <span class="pill"><button class="btn ghost small" data-e="admin@lnu.edu.ua">адмін**</button></span>
+      <span class="pill"><button class="btn ghost small" data-e="someone@gmail.com">чужий gmail</button></span>
+      <div class="hint">* спершу зайдіть адміном і призначте роль (вкладка «Керування»).<br>** якщо сервер запущено з ADMIN_EMAILS=admin@lnu.edu.ua</div>
+    </div>`;
+  document.querySelectorAll('[data-e]').forEach((b) => (b.onclick = () => ($('#email').value = b.dataset.e)));
+  $('#go').onclick = async () => {
+    const r = await api('POST', '/auth/google', { idToken: 'test:' + $('#email').value.trim(), deviceId: DEVICE });
+    if (!r.ok) return r.data?.error === 'NON_LNU_EMAIL' ? toast('Це не пошта ЛНУ. Оберіть інший акаунт (NON_LNU_EMAIL)') : fail(r);
+    S.token = r.data.accessToken; S.refresh = r.data.refreshToken; save();
+    await boot();
+  };
+}
+
+// ---------- Каркас ----------
+const isManager = () => S.me && (S.me.role === 'HEADMAN' || S.me.role === 'ADMIN');
+function renderNav() {
+  const tabs = [['schedule','Розклад'], ['rooms','Аудиторії'], ['profile','Профіль']];
+  if (isManager()) tabs.push(['admin','Керування']);
+  $('#nav').innerHTML = tabs.map(([k, t]) => `<button class="${S.tab === k ? 'on' : ''}" data-t="${k}">${t}</button>`).join('');
+  document.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; render(); }));
+  $('#who').textContent = `${S.me.email} · ${S.me.role}`;
+}
+async function boot() {
+  const r = await api('GET', '/me');
+  if (!r.ok) { S.token = null; save(); return renderLogin(); }
+  S.me = r.data; S.tab = S.me.groupId ? 'schedule' : 'profile'; render();
+}
+function render() { renderNav(); ({ schedule: renderSchedule, rooms: renderRooms, profile: renderProfile, admin: renderAdmin })[S.tab](); }
+
+// ---------- Розклад ----------
+const mondayOf = (d) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7)); return x; };
+const iso = (d) => d.toISOString().slice(0, 10);
+const addDays = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+
+async function renderSchedule() {
+  if (!S.me.groupId) { $('#view').innerHTML = '<div class="card center">Спершу оберіть групу у вкладці «Профіль».</div>'; return; }
+  S.date ??= iso(new Date());
+  const r = await api('GET', '/schedule/week?date=' + S.date);
+  if (!r.ok) return fail(r);
+  S.week = r.data;
+  const byDay = {};
+  r.data.lessons.forEach((l) => (byDay[l.date] ??= []).push(l));
+  const days = Object.keys(byDay).sort();
+  const now = new Date(); const today = iso(now); const hm = now.toTimeString().slice(0, 5);
+  $('#view').innerHTML = `
+    <div class="row"><button class="btn ghost small" id="prev">← тиждень</button><b>${esc(r.data.weekStart)}</b><button class="btn ghost small" id="next">тиждень →</button></div>
+    ${days.length ? '' : '<div class="card center">На цьому тижні пар немає.<div class="hint">Для демо: npm run seed -- --shift-to-current-week</div></div>'}
+    ${days.map((d) => `<div class="day">${new Date(d + 'T00:00:00Z').toLocaleDateString('uk-UA', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })}</div>${byDay[d].map((l) => lessonCard(l, d === today && l.start <= hm && hm <= l.end)).join('')}`).join('')}`;
+  $('#prev').onclick = () => { S.date = addDays(r.data.weekStart, -7); renderSchedule(); };
+  $('#next').onclick = () => { S.date = addDays(r.data.weekStart, 7); renderSchedule(); };
+  document.querySelectorAll('[data-sub]').forEach((b) => (b.onclick = () => openSubForm(b.dataset.sub)));
+  document.querySelectorAll('[data-unsub]').forEach((b) => (b.onclick = async () => { const x = await api('DELETE', '/substitutions/' + b.dataset.unsub); x.ok ? (toast('Заміну скасовано', true), renderSchedule()) : fail(x); }));
+}
+
+function lessonCard(l, current) {
+  const s = l.substitution;
+  const cancelled = s?.kind === 'CANCELLED';
+  const teacher = s?.newTeacher ? `<span class="old">${esc(l.teacher)}</span> <span class="new">${esc(s.newTeacher)}</span>` : esc(l.teacher ?? '');
+  const room = s?.newRoom ? `<span class="old">${esc(l.room)}</span> <span class="new">${esc(s.newRoom)}</span>` : esc(l.room ?? 'онлайн / без аудиторії');
+  const moved = s?.kind === 'MOVED' ? `<div class="new">→ ${esc(s.newDate ?? l.date)}${s.newPairNumber ? ', пара ' + s.newPairNumber : ''}</div>` : '';
+  return `<div class="card lesson ${s ? (cancelled ? 'cancelled' : 'sub') : ''} ${current ? 'now' : ''}">
+    <div class="row"><span class="time">${l.start}–${l.end} · пара ${l.pairNumber}</span>
+      <span>${s ? `<span class="badge ${cancelled ? 'gray' : 'warn'}">${cancelled ? 'Скасовано' : 'Заміна'}</span>` : ''}${TYPE[l.type] ? ` <span class="badge">${TYPE[l.type]}</span>` : ''}</span></div>
+    <div class="subject ${cancelled ? 'old' : ''}">${esc(l.subject)}</div>
+    <div class="meta">${teacher}${teacher ? ' · ' : ''}${room}${l.subgroup ? ` · підгрупа ${l.subgroup}` : ''}</div>
+    ${moved}${s?.comment ? `<div class="meta">💬 ${esc(s.comment)}</div>` : ''}
+    ${current ? '<div class="bar"><i style="width:50%"></i></div>' : ''}
+    ${isManager() ? (s ? `<button class="btn danger small" data-unsub="${s.id}">Скасувати заміну</button>` : `<button class="btn ghost small" data-sub="${l.id}">+ Заміна</button>`) : ''}
+  </div>`;
+}
+
+function openSubForm(lessonId) {
+  const l = S.week.lessons.find((x) => x.id === lessonId);
+  const el = document.createElement('div'); el.className = 'modal';
+  el.innerHTML = `<div class="sheet"><h3>Заміна: ${esc(l.subject)}</h3>
+    <select id="kind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}">${v} (${k})</option>`).join('')}</select>
+    <div id="f-teacher"><input id="tq" placeholder="Новий викладач: пошук"><select id="tsel"></select></div>
+    <div id="f-room"><input id="rq" placeholder="Нова аудиторія: номер"><select id="rsel"></select></div>
+    <div id="f-move"><input type="date" id="nd"><select id="np"><option value="">пара (без змін)</option>${[1,2,3,4,5].map((n) => `<option>${n}</option>`).join('')}</select></div>
+    <input id="cm" placeholder="Коментар (необов'язково)">
+    <button class="btn" id="ok">Створити</button><button class="btn ghost" id="cl">Закрити</button></div>`;
+  document.body.appendChild(el);
+  const sync = () => { const k = $('#kind', el).value;
+    $('#f-teacher', el).style.display = k === 'REPLACED' ? '' : 'none';
+    $('#f-room', el).style.display = k === 'ROOM_CHANGED' ? '' : 'none';
+    $('#f-move', el).style.display = k === 'MOVED' ? '' : 'none'; };
+  const fill = async (inp, sel, path, label) => { const r = await api('GET', `${path}?q=${encodeURIComponent($(inp, el).value)}`); $(sel, el).innerHTML = (r.data ?? []).map((x) => `<option value="${x.id}">${esc(label(x))}</option>`).join(''); };
+  $('#kind', el).onchange = sync; sync();
+  $('#tq', el).oninput = () => fill('#tq', '#tsel', '/teachers', (x) => x.fullName);
+  $('#rq', el).oninput = () => fill('#rq', '#rsel', '/classrooms', (x) => x.label);
+  fill('#tq', '#tsel', '/teachers', (x) => x.fullName); fill('#rq', '#rsel', '/classrooms', (x) => x.label);
+  $('#cl', el).onclick = () => el.remove();
+  $('#ok', el).onclick = async () => {
+    const k = $('#kind', el).value; const body = { lessonId, kind: k, comment: $('#cm', el).value || undefined };
+    if (k === 'REPLACED') body.newTeacherId = $('#tsel', el).value || undefined;
+    if (k === 'ROOM_CHANGED' || k === 'MOVED') body.newClassroomId = k === 'MOVED' ? undefined : $('#rsel', el).value || undefined;
+    if (k === 'MOVED') { body.newDate = $('#nd', el).value || undefined; body.newPairNumber = $('#np', el).value ? Number($('#np', el).value) : undefined; }
+    const r = await api('POST', '/substitutions', body);
+    if (!r.ok) return fail(r);
+    el.remove(); toast('Заміну створено', true); renderSchedule();
+  };
+}
+
+// ---------- Аудиторії ----------
+function renderRooms() {
+  $('#view').innerHTML = `<input id="q" placeholder="Номер аудиторії, напр. 218"><div id="res"></div>`;
+  const run = async () => { const r = await api('GET', '/classrooms?q=' + encodeURIComponent($('#q').value)); if (!r.ok) return fail(r);
+    $('#res').innerHTML = r.data.map((c) => `<div class="card"><b>${esc(c.label)}</b><div class="meta">${esc(c.building.name)}</div>
+      <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.building.name + ' Львів')}" target="_blank">Прокласти маршрут ↗</a></div>`).join('') || '<div class="card center">Нічого не знайдено</div>'; };
+  $('#q').oninput = run; run();
+}
+
+// ---------- Профіль ----------
+async function renderProfile() {
+  const g = await api('GET', '/groups');
+  $('#view').innerHTML = `<div class="card"><b>${esc(S.me.fullName)}</b><div class="meta">${esc(S.me.email)} · роль ${S.me.role}</div></div>
+    <h3>Моя група</h3>
+    <select id="grp"><option value="">— оберіть —</option>${(g.data ?? []).map((x) => `<option value="${x.id}" ${x.id === S.me.groupId ? 'selected' : ''}>${esc(x.faculty)} · ${esc(x.code)} (${x.course} курс)</option>`).join('')}</select>
+    <select id="sub">${[0,1,2].map((n) => `<option value="${n}" ${n === S.me.subgroup ? 'selected' : ''}>${n === 0 ? 'усі підгрупи' : 'підгрупа ' + n}</option>`).join('')}</select>
+    <button class="btn" id="save">Зберегти</button><button class="btn ghost" id="out">Вийти</button>`;
+  $('#save').onclick = async () => { if (!$('#grp').value) return toast('Оберіть групу'); const r = await api('PATCH', '/me', { groupId: $('#grp').value, subgroup: Number($('#sub').value) });
+    if (!r.ok) return fail(r); S.me = (await api('GET', '/me')).data; toast('Збережено', true); S.tab = 'schedule'; render(); };
+  $('#out').onclick = async () => { await api('POST', '/auth/logout', { refreshToken: S.refresh }); S.token = S.refresh = S.me = null; save(); renderLogin(); };
+}
+
+// ---------- Керування ----------
+const SAMPLE = JSON.stringify({ lessons: [{ group: 'ТЕСТ-31', date: iso(mondayOf(iso(new Date()))), pair: 5, subject: 'Нова пара з імпорту', type: 'PRACTICE', room: '1/Б' }] }, null, 2);
+function renderAdmin() {
+  const admin = S.me.role === 'ADMIN';
+  $('#view').innerHTML = admin ? `
+    <h3>Ролі користувачів</h3><input id="uq" placeholder="Пошук за поштою або ім'ям"><div id="users"></div>
+    <h3>Імпорт розкладу</h3><div class="hint">JSON або CSV (group,date,pair,subject,...)</div>
+    <textarea id="imp">${esc(SAMPLE)}</textarea><input type="file" id="file" accept=".json,.csv">
+    <button class="btn" id="run">Імпортувати</button>` : '<div class="card center">Староста створює заміни кнопкою «+ Заміна» на картці пари у вкладці «Розклад».</div>';
+  if (!admin) return;
+  const find = async () => { const r = await api('GET', '/admin/users?q=' + encodeURIComponent($('#uq').value)); if (!r.ok) return fail(r);
+    $('#users').innerHTML = r.data.map((u) => `<div class="card row"><span>${esc(u.email)}<div class="meta">${u.role}</div></span>
+      ${u.id === S.me.id ? '<span class="meta">це ви</span>' : `<select data-u="${u.id}">${['STUDENT','HEADMAN','ADMIN'].map((x) => `<option ${x === u.role ? 'selected' : ''}>${x}</option>`).join('')}</select>`}</div>`).join('');
+    document.querySelectorAll('[data-u]').forEach((s) => (s.onchange = async () => { const x = await api('PATCH', `/admin/users/${s.dataset.u}/role`, { role: s.value }); x.ok ? (toast('Роль змінено', true), find()) : fail(x); })); };
+  $('#uq').oninput = find; find();
+  let csv = false;
+  $('#file').onchange = async (e) => { const f = e.target.files[0]; if (!f) return; csv = f.name.endsWith('.csv'); $('#imp').value = await f.text(); };
+  $('#run').onclick = async () => { const text = $('#imp').value; const asCsv = csv || !text.trim().startsWith('{');
+    const r = asCsv ? await api('POST', '/admin/schedule/import', text, 'text/csv') : await api('POST', '/admin/schedule/import', JSON.parse(text));
+    r.ok ? toast(`Імпортовано пар: ${r.data.imported}${r.data.warnings.length ? '. ' + r.data.warnings.join('; ') : ''}`, true) : fail(r); };
+}
+
+load(); S.token ? boot() : renderLogin();
+</script>
+</body>
+</html>
