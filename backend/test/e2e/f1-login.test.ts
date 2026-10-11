@@ -47,6 +47,15 @@ describe('F1: вхід', () => {
     expect((await loginRaw('f1.nodevice@lnu.edu.ua', '')).status).toBe(400);
   });
 
+  it('зламаний JSON дає 400, а не 500', async () => {
+    const res = await fetch(`${API}/auth/google`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('недійсний токен повертає 401 INVALID_TOKEN', async () => {
     const res = await postJson('/auth/google', { idToken: 'garbage', deviceId: DEVICE });
     expect(res.status).toBe(401);

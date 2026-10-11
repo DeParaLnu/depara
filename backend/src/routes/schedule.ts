@@ -26,7 +26,7 @@ export async function scheduleRoutes(app: FastifyInstance) {
         pair: true,
         teacher: true,
         classroom: { include: { building: true } },
-        substitution: true,
+        substitution: { include: { newTeacher: true, newClassroom: { include: { building: true } } } },
       },
       orderBy: [{ date: 'asc' }, { pairNumber: 'asc' }, { subgroup: 'asc' }],
     });
@@ -46,7 +46,17 @@ export async function scheduleRoutes(app: FastifyInstance) {
         teacher: l.teacher?.fullName ?? null,
         room: l.classroom ? `${l.classroom.number}/${l.classroom.building.code}` : null,
         substitution: l.substitution
-          ? { kind: l.substitution.kind, comment: l.substitution.comment }
+          ? {
+              id: l.substitution.id,
+              kind: l.substitution.kind,
+              comment: l.substitution.comment,
+              newTeacher: l.substitution.newTeacher?.fullName ?? null,
+              newRoom: l.substitution.newClassroom
+                ? `${l.substitution.newClassroom.number}/${l.substitution.newClassroom.building.code}`
+                : null,
+              newDate: l.substitution.newDate?.toISOString().slice(0, 10) ?? null,
+              newPairNumber: l.substitution.newPairNumber,
+            }
           : null,
       })),
     };
