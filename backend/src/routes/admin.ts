@@ -16,6 +16,19 @@ export async function adminRoutes(app: FastifyInstance) {
     done(null, body),
   );
 
+  // Пошук користувачів за поштою або ім'ям: потрібен, щоб знайти id для призначення ролі
+  app.get('/admin/users', { preHandler: requireRole('ADMIN') }, async (req) => {
+    const { q } = req.query as { q?: string };
+    const users = await prisma.user.findMany({
+      where: q
+        ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { fullName: { contains: q, mode: 'insensitive' } }] }
+        : {},
+      take: 20,
+      orderBy: { createdAt: 'desc' },
+    });
+    return users.map((u) => ({ id: u.id, email: u.email, fullName: u.fullName, role: u.role, groupId: u.groupId }));
+  });
+
   app.patch('/admin/users/:id/role', { preHandler: requireRole('ADMIN') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { role } = (req.body ?? {}) as { role?: unknown };
