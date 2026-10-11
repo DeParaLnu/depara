@@ -13,5 +13,5 @@ depara/
     src/
     e2e/                 # Appium + WebdriverIO
     package.json
-  .env.example           # без секретів, лише назви змінних
+  .env.example           
   README.md
