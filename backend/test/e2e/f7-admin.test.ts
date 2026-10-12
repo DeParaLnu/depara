@@ -38,6 +38,19 @@ describe('F7: ролі', () => {
   });
 });
 
+describe('F7: пошук користувачів', () => {
+  it('адмін знаходить користувача за поштою, студент не має доступу', async () => {
+    const admin = await adminToken();
+    const student = await loginToken('f7.findme@lnu.edu.ua');
+    const res = await send('GET', '/admin/users?q=f7.findme', admin);
+    expect(res.status).toBe(200);
+    const users = (await res.json()) as { id: string; email: string; role: string }[];
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({ email: 'f7.findme@lnu.edu.ua', role: 'STUDENT' });
+    expect((await send('GET', '/admin/users', student)).status).toBe(403);
+  });
+});
+
 describe('F7: імпорт розкладу', () => {
   it('JSON-імпорт з`являється в розкладі студента, повторний імпорт не дублює', async () => {
     const admin = await adminToken();

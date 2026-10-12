@@ -49,3 +49,15 @@ routes/           ендпоінти за фічами (auth, profile, schedule,
 - Імпорт розкладу: `POST /admin/schedule/import` (ADMIN). JSON у форматі `prisma/seed/schedule.seed.json` (довідники необов'язкові)
   або CSV (`Content-Type: text/csv`, колонки `group,date,pair,subject[,type,teacher,audience,subgroup,room,faculty]`).
   Імпорт атомарний: при помилці в базу не потрапляє нічого. Повторний імпорт оновлює пари, а не дублює.
+
+## Демо-консоль
+
+Проста сторінка-«застосунок» для ручного тестування API в браузері (вхід, вибір групи, розклад, заміни, пошук аудиторій, ролі та імпорт).
+Доступна лише в тестовому режимі, на проді її немає:
+
+```bash
+cd backend
+export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=admin@lnu.edu.ua
+npm run seed -- --shift-to-current-week
+npm run dev        # відкрийте http://localhost:3000/dev
+```
