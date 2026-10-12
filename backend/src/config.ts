@@ -1,5 +1,15 @@
+// Секрет за замовчуванням дозволений лише в test і development. На сервері без JWT_SECRET
+// застосунок не стартує, бо відомий секрет дозволив би підробляти токени (зокрема адміна).
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (secret) return secret;
+  const env = process.env.NODE_ENV;
+  if (env === 'test' || env === 'development') return 'dev-only-secret';
+  throw new Error('JWT_SECRET is required. Set it in .env (див. .env.example).');
+}
+
 export const config = {
-  jwtSecret: process.env.JWT_SECRET ?? 'dev-only-secret',
+  jwtSecret: resolveJwtSecret(),
   allowedEmailDomain: 'lnu.edu.ua',
   accessTokenTtl: '15m',
   refreshTokenTtlSeconds: 30 * 24 * 60 * 60,

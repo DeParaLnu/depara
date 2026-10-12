@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { prisma } from '../db';
 import { mondayOf } from '../lib/dates';
+import { isIsoDate } from '../lib/validation';
 import { requireAuth } from '../plugins/auth';
 
 // F3: розклад на тиждень з ETag
@@ -11,6 +12,9 @@ export async function scheduleRoutes(app: FastifyInstance) {
     if (!user?.groupId) return reply.code(409).send({ error: 'GROUP_NOT_SET' });
 
     const { date } = req.query as { date?: string };
+    if (date !== undefined && !isIsoDate(date)) {
+      return reply.code(400).send({ error: 'INVALID_DATE' });
+    }
     const start = mondayOf(date ? new Date(`${date}T00:00:00Z`) : new Date());
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 6);
