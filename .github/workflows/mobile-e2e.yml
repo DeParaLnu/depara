@@ -1,0 +1,103 @@
+name: mobile-e2e
+
+# Поки в mobile/ немає застосунку, workflow запускається тільки вручну
+# (вкладка Actions -> mobile-e2e -> Run workflow).
+# Коли Appium-сценарії стабільно зеленіють, розкоментуйте pull_request і schedule.
+on:
+  workflow_dispatch:
+  # pull_request:
+  #   branches: [develop]
+  # schedule:
+  #   - cron: '0 2 * * *'   # щоночі о 02:00 UTC
+
+concurrency:
+  group: mobile-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: depara_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/depara_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/depara_test
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      AUTH_MODE: fake
+      ADMIN_EMAILS: e2e.admin@lnu.edu.ua
+      JWT_SECRET: ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Backend (міграції, seed, запуск у фоні)
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+          npm run seed -- --shift-to-current-week
+          nohup npm run start:test > api.log 2>&1 &
+          npx --yes wait-on http://localhost:3000/health
+
+      - name: Збірка debug APK
+        working-directory: mobile
+        env:
+          E2E: '1'
+          API_URL: http://10.0.2.2:3000
+        run: |
+          npm ci
+          cd android && ./gradlew assembleDebug
+
+      - name: Увімкнути KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Appium E2E на емуляторі
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          working-directory: mobile
+          script: |
+            npm i -g appium
+            appium driver install uiautomator2
+            npx wdio run e2e/wdio.conf.ts
+
+      - name: Логи API при падінні
+        if: failure()
+        run: cat backend/api.log

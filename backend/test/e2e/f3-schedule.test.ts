@@ -23,6 +23,13 @@ describe('F3: розклад на тиждень', () => {
     expect(second.status).toBe(304);
   });
 
+  it('некоректна дата в запиті дає 400 INVALID_DATE, а не 500', async () => {
+    const token = await setupStudent('f3.baddate@lnu.edu.ua');
+    const res = await fetch(`${API}/schedule/week?date=abc`, { headers: authHeaders(token) });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('INVALID_DATE');
+  });
+
   it('без токена повертає 401', async () => {
     const res = await fetch(`${API}/schedule/week`);
     expect(res.status).toBe(401);

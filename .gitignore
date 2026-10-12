@@ -1,20 +1,19 @@
-depara/
-  .github/
-    workflows/ci.yml
-    pull_request_template.md
-    CODEOWNERS
-  backend/
-    prisma/schema.prisma
-    prisma/seed/schedule.seed.json
-    src/
-    test/e2e/            # HTTP-тести до API
-    package.json
-  mobile/
-    src/
-    e2e/                 # Appium + WebdriverIO
-    package.json
-  .env.example           
-  README.md
-
 node_modules/
+dist/
 .env
+.env.*
+!.env.example
+*.log
+
+# React Native / Android
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/ios/Pods/
+*.apk
+*.aab
+
+# ОС і редактори
+.DS_Store
+.idea/
+.vscode/
