@@ -16,6 +16,8 @@ npm run seed                         # тестовий розклад
 npm run dev                          # http://localhost:3000/health
 ```
 
+Після `cp .env.example .env` відкрийте `.env` і додайте свою пошту в `ADMIN_EMAILS`. `GOOGLE_CLIENT_ID` уже заповнений у шаблоні (це не секрет). Справжні секрети (`JWT_SECRET` на сервері, паролі БД, ключі FCM) у репозиторій не потрапляють: вони живуть у змінних хостингу та GitHub Secrets. Файл `.env` у `.gitignore` і ніколи не комітиться.
+
 Скрипти (`backend/`): `npm run lint`, `npm run typecheck`, `npm run test:e2e`.
 
 ### E2E-тести
