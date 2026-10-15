@@ -33,6 +33,10 @@ npm run test:e2e
 
 `ADMIN_EMAILS` потрібен для тестів адмін-ендпоінтів. `AUTH_MODE=fake` вмикає вхід за фейковим токеном `test:<email>` і працює лише при `NODE_ENV=test`.
 
+## Деплой
+
+Образ бекенда збирається з `backend/Dockerfile`. Інструкція, змінні середовища і приклад хостингу: [docs/deploy.md](docs/deploy.md).
+
 ## Структура backend/src
 
 ```

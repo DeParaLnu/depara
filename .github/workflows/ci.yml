@@ -75,3 +75,63 @@ jobs:
       - run: npx prisma migrate deploy
       - run: npm run seed -- --shift-to-current-week
       - run: npm run test:e2e
+
+  # Прод-образ: збирається, застосовує міграції на старті і відповідає на /health.
+  # Контейнер запускається як на хостингу: NODE_ENV=production, без фейкового входу.
+  backend-docker:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: depara_docker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Зібрати образ
+        run: docker build -t depara-backend backend
+      - name: Без JWT_SECRET контейнер не має стартувати
+        run: |
+          if docker run --rm --network host \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/depara_docker \
+            -e DIRECT_URL=postgresql://postgres:postgres@localhost:5432/depara_docker \
+            -e REDIS_URL=redis://localhost:6379 \
+            depara-backend; then
+            echo "Контейнер стартував без JWT_SECRET"; exit 1
+          fi
+      - name: Запустити і перевірити /health
+        run: |
+          docker run -d --name api --network host \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/depara_docker \
+            -e DIRECT_URL=postgresql://postgres:postgres@localhost:5432/depara_docker \
+            -e REDIS_URL=redis://localhost:6379 \
+            -e JWT_SECRET=ci-only-secret \
+            depara-backend
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3000/health; then ok=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ok" ]; then docker logs api; exit 1; fi
+      - name: Демо-консоль у проді недоступна
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/dev)
+          test "$code" = "404"
+      - name: Логи контейнера
+        if: always()
+        run: docker logs api || true
