@@ -7,7 +7,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 main() {
   local file="${1:-}"
-  [ -n "$file" ] && [ -f "$file" ] || die "вкажіть існуючий файл дампу: deploy/restore.sh <файл>"
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    die "вкажіть існуючий файл дампу: deploy/restore.sh <файл>"
+  fi
   require_env
 
   log "Буде перезаписано базу даними з $file"
