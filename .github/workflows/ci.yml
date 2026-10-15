@@ -135,3 +135,23 @@ jobs:
       - name: Логи контейнера
         if: always()
         run: docker logs api || true
+
+  # Конфігурація VPS-деплою (deploy/): синтаксис compose і скриптів. Саме розгортання тут не перевіряється.
+  deploy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Скрипти деплою (shellcheck)
+        run: shellcheck -x deploy/*.sh
+      - name: Прод-compose валідний
+        run: |
+          printf '%s\n' DOMAIN=api.example.com POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci JWT_SECRET=ci > /tmp/ci.env
+          docker compose --env-file /tmp/ci.env -f deploy/docker-compose.prod.yml config --quiet
+      - name: Postgres і Redis не публікують порти на хост
+        run: |
+          printf '%s\n' DOMAIN=api.example.com POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci JWT_SECRET=ci > /tmp/ci.env
+          out=$(docker compose --env-file /tmp/ci.env -f deploy/docker-compose.prod.yml config --format json)
+          for s in postgres redis api; do
+            n=$(echo "$out" | jq ".services.$s.ports // [] | length")
+            test "$n" = 0 || { echo "$s публікує порти на хост"; exit 1; }
+          done

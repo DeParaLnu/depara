@@ -1,0 +1,13 @@
+# Caddy сам отримує і поновлює HTTPS-сертифікат Let's Encrypt для домену з DOMAIN.
+# Для цього домен має вказувати A-записом на IP сервера, а порти 80 і 443 мають бути відкриті.
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	reverse_proxy api:3000
+}

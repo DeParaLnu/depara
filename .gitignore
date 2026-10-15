@@ -17,3 +17,6 @@ mobile/ios/Pods/
 .DS_Store
 .idea/
 .vscode/
+
+# Стан деплою на сервері
+deploy/.state/
