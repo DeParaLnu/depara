@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ApiError, api, type Session } from '../api';
-import { config } from '../config';
-import { colors, errorText } from '../theme';
+import { ApiError, api } from '../../api';
+import { config } from '../../config';
+import { colors, errorText } from '../../theme';
+import { useSession } from './session';
 
 // Поки немає сховища, deviceId живе до перезапуску застосунку
 const deviceId = `device-${Math.random().toString(36).slice(2)}`;
 
-type Props = { onLogin: (session: Session) => void };
-
 // F1: вхід через Google
-export function LoginScreen({ onLogin }: Props) {
+export function LoginScreen() {
+  const setSession = useSession((s) => s.setSession);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +23,7 @@ export function LoginScreen({ onLogin }: Props) {
     }
     setLoading(true);
     try {
-      onLogin(await api.loginWithGoogle(config.e2eIdToken, deviceId));
+      setSession(await api.loginWithGoogle(config.e2eIdToken, deviceId));
     } catch (e) {
       setError(errorText(e instanceof ApiError ? e.code : 'UNKNOWN'));
     } finally {
