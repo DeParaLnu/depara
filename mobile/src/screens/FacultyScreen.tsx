@@ -51,7 +51,12 @@ export function FacultyScreen({ accessToken }: Props) {
       {error ? (
         <View style={styles.center}>
           <Text style={styles.error}>{error}</Text>
-          <Pressable onPress={load} style={styles.retry}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Спробувати ще раз"
+            onPress={load}
+            style={styles.retry}
+          >
             <Text style={styles.retryText}>Спробувати ще раз</Text>
           </Pressable>
         </View>
@@ -66,7 +71,11 @@ export function FacultyScreen({ accessToken }: Props) {
           keyExtractor={(f) => f.name}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <Pressable style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={item.name}
+              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+            >
               <Text style={styles.cardTitle}>{item.name}</Text>
               <Text style={styles.cardMeta}>{groupsLabel(item.groups)}</Text>
             </Pressable>
