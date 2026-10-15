@@ -1,20 +1,16 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import type { Session } from './src/api';
+import { FacultyScreen } from './src/screens/FacultyScreen';
+import { LoginScreen } from './src/screens/LoginScreen';
 
 export default function App() {
+  const [session, setSession] = useState<Session | null>(null);
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <>
+      <StatusBar style={session ? 'dark' : 'light'} />
+      {session ? <FacultyScreen accessToken={session.accessToken} /> : <LoginScreen onLogin={setSession} />}
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
