@@ -1,6 +1,7 @@
 import { SubstitutionKind } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
+import { audit } from '../lib/audit';
 import { invalidateGroupSchedule } from '../lib/cache';
 import { isIsoDate, isUuid } from '../lib/validation';
 import { requireRole } from '../plugins/roles';
@@ -81,6 +82,7 @@ export async function substitutionRoutes(app: FastifyInstance) {
       data: { lessonId: lesson.id, kind, comment: (b.comment as string | null | undefined) ?? null, createdById: user.id, ...data },
     });
     await invalidateGroupSchedule(lesson.groupId);
+    audit(req, 'substitution.create', { target: sub.id, lessonId: lesson.id, groupId: lesson.groupId, kind });
 
     return reply.code(201).send({
       id: sub.id,
@@ -108,6 +110,7 @@ export async function substitutionRoutes(app: FastifyInstance) {
 
     await prisma.substitution.delete({ where: { id } });
     await invalidateGroupSchedule(sub.lesson.groupId);
+    audit(req, 'substitution.delete', { target: id, lessonId: sub.lessonId, groupId: sub.lesson.groupId, kind: sub.kind });
     return reply.code(204).send();
   });
 }

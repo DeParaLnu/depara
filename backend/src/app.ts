@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import Fastify from 'fastify';
+import Fastify, { type FastifyServerOptions } from 'fastify';
 import { config } from './config';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
@@ -11,9 +11,9 @@ import { substitutionRoutes } from './routes/substitutions';
 import { teacherRoutes } from './routes/teachers';
 import { redis } from './redis';
 
-export function buildApp() {
+export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {}) {
   const app = Fastify({
-    logger: process.env.NODE_ENV !== 'test',
+    logger: opts.logger ?? process.env.NODE_ENV !== 'test',
     trustProxy: config.trustProxy,
     // Caddy передає свій id у X-Request-ID: так запис access-логу і запис API зіставляються.
     // Приймаємо лише безпечний формат, щоб через заголовок не можна було підсунути сміття в логи.
@@ -23,7 +23,7 @@ export function buildApp() {
     },
   });
 
-  // Клієнт бачить id запиту й може назвати його при звернені: за ним знаходимо запис у логах
+  // Клієнт бачить id запиту й може назвати його при зверненні: за ним знаходимо запис у логах
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
   });
