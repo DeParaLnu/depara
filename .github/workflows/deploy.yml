@@ -1,0 +1,97 @@
+name: deploy
+
+# Автодеплой на VPS після зеленого CI на develop. Вимкнений, доки в репозиторії не задано
+# змінну DEPLOY_ENABLED=true (Settings -> Secrets and variables -> Actions -> Variables).
+# Налаштування сервера і секретів: docs/deploy-vps.md.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'deploy: розгорнути коміт. rollback: повернути попередню версію'
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+      ref:
+        description: 'sha коміту (для deploy: порожньо = поточний develop; для rollback: порожньо = попередня версія)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Один деплой за раз, без скасування вже запущеного посеред релізу
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    # Деплоїмо лише: (а) зелений CI від push у develop цього ж репозиторію (не від форку чи PR),
+    # (б) ручний запуск з гілки develop
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' && (
+        (github.event_name == 'workflow_run'
+          && github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
+        || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop')
+      )
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+      MODE: ${{ inputs.mode || 'deploy' }}
+      INPUT_REF: ${{ inputs.ref }}
+      EVENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Перевірити параметри
+        run: |
+          if [ -n "$INPUT_REF" ] && ! printf '%s' "$INPUT_REF" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            echo "ref має бути sha коміту (7-40 hex-символів)" >&2
+            exit 1
+          fi
+          for v in DEPLOY_HOST DEPLOY_USER; do
+            [ -n "${!v}" ] || { echo "Не задано секрет $v" >&2; exit 1; }
+          done
+          printf '%s' "$DEPLOY_PORT" | grep -Eq '^[0-9]+$' || { echo "DEPLOY_PORT має бути числом" >&2; exit 1; }
+
+      - name: Налаштувати SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ] || { echo "Не задано DEPLOY_SSH_KEY або DEPLOY_KNOWN_HOSTS" >&2; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Відбиток сервера береться із секрету, а не з ssh-keyscan: так перевіряємо, що це саме наш сервер
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Деплой на сервер
+        run: |
+          ref="${INPUT_REF:-$EVENT_SHA}"
+          if [ "$MODE" = rollback ]; then
+            remote="cd /opt/depara && DEPLOY_ACTOR='${GITHUB_ACTOR}' ./deploy/rollback.sh ${INPUT_REF}"
+          else
+            # Розгортаємо лише коміти, що вже є в develop (пройшли ревʼю). merge-base --is-ancestor це перевіряє
+            remote="cd /opt/depara && git fetch --quiet origin develop && git merge-base --is-ancestor '${ref}' origin/develop && git checkout --quiet --detach '${ref}' && DEPLOY_ACTOR='${GITHUB_ACTOR}' ./deploy/deploy.sh"
+          fi
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote"
+
+      - name: Перевірка після деплою
+        if: env.DEPLOY_URL != ''
+        run: |
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors --max-time 15 "$DEPLOY_URL/health"
+          echo
+          # Демо-консоль і фейковий вхід у проді мають бути вимкнені
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$DEPLOY_URL/dev")"
+          [ "$code" = 404 ] || { echo "/dev відповів $code, очікували 404: перевірте AUTH_MODE і NODE_ENV" >&2; exit 1; }

@@ -1,0 +1,103 @@
+# Прод-стек на одному VPS: Caddy (HTTPS) -> API -> Postgres + Redis.
+# Запуск і оновлення: deploy/deploy.sh. Інструкція: docs/deploy-vps.md.
+#
+# Назовні відкриті лише порти 80 і 443 у Caddy. Postgres і Redis портів на хост не публікують:
+# Docker обходить ufw для опублікованих портів, тому безпечніше їх не публікувати зовсім.
+name: depara
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN у deploy/.env}
+    volumes:
+      # каталог, а не файл: після git checkout файл замінюється новим inode, і bind-mount файлу застаріває
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data # тут лежать сертифікати, не видаляти
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  api:
+    build:
+      context: ../backend
+    # TAG виставляє deploy.sh (короткий sha коміту), за ним працює відкат на попередній образ
+    image: depara-backend:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      # API доступний лише через Caddy (порт не опублікований), тож довіряємо його X-Forwarded-For
+      TRUST_PROXY: 'true'
+      DATABASE_URL: postgresql://depara:${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD}@postgres:5432/depara
+      DIRECT_URL: postgresql://depara:${POSTGRES_PASSWORD}@postgres:5432/depara
+      REDIS_URL: redis://:${REDIS_PASSWORD:?задайте REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?задайте JWT_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - '3000'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: depara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD}
+      POSTGRES_DB: depara
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U depara -d depara']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # appendonly: після перезапуску Redis сесії входу не губляться
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD}', '--appendonly', 'yes']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?задайте REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

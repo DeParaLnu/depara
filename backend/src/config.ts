@@ -20,6 +20,8 @@ export const config = {
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
+  // За Caddy довіряємо його X-Forwarded-For, щоб у логах був IP клієнта. Вмикається лише в проді (compose).
+  trustProxy: process.env.TRUST_PROXY === 'true',
   // Фейковий вхід дозволений ЛИШЕ в тестовому режимі. У проді він завжди вимкнений.
   fakeAuth: process.env.NODE_ENV === 'test' && process.env.AUTH_MODE === 'fake',
 } as const;
