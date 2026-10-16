@@ -11,8 +11,14 @@
 
 	# Access-лог у JSON (stdout контейнера, ротується разом з іншими логами). Authorization і Cookie Caddy
 	# за замовчуванням редагує, тож токени в лог не потрапляють. request_id збігається з reqId у логах API.
+	# Параметр q (пошук за поштою чи імʼям) може містити персональні дані, тому в лог він не потрапляє.
 	log {
-		format json
+		format filter {
+			wrap json
+			request>uri query {
+				replace q REDACTED
+			}
+		}
 	}
 	log_append request_id {http.request.uuid}
 

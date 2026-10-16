@@ -54,6 +54,10 @@ ping_monitor() {
   local var="$1" rc="${2:-0}" url
   [ -f "$DEPLOY_DIR/.env" ] || return 0
   url="$(env_value "$var")"
+  # compose допускає лапки навколо значення, а curl ні; прибираємо лапки, CR і кінцеві слеші
+  url="${url%$'\r'}"
+  url="${url//[\"\']/}"
+  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
   [ -n "$url" ] || return 0
   [ "$rc" -eq 0 ] || url="$url/fail"
   command -v curl >/dev/null || return 0

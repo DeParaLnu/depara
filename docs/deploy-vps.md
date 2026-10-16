@@ -239,6 +239,8 @@ docker compose -f deploy/docker-compose.prod.yml up -d postgres redis
 - Логи API: `docker compose -f deploy/docker-compose.prod.yml logs --tail 100 -f api`. Логи ротуються (3 файли по 10 МБ).
 - **Access-логи.** Caddy пише кожен запит у JSON (час, IP клієнта, метод, шлях, статус, тривалість):
   `docker compose -f deploy/docker-compose.prod.yml logs --tail 100 -f caddy`. Authorization і Cookie Caddy редагує сам, токени не витікають.
+  Параметр `q` (пошук за поштою чи імʼям) у логах Caddy і API замінюється, бо там можуть бути персональні дані. Інші query-параметри
+  у логах Caddy лишаються, тож не передавайте через query нічого чутливого.
 - **Кореляція запитів.** Кожен запит має `request_id`: Caddy передає його в API заголовком `X-Request-ID`, API використовує його
   як `reqId` у своїх логах і повертає клієнту в заголовку відповіді. Так запис Caddy, запис API і скарга користувача
   («ось мій x-request-id») зіставляються пошуком одного рядка: `docker compose ... logs api caddy | grep <id>`.

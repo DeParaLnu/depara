@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import Fastify, { type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { config } from './config';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
@@ -11,9 +11,26 @@ import { substitutionRoutes } from './routes/substitutions';
 import { teacherRoutes } from './routes/teachers';
 import { redis } from './redis';
 
+// Query-рядок може містити персональні дані (наприклад ?q=пошта в пошуку), тому в логах запиту лише шлях
+const requestSerializers = {
+  req: (req: FastifyRequest) => ({
+    method: req.method,
+    url: req.url.split('?')[0],
+    host: req.host,
+    remoteAddress: req.ip,
+  }),
+};
+
+function loggerOptions(custom?: FastifyServerOptions['logger']): FastifyServerOptions['logger'] {
+  if (custom === undefined) return process.env.NODE_ENV !== 'test' ? { serializers: requestSerializers } : false;
+  // булеве значення чи готовий екземпляр логера лишаємо як є
+  if (typeof custom !== 'object' || custom === null || 'child' in custom) return custom;
+  return { ...custom, serializers: { ...custom.serializers, ...requestSerializers } };
+}
+
 export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {}) {
   const app = Fastify({
-    logger: opts.logger ?? process.env.NODE_ENV !== 'test',
+    logger: loggerOptions(opts.logger),
     trustProxy: config.trustProxy,
     // Caddy передає свій id у X-Request-ID: так запис access-логу і запис API зіставляються.
     // Приймаємо лише безпечний формат, щоб через заголовок не можна було підсунути сміття в логи.
@@ -23,7 +40,7 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
     },
   });
 
-  // Клієнт бачить id запиту й може назвати його при зверненні: за ним знаходимо запис у логах
+  // Клієнт бачить id запиту й може назвати його при звернені: за ним знаходимо запис у логах
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
   });

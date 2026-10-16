@@ -20,7 +20,9 @@ finish() {
 trap finish EXIT
 
 main() {
-  local label="${1:-}"
+  # Мітку фіксуємо першою: якщо щось впаде нижче, trap уже знає, що це бекап з міткою, і не шле /fail
+  BACKUP_LABEL="${1:-}"
+  local label="$BACKUP_LABEL"
   local dir="${BACKUP_DIR:-$HOME/backups/depara}"
   local keep_days="${KEEP_DAYS:-14}"
   local file tmp
@@ -29,7 +31,6 @@ main() {
   file="$dir/depara-$(date +%Y%m%d-%H%M%S)${label:+-$label}.dump"
   tmp="$file.tmp"
   BACKUP_TMP="$tmp"
-  BACKUP_LABEL="$label"
 
   docker compose exec -T postgres pg_dump -U depara -d depara -Fc >"$tmp"
   [ -s "$tmp" ] || die "дамп порожній"
