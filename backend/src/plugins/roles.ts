@@ -14,8 +14,11 @@ export function requireRole(...roles: Role[]) {
   const check = async (req: FastifyRequest, reply: FastifyReply) => {
     const user = await prisma.user.findUnique({ where: { id: req.userId } });
     if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    if (!roles.includes(user.role)) return reply.code(403).send({ error: 'FORBIDDEN' });
     req.currentUser = user;
+    if (!roles.includes(user.role)) {
+      req.log.warn({ audit: { action: 'access.denied', actor: user.id, actorRole: user.role, route: req.routeOptions.url } }, 'audit');
+      return reply.code(403).send({ error: 'FORBIDDEN' });
+    }
   };
   return [requireAuth, check];
 }

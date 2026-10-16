@@ -2,6 +2,7 @@ import { Role } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { prisma } from '../db';
+import { audit } from '../lib/audit';
 import { csvToLessons } from '../lib/csv';
 import { ImportError, importSchedule, validateImport } from '../lib/scheduleImport';
 import { isSubgroup, isUuid } from '../lib/validation';
@@ -44,6 +45,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!target) return reply.code(404).send({ error: 'USER_NOT_FOUND' });
 
     const user = await prisma.user.update({ where: { id }, data: { role: role as Role } });
+    audit(req, 'user.role.change', { target: id, from: target.role, to: user.role });
     return { id: user.id, email: user.email, role: user.role };
   });
 
@@ -89,6 +91,12 @@ export async function adminRoutes(app: FastifyInstance) {
 
       try {
         const result = await importSchedule(prisma, checked.data);
+        audit(req, 'schedule.import', {
+          format: req.headers['content-type']?.startsWith('text/csv') ? 'csv' : 'json',
+          imported: result.imported,
+          groups: result.groupIds.length,
+          warnings: result.warnings.length,
+        });
         return { imported: result.imported, groups: result.groupIds.length, warnings: result.warnings };
       } catch (e) {
         if (e instanceof ImportError) return reply.code(422).send({ error: 'INVALID_IMPORT', details: e.errors });
