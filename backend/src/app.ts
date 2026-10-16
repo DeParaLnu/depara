@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify from 'fastify';
 import { config } from './config';
@@ -11,7 +12,21 @@ import { teacherRoutes } from './routes/teachers';
 import { redis } from './redis';
 
 export function buildApp() {
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test' });
+  const app = Fastify({
+    logger: process.env.NODE_ENV !== 'test',
+    trustProxy: config.trustProxy,
+    // Caddy передає свій id у X-Request-ID: так запис access-логу і запис API зіставляються.
+    // Приймаємо лише безпечний формат, щоб через заголовок не можна було підсунути сміття в логи.
+    genReqId: (req) => {
+      const incoming = req.headers['x-request-id'];
+      return typeof incoming === 'string' && /^[\w-]{8,64}$/.test(incoming) ? incoming : randomUUID();
+    },
+  });
+
+  // Клієнт бачить id запиту й може назвати його при звернені: за ним знаходимо запис у логах
+  app.addHook('onSend', async (req, reply) => {
+    reply.header('x-request-id', req.id);
+  });
 
   // Порожнє тіло з content-type: application/json (типово для DELETE у мобільних клієнтів) не є помилкою.
   // Зламаний JSON, як і раніше, дає 400.

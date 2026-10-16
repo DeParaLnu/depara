@@ -7,6 +7,18 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+# Результат щоденного бекапу (без мітки) шлемо в моніторинг. Бекап перед деплоєм (з міткою) не рахуємо:
+# інакше він маскував би збій нічного cron. Без BACKUP_PING_URL у deploy/.env нічого не відбувається.
+BACKUP_TMP=""
+BACKUP_LABEL=""
+finish() {
+  local rc=$?
+  if [ -n "$BACKUP_TMP" ]; then rm -f "$BACKUP_TMP"; fi
+  if [ -z "$BACKUP_LABEL" ]; then ping_monitor BACKUP_PING_URL "$rc"; fi
+  return 0
+}
+trap finish EXIT
+
 main() {
   local label="${1:-}"
   local dir="${BACKUP_DIR:-$HOME/backups/depara}"
@@ -16,9 +28,8 @@ main() {
   mkdir -p "$dir"
   file="$dir/depara-$(date +%Y%m%d-%H%M%S)${label:+-$label}.dump"
   tmp="$file.tmp"
-  # $tmp підставляється одразу: після виходу з main локальна змінна вже недоступна
-  # shellcheck disable=SC2064
-  trap "rm -f '$tmp'" EXIT
+  BACKUP_TMP="$tmp"
+  BACKUP_LABEL="$label"
 
   docker compose exec -T postgres pg_dump -U depara -d depara -Fc >"$tmp"
   [ -s "$tmp" ] || die "дамп порожній"

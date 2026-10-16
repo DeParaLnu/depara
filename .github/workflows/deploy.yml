@@ -79,10 +79,10 @@ jobs:
         run: |
           ref="${INPUT_REF:-$EVENT_SHA}"
           if [ "$MODE" = rollback ]; then
-            remote="cd /opt/depara && ./deploy/rollback.sh ${INPUT_REF}"
+            remote="cd /opt/depara && DEPLOY_ACTOR='${GITHUB_ACTOR}' ./deploy/rollback.sh ${INPUT_REF}"
           else
             # Розгортаємо лише коміти, що вже є в develop (пройшли ревʼю). merge-base --is-ancestor це перевіряє
-            remote="cd /opt/depara && git fetch --quiet origin develop && git merge-base --is-ancestor '${ref}' origin/develop && git checkout --quiet --detach '${ref}' && ./deploy/deploy.sh"
+            remote="cd /opt/depara && git fetch --quiet origin develop && git merge-base --is-ancestor '${ref}' origin/develop && git checkout --quiet --detach '${ref}' && DEPLOY_ACTOR='${GITHUB_ACTOR}' ./deploy/deploy.sh"
           fi
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote"

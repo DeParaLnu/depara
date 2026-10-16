@@ -11,7 +11,7 @@ export COMPOSE_PROJECT_NAME=depara
 
 mkdir -p "$STATE_DIR"
 
-log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 die() { log "ПОМИЛКА: $*" >&2; exit 1; }
 
 require_env() {
@@ -36,4 +36,26 @@ wait_api_healthy() {
     waited=$((waited + 3))
   done
   return 1
+}
+
+# Журнал деплоїв і відкатів: deploy/.state/deploy.log. Формат: час дія тег результат автор.
+# Відповідає на питання «що працювало вчора о 14:32 і хто це задеплоїв».
+# DEPLOY_ACTOR передає GitHub Actions; при ручному запуску по SSH береться поточний користувач.
+journal() {
+  local action="$1" tag="$2" result="$3" actor
+  actor="${DEPLOY_ACTOR:-${SUDO_USER:-$(id -un)}}"
+  actor="$(printf '%s' "$actor" | tr -cd '[:alnum:]._@[]-')"
+  printf '%s %s %s %s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$action" "${tag:-?}" "$result" "${actor:-?}" >>"$STATE_DIR/deploy.log" || true
+}
+
+# Dead-man's switch (наприклад healthchecks.io): сервіс сповіщає, коли ping перестають надходити.
+# Аргументи: ім'я змінної в deploy/.env з URL, код результату (0 = успіх, інакше пінг /fail).
+ping_monitor() {
+  local var="$1" rc="${2:-0}" url
+  [ -f "$DEPLOY_DIR/.env" ] || return 0
+  url="$(env_value "$var")"
+  [ -n "$url" ] || return 0
+  [ "$rc" -eq 0 ] || url="$url/fail"
+  command -v curl >/dev/null || return 0
+  curl -fsS --max-time 10 --retry 3 -o /dev/null "$url" || log "увага: не вдалося надіслати ping у $var"
 }

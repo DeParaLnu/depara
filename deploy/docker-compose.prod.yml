@@ -39,6 +39,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: '3000'
+      # API доступний лише через Caddy (порт не опублікований), тож довіряємо його X-Forwarded-For
+      TRUST_PROXY: 'true'
       DATABASE_URL: postgresql://depara:${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD}@postgres:5432/depara
       DIRECT_URL: postgresql://depara:${POSTGRES_PASSWORD}@postgres:5432/depara
       REDIS_URL: redis://:${REDIS_PASSWORD:?задайте REDIS_PASSWORD}@redis:6379

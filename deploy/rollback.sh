@@ -9,9 +9,13 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+RESULT=failed
+trap 'journal rollback "${TARGET:-?}" "$RESULT"' EXIT
+
 main() {
   require_env
   local target="${1:-$(cat "$STATE_DIR/previous" 2>/dev/null || true)}"
+  TARGET="$target"
   local current
   current="$(cat "$STATE_DIR/current" 2>/dev/null || true)"
   [ -n "$target" ] || die "немає куди відкочуватись: вкажіть тег (docker images depara-backend)"
@@ -29,6 +33,7 @@ main() {
 
   [ -n "$current" ] && [ "$current" != "$target" ] && echo "$current" >"$STATE_DIR/previous"
   echo "$target" >"$STATE_DIR/current"
+  RESULT=ok
   log "відкат завершено, працює $target"
 }
 

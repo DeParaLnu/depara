@@ -7,6 +7,9 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+RESULT=failed
+trap 'journal deploy "${TAG:-?}" "$RESULT"' EXIT
+
 main() {
   require_env
   local tag prev domain
@@ -31,6 +34,7 @@ main() {
     [ "$prev" != "$tag" ] && [ -n "$prev" ] && echo "$prev" >"$STATE_DIR/previous"
     echo "$tag" >"$STATE_DIR/current"
     prune_images
+    RESULT=ok
     log "API healthy, версія $tag працює"
   else
     log "API не став healthy. Останні логи:" >&2

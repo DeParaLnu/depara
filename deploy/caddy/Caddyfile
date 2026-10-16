@@ -9,5 +9,15 @@
 		-Server
 	}
 
-	reverse_proxy api:3000
+	# Access-лог у JSON (stdout контейнера, ротується разом з іншими логами). Authorization і Cookie Caddy
+	# за замовчуванням редагує, тож токени в лог не потрапляють. request_id збігається з reqId у логах API.
+	log {
+		format json
+	}
+	log_append request_id {http.request.uuid}
+
+	reverse_proxy api:3000 {
+		# Наскрізний id запиту: API використовує його як reqId, тож записи Caddy і Fastify зіставляються
+		header_up X-Request-ID {http.request.uuid}
+	}
 }
