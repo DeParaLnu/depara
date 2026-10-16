@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../config';
 import { prisma } from '../db';
+import { audit } from '../lib/audit';
 import { checkLnuIdentity, verifyIdToken } from '../lib/google';
 import {
   consumeRefreshToken,
@@ -44,6 +45,9 @@ export async function authRoutes(app: FastifyInstance) {
 
     // Пошти зі змінної ADMIN_EMAILS отримують роль ADMIN (так з'являється перший адмін)
     const isBootstrapAdmin = config.adminEmails.includes(identity.email);
+    const before = isBootstrapAdmin
+      ? await prisma.user.findUnique({ where: { email: identity.email }, select: { role: true } })
+      : null;
     const user = await prisma.user.upsert({
       where: { email: identity.email },
       update: { googleSub: identity.sub, ...(isBootstrapAdmin ? { role: 'ADMIN' } : {}) },
@@ -54,6 +58,11 @@ export async function authRoutes(app: FastifyInstance) {
         role: isBootstrapAdmin ? 'ADMIN' : 'STUDENT',
       },
     });
+
+    // Найчутливіша зміна ролі відбувається без адміна, тому її обовʼязково пишемо в audit
+    if (isBootstrapAdmin && before?.role !== 'ADMIN') {
+      audit(req, 'user.role.bootstrap', { actor: 'ADMIN_EMAILS', target: user.id, from: before?.role ?? null, to: 'ADMIN' });
+    }
 
     return {
       ...(await startSession(user.id, deviceId)),
