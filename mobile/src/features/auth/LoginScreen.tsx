@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ApiError, api } from '../../api';
+import { api } from '../../api';
 import { config } from '../../config';
+import { reportError } from '../../lib/errors';
 import { colors, errorText } from '../../theme';
 import { useSession } from './session';
 
@@ -25,7 +26,7 @@ export function LoginScreen() {
     try {
       setSession(await api.loginWithGoogle(config.e2eIdToken, deviceId));
     } catch (e) {
-      setError(errorText(e instanceof ApiError ? e.code : 'UNKNOWN'));
+      setError(errorText(reportError('auth', e)));
     } finally {
       setLoading(false);
     }

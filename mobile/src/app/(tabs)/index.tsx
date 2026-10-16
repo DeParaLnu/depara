@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ApiError } from '../../api';
 import { mondayOf, toIsoDate } from '../../lib/date';
+import { errorCode, isNetworkError } from '../../lib/errors';
 import { useGroups, useMe, useNow, useWeek } from '../../features/schedule/hooks';
 import { TodayView, type TodayState } from '../../features/schedule/TodayView';
 
@@ -19,11 +19,11 @@ export default function TodayRoute() {
       kind: 'ready',
       lessons: week.data.lessons,
       // Дані є, але останнє оновлення не вдалось через мережу: показуємо збережене з позначкою «Офлайн»
-      offline: week.isError && week.error instanceof ApiError && week.error.code === 'NETWORK_ERROR',
+      offline: week.isError && isNetworkError(week.error),
       updatedAt: week.dataUpdatedAt ? new Date(week.dataUpdatedAt) : null,
     };
   } else if (week.isError) {
-    state = { kind: 'error', code: week.error instanceof ApiError ? week.error.code : 'UNKNOWN' };
+    state = { kind: 'error', code: errorCode(week.error) };
   } else {
     state = { kind: 'loading' };
   }

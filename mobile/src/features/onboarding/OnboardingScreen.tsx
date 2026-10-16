@@ -2,7 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ApiError, api, type Group } from '../../api';
+import { api, type Group } from '../../api';
+import { errorCode } from '../../lib/errors';
 import { colors, errorText } from '../../theme';
 import { useSession } from '../auth/session';
 import { useGroups } from '../schedule/hooks';
@@ -63,7 +64,7 @@ export function OnboardingScreen() {
   });
 
   const error = groups.isError ? groups.error : save.isError ? save.error : null;
-  const errorCode = error ? (error instanceof ApiError ? error.code : 'UNKNOWN') : null;
+  const errorMessageCode = error ? errorCode(error) : null;
 
   const goBack = () => {
     setFaculty(null);
@@ -91,9 +92,9 @@ export function OnboardingScreen() {
         {faculty ? faculty : 'Далі оберете свою групу, щоб бачити розклад'}
       </Text>
 
-      {errorCode && (
+      {errorMessageCode && (
         <View style={styles.errorBox}>
-          <Text style={styles.error}>{errorText(errorCode)}</Text>
+          <Text style={styles.error}>{errorText(errorMessageCode)}</Text>
           {groups.isError && (
             <Pressable
               accessibilityRole="button"

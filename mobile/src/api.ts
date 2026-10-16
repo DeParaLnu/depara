@@ -1,4 +1,5 @@
 import { config } from './config';
+import { log } from './lib/logger';
 
 export type Session = {
   accessToken: string;
@@ -52,12 +53,19 @@ export class ApiError extends Error {
   constructor(
     public code: string,
     public status = 0,
+    /** Заголовок X-Request-ID відповіді: за ним запис знаходиться в логах бекенда. */
+    public requestId?: string,
   ) {
     super(code);
   }
 }
 
+// Єдина точка всіх HTTP-запитів: тут логуємо метод, шлях, статус, код помилки з тіла і тривалість.
+// Токени, тіла відповідей і query-рядок у лог не потрапляють.
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+  const method = init.method ?? 'GET';
+  const route = path.split('?')[0];
+  const started = Date.now();
   let res: Response;
   try {
     res = await fetch(`${config.apiUrl}${path}`, {
@@ -68,10 +76,18 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
       },
     });
   } catch {
+    log.warn('api', `${method} ${route}: немає зв’язку`, { code: 'NETWORK_ERROR', ms: Date.now() - started });
     throw new ApiError('NETWORK_ERROR');
   }
+  const ms = Date.now() - started;
+  const requestId = res.headers.get('x-request-id') ?? undefined;
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error ?? `HTTP_${res.status}`, res.status);
+  if (!res.ok) {
+    const code: string = body.error ?? `HTTP_${res.status}`;
+    log.warn('api', `${method} ${route} → ${res.status} ${code}`, { ms, requestId });
+    throw new ApiError(code, res.status, requestId);
+  }
+  if (__DEV__) log.info('api', `${method} ${route} → ${res.status}`, { ms, requestId });
   return body as T;
 }
 
