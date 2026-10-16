@@ -15,7 +15,8 @@ import { log } from '../lib/logger';
 const onError = (error: unknown, source: string) => {
   if (error instanceof ApiError) {
     log.warn('query', `${source} не вдався: ${error.code}`, { status: error.status, requestId: error.requestId });
-    if (error.status === 401) {
+    // Кілька запитів можуть отримати 401 одночасно: пишемо про скидання лише раз, коли сесія ще була
+    if (error.status === 401 && useSession.getState().session) {
       log.warn('auth', 'сервер відповів 401: сесію скинуто, повернення на екран входу');
       useSession.getState().signOut();
     }

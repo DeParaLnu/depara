@@ -56,6 +56,7 @@ export function OnboardingScreen() {
   );
 
   const save = useMutation({
+    mutationKey: ['setGroup'],
     mutationFn: () => api.setGroup(token, groupId!, subgroup),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['me'] });

@@ -38,7 +38,7 @@ export const log = {
   error: (scope: string, message: string, error?: unknown, data?: Data) =>
     console.error(
       format(scope, message),
-      error instanceof Error ? (error.stack ?? error.message) : (error ?? ''),
+      error instanceof Error ? (error.stack ?? error.message) : error === undefined ? '' : String(error),
       redact(data) ?? '',
     ),
 };
