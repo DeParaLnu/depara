@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app';
+import { prisma } from '../../src/db';
 import { ADMIN_EMAIL, currentMonday } from './helpers';
 
 // Тест запускає застосунок у цьому ж процесі з власним потоком логів і читає з нього записи audit.
@@ -16,8 +17,21 @@ const login = async (email: string) => {
 };
 const auditLines = (action: string) => lines.filter((l) => l.audit?.action === action);
 
-beforeAll(() => app.ready());
-afterAll(() => app.close());
+beforeAll(async () => {
+  await app.ready();
+  await quietApp.ready();
+});
+// Другий застосунок із рівнем логера warn: audit не має зникати
+const quietLines: Line[] = [];
+const quietApp = buildApp({
+  logger: { level: 'warn', stream: { write: (s: string) => quietLines.push(JSON.parse(s) as Line) } },
+});
+
+afterAll(async () => {
+  await app.close();
+  await quietApp.close();
+  await prisma.$disconnect();
+});
 
 describe('audit trail', () => {
   it('зміна ролі пишеться з виконавцем, ціллю, старою і новою роллю та reqId', async () => {
@@ -63,5 +77,41 @@ describe('audit trail', () => {
     const raw = JSON.stringify(lines);
     expect(raw).not.toContain(student.accessToken);
     expect(raw).not.toContain('audit.student@lnu.edu.ua');
+  });
+
+  it('підвищення до ADMIN через ADMIN_EMAILS при вході теж потрапляє в audit', async () => {
+    await login(ADMIN_EMAIL);
+    const row = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } });
+    await prisma.user.update({ where: { id: row.id }, data: { role: 'STUDENT' } });
+
+    await login(ADMIN_EMAIL);
+    const entry = auditLines('user.role.bootstrap').at(-1);
+    expect(entry?.audit).toMatchObject({ actor: 'ADMIN_EMAILS', target: row.id, from: 'STUDENT', to: 'ADMIN' });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: row.id } })).role).toBe('ADMIN');
+
+    // вхід уже адміна нічого не змінює і не пише
+    const count = auditLines('user.role.bootstrap').length;
+    await login(ADMIN_EMAIL);
+    expect(auditLines('user.role.bootstrap')).toHaveLength(count);
+  });
+
+  it('audit лишається в лозі, навіть коли рівень логера warn', async () => {
+    const loginQuiet = async (email: string) =>
+      (await quietApp.inject({ method: 'POST', url: '/auth/google', payload: { idToken: `test:${email}`, deviceId: 'audit-test' } })).json() as {
+        accessToken: string;
+        user: { id: string };
+      };
+    const admin = await loginQuiet(ADMIN_EMAIL);
+    const target = await loginQuiet('audit.quiet@lnu.edu.ua');
+    const res = await quietApp.inject({
+      method: 'PATCH',
+      url: `/admin/users/${target.user.id}/role`,
+      headers: { authorization: `Bearer ${admin.accessToken}` },
+      payload: { role: 'STUDENT' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(quietLines.some((l) => l.audit?.action === 'user.role.change' && l.audit.target === target.user.id)).toBe(true);
+    // а звичайні info-записи (наприклад, "incoming request") у такому режимі відсутні
+    expect(quietLines.some((l) => l.msg === 'incoming request')).toBe(false);
   });
 });
