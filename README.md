@@ -35,7 +35,7 @@ npm run test:e2e
 
 ## Деплой
 
-Образ бекенда збирається з `backend/Dockerfile`. Інструкція, змінні середовища і приклад хостингу: [docs/deploy.md](docs/deploy.md).
+Образ бекенда збирається з `backend/Dockerfile`. Основний варіант: VPS з Docker, бекапами і відкатом, див. [docs/deploy-vps.md](docs/deploy-vps.md) (файли в `deploy/`). Змінні середовища і запасний хостинг: [docs/deploy.md](docs/deploy.md).
 
 ## Структура backend/src
 
