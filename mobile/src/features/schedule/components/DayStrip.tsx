@@ -1,0 +1,59 @@
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { colors } from '../../../theme';
+import { dayLabel, toIsoDate, weekdayShortCap } from '../../../lib/date';
+
+type Props = {
+  days: Date[];
+  selected: Date;
+  today: Date;
+  /** Дати (YYYY-MM-DD), у яких є заміни: на чипі показуємо крапку */
+  markedDates: Set<string>;
+  onSelect: (day: Date) => void;
+};
+
+export function DayStrip({ days, selected, today, markedDates, onSelect }: Props) {
+  const selectedIso = toIsoDate(selected);
+  const todayIso = toIsoDate(today);
+  return (
+    <View style={styles.row} accessibilityRole="tablist">
+      {days.map((day) => {
+        const iso = toIsoDate(day);
+        const isSelected = iso === selectedIso;
+        const marked = markedDates.has(iso);
+        return (
+          <Pressable
+            key={iso}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: isSelected }}
+            accessibilityLabel={`${dayLabel(day)}${iso === todayIso ? ', сьогодні' : ''}${marked ? ', є заміни' : ''}`}
+            onPress={() => onSelect(day)}
+            style={[styles.chip, isSelected && styles.chipSelected, !isSelected && iso === todayIso && styles.chipToday]}
+          >
+            <Text style={[styles.weekday, isSelected && styles.textSelected]}>{weekdayShortCap(day)}</Text>
+            <Text style={[styles.date, isSelected && styles.textSelected]}>{day.getDate()}</Text>
+            {marked && <View style={styles.dot} />}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 6 },
+  chip: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 12,
+    backgroundColor: colors.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  chipSelected: { backgroundColor: colors.primary },
+  chipToday: { borderWidth: 1.5, borderColor: colors.primary },
+  weekday: { fontSize: 11, color: colors.textMuted },
+  date: { fontSize: 15, fontWeight: '700', color: colors.text },
+  textSelected: { color: '#FFFFFF' },
+  dot: { position: 'absolute', top: 6, right: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning },
+});

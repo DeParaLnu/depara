@@ -22,6 +22,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "scheme": "depara",
+    "experiments": {
+      "typedRoutes": true
     }
   }
 }
