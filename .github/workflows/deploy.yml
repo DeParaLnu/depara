@@ -87,11 +87,14 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote"
 
-      - name: Перевірка після деплою
+      - name: Скрипт smoke-перевірки
         if: env.DEPLOY_URL != ''
-        run: |
-          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors --max-time 15 "$DEPLOY_URL/health"
-          echo
-          # Демо-консоль і фейковий вхід у проді мають бути вимкнені
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$DEPLOY_URL/dev")"
-          [ "$code" = 404 ] || { echo "/dev відповів $code, очікували 404: перевірте AUTH_MODE і NODE_ENV" >&2; exit 1; }
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy/smoke.sh
+          sparse-checkout-cone-mode: false
+
+      # /health 200, /dev 404, фейковий вхід відхилено, є x-request-id (деталі в deploy/smoke.sh)
+      - name: Smoke після деплою
+        if: env.DEPLOY_URL != ''
+        run: bash deploy/smoke.sh "$DEPLOY_URL"

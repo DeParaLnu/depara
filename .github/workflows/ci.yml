@@ -76,6 +76,19 @@ jobs:
       - run: npm run seed -- --shift-to-current-week
       - run: npm run test:e2e
 
+  # Мобільні E2E на PR: стартують лише після зеленого backend-e2e, бо застосунок ходить у той самий API.
+  # Вимкнені, доки змінна репозиторію MOBILE_E2E_ON_PR не дорівнює 'true' (ставимо, коли сценарії
+  # стабільно зелені кілька запусків поспіль). Спершу НЕ робимо їх обов'язковою перевіркою в ruleset.
+  # PR з форків не запускаємо: на self-hosted runner це був би чужий код на нашій машині.
+  mobile-e2e:
+    needs: backend-e2e
+    if: >-
+      vars.MOBILE_E2E_ON_PR == 'true' && (
+        github.event_name != 'pull_request'
+        || github.event.pull_request.head.repo.full_name == github.repository
+      )
+    uses: ./.github/workflows/mobile-e2e.yml
+
   # Прод-образ: збирається, застосовує міграції на старті і відповідає на /health.
   # Контейнер запускається як на хостингу: NODE_ENV=production, без фейкового входу.
   backend-docker:
