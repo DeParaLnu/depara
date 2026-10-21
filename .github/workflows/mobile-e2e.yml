@@ -1,22 +1,26 @@
 name: mobile-e2e
 
-# Поки в mobile/ немає застосунку, workflow запускається тільки вручну
-# (вкладка Actions -> mobile-e2e -> Run workflow).
-# Коли Appium-сценарії стабільно зеленіють, розкоментуйте pull_request і schedule.
+# Мобільні E2E (Appium + Android-емулятор). Три способи запуску:
+#  1. На PR: його викликає ci.yml (job mobile-e2e) ПІСЛЯ зеленого backend-e2e. Сам по собі pull_request
+#     тут не вмикаємо: окремий workflow стартував би паралельно і не міг би чекати на backend-e2e.
+#     На PR він вмикається змінною репозиторію MOBILE_E2E_ON_PR=true, коли сценарії стабільно зеленіють.
+#  2. Вручну: Actions -> mobile-e2e -> Run workflow (для налагодження, на будь-якій гілці).
+#  3. Щоночі на develop: розкоментуйте schedule, коли буде стабільний runner.
+# Де бігти: змінна MOBILE_E2E_RUNNER=self-hosted переводить job на власну машину з мітками
+# [self-hosted, linux, android-emulator] (див. docs/mobile-e2e-runner.md), інакше ubuntu-latest.
 on:
   workflow_dispatch:
-  # pull_request:
-  #   branches: [develop]
+  workflow_call:
   # schedule:
   #   - cron: '0 2 * * *'   # щоночі о 02:00 UTC
 
 concurrency:
-  group: mobile-e2e-${{ github.ref }}
+  group: mobile-e2e-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   mobile-e2e:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.MOBILE_E2E_RUNNER == 'self-hosted' && fromJSON('["self-hosted","linux","android-emulator"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     services:
       postgres:
@@ -79,6 +83,8 @@ jobs:
           cd android && ./gradlew assembleDebug
 
       - name: Увімкнути KVM
+        # На власній машині KVM налаштовують один раз під час встановлення runner
+        if: runner.environment == 'github-hosted'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
@@ -101,3 +107,14 @@ jobs:
       - name: Логи API при падінні
         if: failure()
         run: cat backend/api.log
+
+      - name: Зберегти логи і скриншоти Appium
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-logs
+          path: |
+            backend/api.log
+            mobile/e2e/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
