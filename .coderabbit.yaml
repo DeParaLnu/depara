@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Налаштування ШІ-рев'юера CodeRabbit (безкоштовний для публічних репозиторіїв).
+# Рев'ю на додачу до рев'ю техліда, не замість нього. Злиття не блокує.
+
+language: "uk-UA"
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!**/package-lock.json"
+    - "!mobile/android/**"
+    - "!.agents/**"
+    - "!.claude/**"
+    - "!skills-lock.json"
+
+  path_instructions:
+    - path: "backend/src/**"
+      instructions: |
+        Стек: Fastify 5 + Prisma 6 + Postgres + Redis.
+        - Поля API можна лише додавати. Перейменування чи видалення поля у відповіді ламає мобільний клієнт: познач це як суттєву проблему.
+        - AUTH_MODE=fake (вхід за токеном `test:<email>`) дозволено тільки разом з NODE_ENV=test. Будь-який шлях, що вмикає фейковий вхід поза тестовим режимом, є помилкою.
+        - Жодних секретів у коді (JWT_SECRET, паролі БД, ключі FCM тощо): лише змінні середовища.
+        - Помилки API повертаються у форматі `{ error: { code, message } }`.
+        - Роль користувача читається з бази на кожен запит, не з токена.
+
+    - path: "backend/test/e2e/**"
+      instructions: |
+        - Кожен критерій приймання зі specs/*.md (розділ «Критерії приймання») має окремий E2E-тест. Назви тестів відповідають фічам F1–F9.
+        - Тести ходять у живий сервер по HTTP, без моків внутрішніх модулів і без прямого виклику обробників.
+        - Якщо PR додає або змінює критерій у specs/, перевір, що відповідний тест додано чи оновлено.
+
+    - path: "mobile/src/**"
+      instructions: |
+        Стек: Expo Router + TanStack Query + Zustand.
+        - Структура по фічах. Маршрути лише в `src/app/`, решта коду (компоненти, хуки, утиліти) поза `src/app/`.
+        - Без Redux.
+        - Токени (access, refresh) зберігаються лише в expo-secure-store, не в AsyncStorage чи Zustand persist.
+        - testID на екранах за контрактом у docs/mobile-e2e-runner.md (розділ «Контракт testID для екранів»). Перейменування чи видалення testID з контракту ламає E2E.
+        - Не редагувати вручну `android/` та `ios/`: нативні налаштування через app.json і config plugins.
+
+    - path: "mobile/e2e/**"
+      instructions: |
+        - Сценарії Appium шукають елементи за testID із контракту в docs/mobile-e2e-runner.md, а не за текстом, XPath чи індексом.
+        - Новий testID у сценарії має бути доданий і в контракт, і в екран.
+
+    - path: "specs/**"
+      instructions: |
+        - Спершу спека, потім код. Якщо поведінка змінилась, спека оновлена в тому ж PR.
+        - Критерії приймання мають бути перевірними: кожен пункт відповідає E2E-сценарію.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        - Не вмикати фейковий вхід (AUTH_MODE=fake) у прод-деплої: лише в тестових job разом з NODE_ENV=test.
+        - Секрети лише через GitHub Secrets (`secrets.*`), не в коді чи `env:` відкритим текстом.
+        - Мобільні E2E на self-hosted runner не запускаються для PR з форків.
+
+    - path: "deploy/**"
+      instructions: |
+        - Не вмикати фейковий вхід (AUTH_MODE=fake) у проді.
+        - Не публікувати порти Postgres і Redis назовні (жодних `ports:` для цих сервісів у прод-стеку).
+        - Секрети лише через GitHub Secrets або змінні середовища сервера, не в репозиторії.
