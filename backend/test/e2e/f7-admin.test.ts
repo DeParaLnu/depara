@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  adminToken, API, authHeaders, currentMonday, importLesson, loginToken, send, setupStudent, userId, weekLessons,
+  adminToken, API, authHeaders, CORS_ORIGIN, currentMonday, emptyGroup, importLesson, loginToken, send, setupStudent, userId, weekLessons,
 } from './helpers';
 
 const errorOf = async (res: Response) => ((await res.json()) as { error: string }).error;
@@ -105,5 +105,85 @@ describe('F7: імпорт розкладу', () => {
     });
     expect(res.status).toBe(422);
     expect((await weekLessons(student)).some((l) => l.subject === subject)).toBe(false);
+  });
+});
+
+describe('F7: призначення групи', () => {
+  const groupOf = async (token: string) =>
+    (await (await fetch(`${API}/me`, { headers: authHeaders(token) })).json()) as { groupId: string | null; subgroup: number };
+
+  it('адмін призначає групу й підгрупу, і користувач одразу бачить її розклад', async () => {
+    const admin = await adminToken();
+    const user = await loginToken(`f7.assign.${Date.now()}@lnu.edu.ua`);
+    const id = await userId(user);
+    const groups = (await (await fetch(`${API}/groups`, { headers: authHeaders(admin) })).json()) as { id: string; code: string }[];
+    const test31 = groups.find((g) => g.code === 'ТЕСТ-31')!;
+
+    expect((await fetch(`${API}/schedule/week`, { headers: authHeaders(user) })).status).toBe(409);
+
+    const res = await send('PATCH', `/admin/users/${id}/group`, admin, { groupId: test31.id, subgroup: 1 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id, groupId: test31.id, subgroup: 1 });
+    expect(await groupOf(user)).toMatchObject({ groupId: test31.id, subgroup: 1 });
+    expect((await weekLessons(user)).length).toBeGreaterThan(0);
+  });
+
+  it('без підгрупи вона скидається на 0', async () => {
+    const admin = await adminToken();
+    const user = await setupStudent('f7.resub@lnu.edu.ua', 2);
+    const id = await userId(user);
+    const other = await emptyGroup(admin, 'ПУСТО-12');
+    const res = await send('PATCH', `/admin/users/${id}/group`, admin, { groupId: other });
+    expect(res.status).toBe(200);
+    expect(await groupOf(user)).toMatchObject({ groupId: other, subgroup: 0 });
+  });
+
+  it('валідація: id, група, підгрупа, невідомі користувач і група', async () => {
+    const admin = await adminToken();
+    const id = await userId(await loginToken('f7.assignbad@lnu.edu.ua'));
+    const group = await emptyGroup(admin, 'ПУСТО-13');
+    const unknown = '00000000-0000-4000-8000-000000000000';
+    const code = async (res: Response) => [res.status, await errorOf(res)];
+
+    expect(await code(await send('PATCH', '/admin/users/not-a-uuid/group', admin, { groupId: group }))).toEqual([400, 'INVALID_ID']);
+    expect(await code(await send('PATCH', `/admin/users/${id}/group`, admin, {}))).toEqual([400, 'GROUP_REQUIRED']);
+    expect(await code(await send('PATCH', `/admin/users/${id}/group`, admin, { groupId: 'x' }))).toEqual([400, 'INVALID_GROUP_ID']);
+    expect(await code(await send('PATCH', `/admin/users/${id}/group`, admin, { groupId: group, subgroup: 3 }))).toEqual([400, 'INVALID_SUBGROUP']);
+    expect(await code(await send('PATCH', `/admin/users/${unknown}/group`, admin, { groupId: group }))).toEqual([404, 'USER_NOT_FOUND']);
+    expect(await code(await send('PATCH', `/admin/users/${id}/group`, admin, { groupId: unknown }))).toEqual([404, 'GROUP_NOT_FOUND']);
+  });
+
+  it('студент отримує 403, без токена 401', async () => {
+    const student = await loginToken('f7.assignforbidden@lnu.edu.ua');
+    const id = await userId(student);
+    expect((await send('PATCH', `/admin/users/${id}/group`, student, { groupId: id })).status).toBe(403);
+    const res = await fetch(`${API}/admin/users/${id}/group`, { method: 'PATCH' });
+    expect(res.status).toBe(401);
+  });
+});
+
+// Сервер E2E стартує з CORS_ORIGINS=http://localhost:5173 (див. README, ci.yml)
+describe('F7: CORS для веб-адмінки', () => {
+  it('preflight з дозволеного origin проходить, з методом PATCH і заголовком Authorization', async () => {
+    const res = await fetch(`${API}/admin/users/x/role`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: CORS_ORIGIN,
+        'access-control-request-method': 'PATCH',
+        'access-control-request-headers': 'authorization,content-type',
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe(CORS_ORIGIN);
+    expect(res.headers.get('access-control-allow-methods')).toContain('PATCH');
+    expect(res.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('authorization');
+    expect(res.headers.get('access-control-allow-credentials')).toBeNull();
+  });
+
+  it('відповідь API для дозволеного origin містить заголовок, для чужого немає', async () => {
+    const allowed = await fetch(`${API}/health`, { headers: { origin: CORS_ORIGIN } });
+    expect(allowed.headers.get('access-control-allow-origin')).toBe(CORS_ORIGIN);
+    const foreign = await fetch(`${API}/health`, { headers: { origin: 'https://evil.example' } });
+    expect(foreign.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

@@ -1,31 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { describe, expect, it } from 'vitest';
 import { config } from '../../src/config';
-import { checkLnuIdentity, type GoogleIdentity } from '../../src/lib/google';
 import { verifyAccessToken } from '../../src/lib/tokens';
-
-const ok: GoogleIdentity = {
-  sub: '1',
-  email: 'student@lnu.edu.ua',
-  emailVerified: true,
-  hd: 'lnu.edu.ua',
-};
-
-describe('checkLnuIdentity', () => {
-  it('пропускає підтверджений акаунт домену', () => {
-    expect(checkLnuIdentity(ok)).toBeNull();
-  });
-
-  it.each([
-    ['email не підтверджений', { emailVerified: false }],
-    ['немає hd (особистий gmail)', { hd: undefined, email: 'a@gmail.com' }],
-    ['hd іншого домену', { hd: 'example.com' }],
-    ['hd збігається, а пошта чужа', { email: 'a@gmail.com' }],
-    ['суфікс-підробка', { email: 'a@evil-lnu.edu.ua' }],
-  ])('відхиляє: %s', (_name, patch) => {
-    expect(checkLnuIdentity({ ...ok, ...patch })).toBe('NON_LNU_EMAIL');
-  });
-});
 
 describe('verifyAccessToken', () => {
   const sign = (payload: object, opts: jwt.SignOptions = {}) =>

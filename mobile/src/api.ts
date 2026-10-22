@@ -22,12 +22,16 @@ export type Me = {
 export type LessonType = 'LECTURE' | 'PRACTICE' | 'LAB' | 'EXAM' | 'OTHER';
 export type SubstitutionKind = 'CANCELLED' | 'REPLACED' | 'MOVED' | 'ROOM_CHANGED';
 
+// Корпус аудиторії: літера, назва й адреса (для екрана деталей і маршруту)
+export type Building = { code: string; name: string; address: string };
+
 export type Substitution = {
   id: string;
   kind: SubstitutionKind;
   comment: string | null;
   newTeacher: string | null;
   newRoom: string | null; // «номер/код корпусу»
+  newBuilding: Building | null;
   newDate: string | null;
   newPairNumber: number | null;
 };
@@ -44,10 +48,13 @@ export type Lesson = {
   subgroup: number; // 0 = уся група
   teacher: string | null;
   room: string | null; // «номер/код корпусу»
+  building: Building | null;
   substitution: Substitution | null;
 };
 
-export type WeekSchedule = { weekStart: string; lessons: Lesson[] };
+// published = false: деканат ще нічого не опублікував для групи («Розклад ще не опубліковано»),
+// на відміну від порожнього тижня при published = true
+export type WeekSchedule = { weekStart: string; published: boolean; lessons: Lesson[] };
 
 export class ApiError extends Error {
   constructor(
@@ -92,8 +99,8 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
 }
 
 export const api = {
-  loginWithGoogle: (idToken: string, deviceId: string) =>
-    request<Session>('/auth/google', { method: 'POST', body: JSON.stringify({ idToken, deviceId }) }),
+  loginWithMicrosoft: (idToken: string, deviceId: string) =>
+    request<Session>('/auth/microsoft', { method: 'POST', body: JSON.stringify({ idToken, deviceId }) }),
   groups: (token: string) => request<Group[]>('/groups', {}, token),
   me: (token: string) => request<Me>('/me', {}, token),
   setGroup: (token: string, groupId: string, subgroup: number) =>

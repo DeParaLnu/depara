@@ -5,7 +5,7 @@ interface LoginBody {
   accessToken: string;
   refreshToken: string;
   needsOnboarding: boolean;
-  user: { role: string; email: string };
+  user: { id: string; role: string; email: string };
 }
 
 async function login(email: string): Promise<LoginBody> {
@@ -16,7 +16,7 @@ async function login(email: string): Promise<LoginBody> {
 
 const errorOf = async (res: Response) => ((await res.json()) as { error: string }).error;
 
-describe('F1: вхід', () => {
+describe('F1: вхід (Microsoft)', () => {
   it('акаунт @lnu.edu.ua отримує токени, роль STUDENT і needsOnboarding', async () => {
     const body = await login('f1.student@lnu.edu.ua');
     expect(body.accessToken).toBeTruthy();
@@ -42,13 +42,36 @@ describe('F1: вхід', () => {
     expect(await errorOf(res)).toBe('NON_LNU_EMAIL');
   });
 
+  it('токен чужого тенанта Entra відхиляється з 403 NON_LNU_EMAIL, навіть з поштою ЛНУ', async () => {
+    const res = await postJson('/auth/microsoft', { idToken: 'test:f1.tenant@lnu.edu.ua:other-tenant', deviceId: DEVICE });
+    expect(res.status).toBe(403);
+    expect(await errorOf(res)).toBe('NON_LNU_EMAIL');
+  });
+
+  it('пошта з двома @ (x@evil.com@lnu.edu.ua) відхиляється', async () => {
+    const res = await loginRaw('x@evil.com@lnu.edu.ua');
+    expect(res.status).toBe(403);
+    expect(await errorOf(res)).toBe('NON_LNU_EMAIL');
+  });
+
+  it('регістр пошти не створює дублікат акаунта', async () => {
+    const a = await login('F1.Case@lnu.edu.ua');
+    const b = await login('f1.case@lnu.edu.ua');
+    expect(b.user.email).toBe('f1.case@lnu.edu.ua');
+    expect(b.user.id).toBe(a.user.id);
+  });
+
+  it('старий маршрут /auth/google прибрано', async () => {
+    expect((await postJson('/auth/google', { idToken: 'test:f1.old@lnu.edu.ua', deviceId: DEVICE })).status).toBe(404);
+  });
+
   it('без idToken або deviceId повертає 400', async () => {
-    expect((await postJson('/auth/google', { deviceId: DEVICE })).status).toBe(400);
+    expect((await postJson('/auth/microsoft', { deviceId: DEVICE })).status).toBe(400);
     expect((await loginRaw('f1.nodevice@lnu.edu.ua', '')).status).toBe(400);
   });
 
   it('зламаний JSON дає 400, а не 500', async () => {
-    const res = await fetch(`${API}/auth/google`, {
+    const res = await fetch(`${API}/auth/microsoft`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{not json',
@@ -57,7 +80,7 @@ describe('F1: вхід', () => {
   });
 
   it('недійсний токен повертає 401 INVALID_TOKEN', async () => {
-    const res = await postJson('/auth/google', { idToken: 'garbage', deviceId: DEVICE });
+    const res = await postJson('/auth/microsoft', { idToken: 'garbage', deviceId: DEVICE });
     expect(res.status).toBe(401);
     expect(await errorOf(res)).toBe('INVALID_TOKEN');
   });

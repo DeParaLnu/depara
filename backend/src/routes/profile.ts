@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
-import { isUuid } from '../lib/validation';
+import { isSubgroup, isUuid } from '../lib/validation';
 import { requireAuth } from '../plugins/auth';
 
 // F2: список груп і вибір своєї
@@ -39,7 +39,7 @@ export async function profileRoutes(app: FastifyInstance) {
     };
     if (!groupId) return reply.code(400).send({ error: 'GROUP_REQUIRED' });
     if (!isUuid(groupId)) return reply.code(400).send({ error: 'INVALID_GROUP_ID' });
-    if (subgroup !== undefined && (!Number.isInteger(subgroup) || (subgroup as number) < 0 || (subgroup as number) > 2)) {
+    if (subgroup !== undefined && !isSubgroup(subgroup)) {
       return reply.code(400).send({ error: 'INVALID_SUBGROUP' });
     }
     if (!(await prisma.studyGroup.findUnique({ where: { id: groupId } }))) {

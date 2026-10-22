@@ -27,7 +27,10 @@ Docker або Node (Render, Railway, Fly.io тощо). Нижче загальн
 | `REDIS_URL` | так | Redis (`redis://...` або `rediss://...` для TLS, наприклад Upstash) |
 | `JWT_SECRET` | так | Випадковий рядок: `openssl rand -hex 32`. Без нього сервер не стартує |
 | `PORT` | ні | Хостинг зазвичай задає сам |
-| `GOOGLE_CLIENT_ID` | поки так | Для поточного входу через Google. Зникне після переходу на Microsoft |
+| `MICROSOFT_CLIENT_ID` | для входу | Application (client) ID застосунку в Microsoft Entra, він же `aud` ID-токена. Без нього `POST /auth/microsoft` відповідає 503 |
+| `MICROSOFT_TENANT_ID` | для входу | Directory (tenant) ID організації, з якої пускаємо (`tid` токена). Токени інших тенантів відхиляються |
+| `ALLOWED_EMAIL_DOMAIN` | ні | Домен пошти, який пускаємо. За замовчуванням `lnu.edu.ua` |
+| `CORS_ORIGINS` | для веб-адмінки | Origin веб-адмінки через кому, без слеша в кінці. Порожньо = CORS вимкнений (мобільному застосунку він не потрібен) |
 | `ADMIN_EMAILS` | для першого адміна | Пошти через кому, які отримують роль ADMIN при вході |
 
 **У проді не задавати `NODE_ENV=test` і `AUTH_MODE=fake`.** Образ сам ставить `NODE_ENV=production`,

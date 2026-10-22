@@ -97,5 +97,5 @@ npx wdio run e2e/wdio.conf.ts --spec e2e/specs/f5-rooms.e2e.ts             # о�
 ## Smoke на проді
 
 `deploy/smoke.sh https://<домен API>` перевіряє: `/health` 200, `/dev` 404, фейковий вхід `test:<email>`
-відхилено (401/503, або 404 коли маршрут Google приберуть), є заголовок `x-request-id`.
+відхилено (401/503, або 404), є заголовок `x-request-id`.
 Запускається автоматично в `deploy.yml` після кожного деплою, якщо задано змінну `DEPLOY_URL`.

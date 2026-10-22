@@ -2,6 +2,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID_RE.test(v);
 
+// Підгрупа: 0 = усі підгрупи, 1 або 2
+export const isSubgroup = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 2;
+
 export const isNonEmptyString = (v: unknown): v is string =>
   typeof v === 'string' && v.trim().length > 0;
 

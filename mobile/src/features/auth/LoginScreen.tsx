@@ -9,7 +9,7 @@ import { useSession } from './session';
 // Поки немає сховища, deviceId живе до перезапуску застосунку
 const deviceId = `device-${Math.random().toString(36).slice(2)}`;
 
-// F1: вхід через Google
+// F1: вхід через Microsoft (корпоративна пошта ЛНУ)
 export function LoginScreen() {
   const setSession = useSession((s) => s.setSession);
   const [loading, setLoading] = useState(false);
@@ -18,13 +18,13 @@ export function LoginScreen() {
   const login = async () => {
     setError(null);
     if (!config.e2e) {
-      // Справжній Google Sign-In підключимо окремою задачею
-      setError('Вхід через Google ще не підключено. Запустіть застосунок з E2E=1.');
+      // Справжній вхід через Microsoft Entra підключимо окремою задачею
+      setError('Вхід через Microsoft ще не підключено. Запустіть застосунок з E2E=1.');
       return;
     }
     setLoading(true);
     try {
-      setSession(await api.loginWithGoogle(config.e2eIdToken, deviceId));
+      setSession(await api.loginWithMicrosoft(config.e2eIdToken, deviceId));
     } catch (e) {
       setError(errorText(reportError('auth', e)));
     } finally {
@@ -45,7 +45,7 @@ export function LoginScreen() {
       <View style={styles.footer}>
         {error && <Text style={styles.error}>{error}</Text>}
         <Pressable
-          testID="login-google-button"
+          testID="login-button"
           accessibilityRole="button"
           onPress={login}
           disabled={loading}
@@ -54,10 +54,7 @@ export function LoginScreen() {
           {loading ? (
             <ActivityIndicator color={colors.primary} />
           ) : (
-            <>
-              <Text style={styles.googleMark}>G</Text>
-              <Text style={styles.buttonText}>Увійти через Google</Text>
-            </>
+            <Text style={styles.buttonText}>Увійти через Microsoft</Text>
           )}
         </Pressable>
         <Text style={styles.hint}>Лише для університетської пошти @lnu.edu.ua</Text>
@@ -107,7 +104,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   buttonPressed: { opacity: 0.85 },
-  googleMark: { fontSize: 20, fontWeight: '800', color: colors.primary },
   buttonText: { fontSize: 17, fontWeight: '600', color: colors.text },
   hint: { fontSize: 13, color: '#C9D8EE', textAlign: 'center' },
 });
