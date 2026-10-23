@@ -17,9 +17,9 @@ export function LoginScreen() {
 
   const login = async () => {
     setError(null);
-    if (!config.e2e) {
+    if (!config.e2e && !config.mock) {
       // Справжній Google Sign-In підключимо окремою задачею
-      setError('Вхід через Google ще не підключено. Запустіть застосунок з E2E=1.');
+      setError('Вхід через Google ще не підключено. Для перегляду без бекенда запустіть застосунок з MOCK=1.');
       return;
     }
     setLoading(true);
@@ -60,7 +60,9 @@ export function LoginScreen() {
             </>
           )}
         </Pressable>
-        <Text style={styles.hint}>Лише для університетської пошти @lnu.edu.ua</Text>
+        <Text style={styles.hint}>
+          {config.mock ? 'Демо-режим: дані вбудовані в застосунок' : 'Лише для університетської пошти @lnu.edu.ua'}
+        </Text>
       </View>
     </View>
   );
