@@ -76,3 +76,11 @@ export const minutesOf = (hhmm: string) => {
 export const nowMinutes = (now: Date) => now.getHours() * 60 + now.getMinutes();
 
 export const clock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+/** «19–25 жовтня» або «28 жовтня – 3 листопада» для тижня, що починається в понеділок. */
+export const weekRangeLabel = (monday: Date) => {
+  const sunday = addDays(monday, 6);
+  return monday.getMonth() === sunday.getMonth()
+    ? `${monday.getDate()}–${dayMonth(sunday)}`
+    : `${dayMonth(monday)} – ${dayMonth(sunday)}`;
+};
