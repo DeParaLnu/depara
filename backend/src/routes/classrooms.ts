@@ -4,8 +4,12 @@ import { requireAuth } from '../plugins/auth';
 
 // F5: пошук аудиторій, за номером (q) і/або корпусом (building = літера корпусу)
 export async function classroomRoutes(app: FastifyInstance) {
-  app.get('/classrooms', { preHandler: requireAuth }, async (req) => {
-    const { q, building } = req.query as { q?: string; building?: string };
+  app.get('/classrooms', { preHandler: requireAuth }, async (req, reply) => {
+    const { q, building } = req.query as { q?: unknown; building?: unknown };
+    // Повторений параметр (?building=А&building=Б) Fastify віддає масивом: це не рядок, відхиляємо
+    if ((q !== undefined && typeof q !== 'string') || (building !== undefined && typeof building !== 'string')) {
+      return reply.code(400).send({ error: 'INVALID_QUERY' });
+    }
     const code = building?.trim();
     const rooms = await prisma.classroom.findMany({
       where: {

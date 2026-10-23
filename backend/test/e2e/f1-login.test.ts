@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { PrismaClient } from '@prisma/client';
+import { afterAll, describe, expect, it } from 'vitest';
 import { API, authHeaders, DEVICE, loginRaw, postJson, setupStudent } from './helpers';
 
 interface LoginBody {
@@ -143,5 +144,77 @@ describe('F1: refresh і вихід', () => {
       deviceId: DEVICE,
     });
     expect(res.status).toBe(401);
+  });
+});
+
+// Токен "test:<email>::<oid>" імітує інший акаунт Entra з тією самою поштою (tid типовий)
+const asOid = (email: string, oid: string) => postJson('/auth/microsoft', { idToken: `test:${email}::${oid}`, deviceId: DEVICE });
+
+describe('F1: прив\'язка акаунта до oid', () => {
+  const prisma = new PrismaClient();
+  const run = Date.now();
+  // Щоразу новий oid зловмисника: спільний oid після першого успішного перепризначення зробив би наступні перевірки хибними
+  let n = 0;
+  const attacker = () => `attacker-${run}-${++n}`;
+  afterAll(() => prisma.$disconnect());
+
+  it('акаунт, уже прив\'язаний до одного oid, не перепризначається іншому oid з такою самою поштою (409)', async () => {
+    const email = `f1.bound.${run}@lnu.edu.ua`;
+    const owner = await login(email);
+
+    const res = await asOid(email, attacker());
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; accessToken?: string };
+    expect(body.error).toBe('ACCOUNT_CONFLICT');
+    expect(body.accessToken).toBeUndefined();
+
+    // справжній власник входить як і раніше, прив'язка не змінилась
+    expect((await login(email)).user.id).toBe(owner.user.id);
+    expect((await prisma.user.findUniqueOrThrow({ where: { email } })).microsoftOid).toBe(`test-${email}`);
+  });
+
+  it('роль власника не дістається іншому oid навіть після підвищення до ADMIN/HEADMAN', async () => {
+    const email = `f1.bound-role.${run}@lnu.edu.ua`;
+    await login(email);
+    await prisma.user.update({ where: { email }, data: { role: 'HEADMAN' } });
+    expect((await asOid(email, attacker())).status).toBe(409);
+    expect((await login(email)).user.role).toBe('HEADMAN');
+  });
+
+  it('зміна пошти в Entra (той самий oid) лишає той самий акаунт', async () => {
+    const oldEmail = `f1.upn-old.${run}@lnu.edu.ua`;
+    const newEmail = `f1.upn-new.${run}@lnu.edu.ua`;
+    const before = await login(oldEmail);
+
+    const res = await asOid(newEmail, `test-${oldEmail}`);
+    expect(res.status).toBe(200);
+    const after = (await res.json()) as LoginBody;
+    expect(after.user.id).toBe(before.user.id);
+    expect(after.user.email).toBe(newEmail);
+  });
+
+  it('запис без oid (після міграції) прив\'язується до першого входу за поштою і зберігає роль', async () => {
+    const email = `f1.legacy.${run}@lnu.edu.ua`;
+    const legacy = await prisma.user.create({ data: { email, fullName: 'Legacy', role: 'HEADMAN', microsoftOid: null } });
+
+    const body = await login(email);
+    expect(body.user.id).toBe(legacy.id);
+    expect(body.user.role).toBe('HEADMAN');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: legacy.id } })).microsoftOid).toBe(`test-${email}`);
+
+    // після прив'язки інший oid з цією поштою вже не пройде
+    expect((await asOid(email, attacker())).status).toBe(409);
+  });
+
+  it('два одночасні перші входи з різними oid в один вільний запис: прив\'язується лише один', async () => {
+    const email = `f1.race.${run}@lnu.edu.ua`;
+    await prisma.user.create({ data: { email, fullName: 'Race', microsoftOid: null } });
+
+    // oid унікальні на запуск: інакше oid із попереднього прогону вже прив'язаний до іншого запису
+    const oids = [`race-oid-a-${run}`, `race-oid-b-${run}`];
+    const results = await Promise.all(oids.map((oid) => asOid(email, oid)));
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    const bound = (await prisma.user.findUniqueOrThrow({ where: { email } })).microsoftOid;
+    expect(oids).toContain(bound);
   });
 });

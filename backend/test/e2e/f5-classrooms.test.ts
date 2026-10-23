@@ -70,9 +70,22 @@ describe('F5: пошук аудиторій', () => {
     expect(t.rooms.map((r) => r.label)).toContain('218/Т');
     expect(t.rooms.map((r) => r.label)).not.toContain('N10/Б');
 
+    // регістр не важливий: «т» дає той самий набір, що й «Т»
+    const lower = await searchRooms(token, undefined, 'т');
+    expect(lower.rooms.map((r) => r.id).sort()).toEqual(t.rooms.map((r) => r.id).sort());
+
     const b = await searchRooms(token, undefined, 'Б');
     expect(b.rooms.every((r) => r.building.code === 'Б')).toBe(true);
     expect(b.rooms.map((r) => r.label)).toContain('N10/Б');
+  });
+
+  it('повторений параметр (?building=Т&building=Б, ?q=a&q=b) дає 400 INVALID_QUERY, а не 500', async () => {
+    const token = await setupStudent('f5.repeated@lnu.edu.ua');
+    for (const query of ['building=%D0%A2&building=%D0%91', 'q=N1&q=N2']) {
+      const res = await fetch(`${API}/classrooms?${query}`, { headers: authHeaders(token) });
+      expect(res.status, query).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('INVALID_QUERY');
+    }
   });
 
   it('building і q працюють разом, невідомий корпус дає порожній список', async () => {

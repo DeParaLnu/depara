@@ -4,7 +4,7 @@
 // (ЮР-41) і акаунта без групи показує стани «Розклад ще не опубліковано» й онбординг.
 import { PrismaClient, type SubstitutionKind } from '@prisma/client';
 import { ImportError, importSchedule, validateImport } from '../../src/lib/scheduleImport';
-import { buildDemoPayload, DEMO_HEADMAN, DEMO_STUDENT_GROUP, DEMO_USERS } from './demoData';
+import { buildDemoPayload, DEMO_HEADMAN, DEMO_STUDENT_GROUP, DEMO_USERS, facultyOf } from './demoData';
 
 // Демо-акаунти зі званням HEADMAN і відомими поштами не повинні з'являтися на справжній базі
 if (process.env.NODE_ENV === 'production') {
@@ -15,8 +15,9 @@ if (process.env.NODE_ENV === 'production') {
 const prisma = new PrismaClient();
 
 async function seedUsers() {
-  const groups = await prisma.studyGroup.findMany();
-  const groupId = (code: string | null) => (code ? (groups.find((g) => g.code === code)?.id ?? null) : null);
+  const groups = await prisma.studyGroup.findMany({ include: { faculty: true } });
+  const groupId = (code: string | null) =>
+    code ? (groups.find((g) => g.code === code && g.faculty.shortName === facultyOf(code))?.id ?? null) : null;
 
   for (const u of DEMO_USERS) {
     const data = { fullName: u.fullName, role: u.role, groupId: groupId(u.group), subgroup: u.subgroup };
@@ -32,7 +33,11 @@ async function seedSubstitutions(now: Date) {
   await prisma.substitution.deleteMany({ where: { createdById: headman.id } });
 
   const upcoming = await prisma.lesson.findMany({
-    where: { group: { code: DEMO_STUDENT_GROUP }, date: { gte: today }, subgroup: 0 },
+    where: {
+      group: { code: DEMO_STUDENT_GROUP, faculty: { shortName: facultyOf(DEMO_STUDENT_GROUP) } },
+      date: { gte: today },
+      subgroup: 0,
+    },
     orderBy: [{ date: 'asc' }, { pairNumber: 'asc' }],
     include: { classroom: { include: { building: true } } },
   });
@@ -52,14 +57,23 @@ async function seedSubstitutions(now: Date) {
             where: { buildingId: lesson.classroom?.buildingId, id: { not: lesson.classroomId ?? undefined } },
           })
         : null;
+    // Перенесення лише на пару, вільну в цієї групи того дня (пізніші пари в пріоритеті)
+    let movedTo: number | undefined;
+    if (kind === 'MOVED') {
+      const busy = new Set(
+        (await prisma.lesson.findMany({ where: { groupId: lesson.groupId, date: lesson.date }, select: { pairNumber: true } }))
+          .map((l) => l.pairNumber),
+      );
+      movedTo = [5, 4, 3, 2, 1].find((p) => !busy.has(p));
+    }
     const data = {
       CANCELLED: { comment: 'Викладач захворів, пару скасовано' },
       ROOM_CHANGED: { comment: 'Аудиторія зайнята, переходимо в іншу', newClassroomId: room?.id },
       REPLACED: { comment: 'Пару проведе інший викладач', newTeacherId: otherTeacher?.id },
-      MOVED: { comment: 'Пару перенесено на кінець дня', newPairNumber: lesson.pairNumber === 5 ? 4 : 5 },
+      MOVED: { comment: 'Пару перенесено на вільну пару', newPairNumber: movedTo },
     }[kind];
     // Якщо для заміни нема потрібних довідкових даних, пропускаємо її, а не створюємо неповну
-    if ((kind === 'ROOM_CHANGED' && !room) || (kind === 'REPLACED' && !otherTeacher)) continue;
+    if ((kind === 'ROOM_CHANGED' && !room) || (kind === 'REPLACED' && !otherTeacher) || (kind === 'MOVED' && !movedTo)) continue;
     await prisma.substitution.create({ data: { lessonId: lesson.id, kind, createdById: headman.id, ...data } });
   }
   return targets.length;

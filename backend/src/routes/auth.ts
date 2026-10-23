@@ -45,27 +45,40 @@ export async function authRoutes(app: FastifyInstance) {
 
     // Пошти зі змінної ADMIN_EMAILS отримують роль ADMIN (так з'являється перший адмін)
     const isBootstrapAdmin = config.adminEmails.includes(identity.email);
-    // Користувача шукаємо за oid, а потім за поштою: після зміни пошти (UPN) в Entra акаунт лишається тим самим
-    const existing =
-      (await prisma.user.findUnique({ where: { microsoftOid: identity.oid } })) ??
-      (await prisma.user.findUnique({ where: { email: identity.email } }));
+    const adminRole = isBootstrapAdmin ? { role: 'ADMIN' as const } : {};
+    // Основний ключ: oid (після зміни пошти/UPN в Entra акаунт лишається тим самим). Пошта лише знаходить
+    // запис, який ще не прив'язаний до жодного oid (перший вхід після міграції). Запис, уже прив'язаний
+    // до іншого oid, за поштою не перепризначаємо: claim email в Entra змінний, і інакше чужий акаунт
+    // з тією самою поштою отримав би роль, групу й сесію попереднього власника.
+    const byOid = await prisma.user.findUnique({ where: { microsoftOid: identity.oid } });
+    const byEmail = byOid ? null : await prisma.user.findUnique({ where: { email: identity.email } });
+    if (byEmail?.microsoftOid) return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
+
     let user;
     try {
-      user = existing
-        ? await prisma.user.update({
-            where: { id: existing.id },
-            data: { email: identity.email, microsoftOid: identity.oid, ...(isBootstrapAdmin ? { role: 'ADMIN' } : {}) },
-          })
-        : await prisma.user.create({
-            data: {
-              email: identity.email,
-              microsoftOid: identity.oid,
-              fullName: identity.name ?? identity.email.split('@')[0],
-              role: isBootstrapAdmin ? 'ADMIN' : 'STUDENT',
-            },
-          });
+      if (byOid) {
+        user = await prisma.user.update({ where: { id: byOid.id }, data: { email: identity.email, ...adminRole } });
+      } else if (byEmail) {
+        // Прив'язуємо лише вільний запис і робимо це одним умовним UPDATE: якщо між перевіркою й записом
+        // його встиг зайняти інший oid (два одночасні перші входи), цей вхід отримує 409
+        const claimed = await prisma.user.updateMany({
+          where: { id: byEmail.id, microsoftOid: null },
+          data: { microsoftOid: identity.oid, ...adminRole },
+        });
+        if (claimed.count === 0) return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
+        user = await prisma.user.findUniqueOrThrow({ where: { id: byEmail.id } });
+      } else {
+        user = await prisma.user.create({
+          data: {
+            email: identity.email,
+            microsoftOid: identity.oid,
+            fullName: identity.name ?? identity.email.split('@')[0],
+            role: isBootstrapAdmin ? 'ADMIN' : 'STUDENT',
+          },
+        });
+      }
     } catch (e) {
-      // Нова пошта вже належить іншому запису (або гонка двох перших входів): не вгадуємо, хто з них хто
+      // Нова пошта вже належить іншому запису (або гонка двох створень): не вгадуємо, хто з них хто
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
       }

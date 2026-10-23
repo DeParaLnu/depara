@@ -43,12 +43,13 @@ export async function verifyMicrosoftToken(
   return { oid, tid, email, name: str(payload.name) };
 }
 
-// Тестовий режим: токен "test:<email>" або "test:<email>:<tid>" (другий вигляд перевіряє чужий тенант).
+// Тестовий режим: токен "test:<email>[:<tid>[:<oid>]]". Без tid і oid беруться типові (oid = test-<email>);
+// tid перевіряє чужий тенант, oid дозволяє зімітувати інший акаунт Entra з тією самою поштою.
 function verifyFake(idToken: string): MicrosoftIdentity {
   if (!idToken.startsWith('test:')) throw new Error('Not a test token');
-  const [email, tid] = idToken.slice('test:'.length).toLowerCase().split(':');
+  const [email, tid, oid] = idToken.slice('test:'.length).toLowerCase().split(':');
   if (!email) throw new Error('Not a test token');
-  return { oid: `test-${email}`, tid: tid || config.microsoftTenantId || FAKE_TENANT, email };
+  return { oid: oid || `test-${email}`, tid: tid || config.microsoftTenantId || FAKE_TENANT, email };
 }
 
 export async function verifyIdToken(idToken: string): Promise<MicrosoftIdentity> {

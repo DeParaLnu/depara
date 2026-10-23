@@ -52,6 +52,9 @@ export const GROUPS = [
 
 export const UNPUBLISHED_GROUP = 'ЮР-41';
 
+// Код групи унікальний лише в межах факультету, тому демо-групу шукаємо за кодом і факультетом разом
+export const facultyOf = (groupCode: string): string => GROUPS.find((g) => g.code === groupCode)!.faculty;
+
 // Літери корпусів не збігаються з тестовими Б і Т із schedule.seed.json, щоб демо не перезаписувало їх
 export const BUILDINGS = [
   { code: 'Г', name: 'Головний корпус', address: 'вул. Університетська, 1' },
