@@ -23,15 +23,16 @@ beforeAll(async () => {
   keys = createLocalJWKSet({ keys: [jwk] });
 });
 
-function sign(claims: Record<string, unknown> = {}, opts: { key?: CryptoKey; exp?: string | number; alg?: string } = {}) {
+// exp: null підписує токен без терміну дії
+function sign(claims: Record<string, unknown> = {}, opts: { key?: CryptoKey; exp?: string | number | null; alg?: string } = {}) {
   const base = { oid: 'oid-1', tid: TENANT, email: 'Student@LNU.edu.ua', name: 'Іван Франко', ...claims };
-  return new SignJWT(base)
+  const jwt = new SignJWT(base)
     .setProtectedHeader({ alg: (opts.alg ?? 'RS256') as 'RS256', kid: 'k1' })
     .setIssuer((claims.iss as string | undefined) ?? ISS)
     .setAudience((claims.aud as string | undefined) ?? CLIENT)
-    .setIssuedAt()
-    .setExpirationTime(opts.exp ?? '5m')
-    .sign(opts.key ?? signingKey);
+    .setIssuedAt();
+  if (opts.exp !== null) jwt.setExpirationTime(opts.exp ?? '5m');
+  return jwt.sign(opts.key ?? signingKey);
 }
 
 describe('verifyMicrosoftToken', () => {
@@ -56,6 +57,10 @@ describe('verifyMicrosoftToken', () => {
 
   it('відхиляє прострочений токен', async () => {
     await expect(verifyMicrosoftToken(await sign({}, { exp: Math.floor(Date.now() / 1000) - 60 }), keys)).rejects.toThrow();
+  });
+
+  it('відхиляє токен без терміну дії (exp), бо він був би вічним', async () => {
+    await expect(verifyMicrosoftToken(await sign({}, { exp: null }), keys)).rejects.toThrow();
   });
 
   it('відхиляє токен для іншого застосунку (aud)', async () => {

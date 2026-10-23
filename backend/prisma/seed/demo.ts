@@ -51,12 +51,17 @@ async function seedSubstitutions(now: Date) {
 
   for (const [i, lesson] of targets.entries()) {
     const kind = kinds[i];
-    const room =
-      kind === 'ROOM_CHANGED'
-        ? await prisma.classroom.findFirst({
-            where: { buildingId: lesson.classroom?.buildingId, id: { not: lesson.classroomId ?? undefined } },
-          })
-        : null;
+    // Нова аудиторія: у тому ж корпусі й вільна в цей день і пару (оригінальна теж зайнята цією парою)
+    let room = null;
+    if (kind === 'ROOM_CHANGED') {
+      const used = await prisma.lesson.findMany({
+        where: { date: lesson.date, pairNumber: lesson.pairNumber, classroomId: { not: null } },
+        select: { classroomId: true },
+      });
+      room = await prisma.classroom.findFirst({
+        where: { buildingId: lesson.classroom?.buildingId, id: { notIn: used.map((u) => u.classroomId!) } },
+      });
+    }
     // Перенесення лише на пару, вільну в цієї групи того дня (пізніші пари в пріоритеті)
     let movedTo: number | undefined;
     if (kind === 'MOVED') {

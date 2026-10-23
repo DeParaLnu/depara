@@ -52,7 +52,10 @@ export async function authRoutes(app: FastifyInstance) {
     // з тією самою поштою отримав би роль, групу й сесію попереднього власника.
     const byOid = await prisma.user.findUnique({ where: { microsoftOid: identity.oid } });
     const byEmail = byOid ? null : await prisma.user.findUnique({ where: { email: identity.email } });
-    if (byEmail?.microsoftOid) return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
+    // (той самий oid тут можливий, якщо паралельний запит власника встиг прив'язати запис між двома пошуками)
+    if (byEmail?.microsoftOid && byEmail.microsoftOid !== identity.oid) {
+      return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
+    }
 
     let user;
     try {
@@ -60,13 +63,16 @@ export async function authRoutes(app: FastifyInstance) {
         user = await prisma.user.update({ where: { id: byOid.id }, data: { email: identity.email, ...adminRole } });
       } else if (byEmail) {
         // Прив'язуємо лише вільний запис і робимо це одним умовним UPDATE: якщо між перевіркою й записом
-        // його встиг зайняти інший oid (два одночасні перші входи), цей вхід отримує 409
+        // його встиг зайняти інший oid (два одночасні перші входи), цей вхід отримує 409. Якщо ж запис
+        // зайняв той самий oid (подвійний тап, повтор запиту клієнта), це той самий власник: успіх.
         const claimed = await prisma.user.updateMany({
           where: { id: byEmail.id, microsoftOid: null },
           data: { microsoftOid: identity.oid, ...adminRole },
         });
-        if (claimed.count === 0) return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
         user = await prisma.user.findUniqueOrThrow({ where: { id: byEmail.id } });
+        if (claimed.count === 0 && user.microsoftOid !== identity.oid) {
+          return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
+        }
       } else {
         user = await prisma.user.create({
           data: {

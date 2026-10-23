@@ -16,7 +16,7 @@ npm run seed                         # тестовий розклад
 npm run dev                          # http://localhost:3000/health
 ```
 
-Після `cp .env.example .env` відкрийте `.env` і додайте свою пошту в `ADMIN_EMAILS`. `MICROSOFT_CLIENT_ID` і `MICROSOFT_TENANT_ID` порожні, доки не зареєстровано застосунок в Entra: локально входьте через демо-консоль або `AUTH_MODE=fake`. Справжні секрети (`JWT_SECRET` на сервері, паролі БД, ключі FCM) у репозиторій не потрапляють: вони живуть у змінних хостингу та GitHub Secrets. Файл `.env` у `.gitignore` і ніколи не комітиться.
+Після `cp .env.example .env` відкрийте `.env` і додайте свою пошту в `ADMIN_EMAILS`. `MICROSOFT_CLIENT_ID` і `MICROSOFT_TENANT_ID` порожні, доки не зареєстровано застосунок в Entra: локально входьте через демо-консоль у режимі `NODE_ENV=test` або запускайте API з `NODE_ENV=test AUTH_MODE=fake` (поза тестовим режимом фейковий вхід вимкнений). Справжні секрети (`JWT_SECRET` на сервері, паролі БД, ключі FCM) у репозиторій не потрапляють: вони живуть у змінних хостингу та GitHub Secrets. Файл `.env` у `.gitignore` і ніколи не комітиться.
 
 Скрипти (`backend/`): `npm run lint`, `npm run typecheck`, `npm run test:e2e`.
 

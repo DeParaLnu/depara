@@ -31,6 +31,8 @@ export async function verifyMicrosoftToken(
   const { payload } = await jwtVerify(idToken, keys, {
     audience: config.microsoftClientId,
     algorithms: ['RS256'],
+    // jose перевіряє exp лише якщо він є: токен без терміну дії був би вічним
+    requiredClaims: ['exp'],
   });
   const oid = str(payload.oid);
   const tid = str(payload.tid);
