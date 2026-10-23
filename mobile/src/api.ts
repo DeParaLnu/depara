@@ -1,4 +1,5 @@
 import { config } from './config';
+import { mockFetch } from './mock/mockFetch';
 import { log } from './lib/logger';
 
 export type Session = {
@@ -75,13 +76,15 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   const started = Date.now();
   let res: Response;
   try {
-    res = await fetch(`${config.apiUrl}${path}`, {
+    const options = {
       ...init,
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-    });
+    };
+    // MOCK=1: запити обслуговує вбудований мок (src/mock), мережа й бекенд не потрібні
+    res = await (config.mock ? mockFetch(path, options) : fetch(`${config.apiUrl}${path}`, options));
   } catch {
     log.warn('api', `${method} ${route}: немає зв’язку`, { code: 'NETWORK_ERROR', ms: Date.now() - started });
     throw new ApiError('NETWORK_ERROR');
