@@ -16,7 +16,7 @@ npm run seed                         # тестовий розклад
 npm run dev                          # http://localhost:3000/health
 ```
 
-Після `cp .env.example .env` відкрийте `.env` і додайте свою пошту в `ADMIN_EMAILS`. `GOOGLE_CLIENT_ID` уже заповнений у шаблоні (це не секрет). Справжні секрети (`JWT_SECRET` на сервері, паролі БД, ключі FCM) у репозиторій не потрапляють: вони живуть у змінних хостингу та GitHub Secrets. Файл `.env` у `.gitignore` і ніколи не комітиться.
+Після `cp .env.example .env` відкрийте `.env` і додайте свою пошту в `ADMIN_EMAILS`. `MICROSOFT_CLIENT_ID` і `MICROSOFT_TENANT_ID` порожні, доки не зареєстровано застосунок в Entra: локально входьте через демо-консоль у режимі `NODE_ENV=test` або запускайте API з `NODE_ENV=test AUTH_MODE=fake` (поза тестовим режимом фейковий вхід вимкнений). Справжні секрети (`JWT_SECRET` на сервері, паролі БД, ключі FCM) у репозиторій не потрапляють: вони живуть у змінних хостингу та GitHub Secrets. Файл `.env` у `.gitignore` і ніколи не комітиться.
 
 Скрипти (`backend/`): `npm run lint`, `npm run typecheck`, `npm run test:e2e`.
 
@@ -26,12 +26,12 @@ npm run dev                          # http://localhost:3000/health
 
 ```bash
 cd backend
-export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=e2e.admin@lnu.edu.ua
+export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=e2e.admin@lnu.edu.ua CORS_ORIGINS=http://localhost:5173
 npm run seed -- --shift-to-current-week
 npm run test:e2e
 ```
 
-`ADMIN_EMAILS` потрібен для тестів адмін-ендпоінтів. `AUTH_MODE=fake` вмикає вхід за фейковим токеном `test:<email>` і працює лише при `NODE_ENV=test`.
+`ADMIN_EMAILS` потрібен для тестів адмін-ендпоінтів, `CORS_ORIGINS` для тестів CORS веб-адмінки. `AUTH_MODE=fake` вмикає вхід за фейковим токеном `test:<email>` і працює лише при `NODE_ENV=test`.
 
 ## Мобільний застосунок: запуск
 
@@ -82,3 +82,14 @@ export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=admin@lnu.edu.ua
 npm run seed -- --shift-to-current-week
 npm run dev        # відкрийте http://localhost:3000/dev
 ```
+
+## Демо-дані для показу
+
+`npm run seed:demo` (з `backend/`, база задається `DATABASE_URL`) наповнює локальну або демо-базу:
+
+- розклад чотирьох факультетів (7 груп) на 5 тижнів навколо сьогодні, з лекціями потоку, підгрупами в лабораторних і чисельником/знаменником;
+- шість демо-акаунтів (`demo.student@lnu.edu.ua`, `demo.headman@lnu.edu.ua`, `demo.newcomer@lnu.edu.ua` без групи та інші) і по одній заміні кожного типу на найближчих парах групи ПМІ-31;
+- групу ЮР-41 без розкладу: екран «Розклад ще не опубліковано».
+
+Повторний запуск оновлює розклад, скидає демо-акаунти й заміни. Скрипт відмовляється працювати при `NODE_ENV=production`, адреси корпусів і прізвища викладачів у ньому вигадані або орієнтовні. Не запускайте його на базі E2E (`depara_test`): для неї є звичайний `npm run seed`. Увійти демо-акаунтом можна в демо-консолі (`/dev`, `AUTH_MODE=fake`).
+

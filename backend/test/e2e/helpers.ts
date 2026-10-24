@@ -11,7 +11,7 @@ export function postJson(path: string, body: unknown): Promise<Response> {
 }
 
 export function loginRaw(email: string, deviceId: string | undefined = DEVICE): Promise<Response> {
-  return postJson('/auth/google', { idToken: `test:${email}`, deviceId });
+  return postJson('/auth/microsoft', { idToken: `test:${email}`, deviceId });
 }
 
 export function authHeaders(token: string) {
@@ -90,4 +90,21 @@ export async function importLesson(admin: string, subject: string, group = 'ТЕ
     groups: [{ code: group, course: 3, faculty: 'ТФ' }],
     lessons: [{ group, date: currentMonday(), pair: 5, subject, type: 'PRACTICE', subgroup: 0 }],
   });
+}
+
+// Origin веб-адмінки, дозволений у CORS_ORIGINS сервера E2E (див. README і ci.yml)
+export const CORS_ORIGIN = 'http://localhost:5173';
+
+// Створює (або знаходить) групу без жодної пари: стан «розклад ще не опубліковано». Повертає id групи.
+export async function emptyGroup(admin: string, code: string): Promise<string> {
+  const res = await send('POST', '/admin/schedule/import', admin, {
+    faculties: [{ name: 'Тестовий факультет', short_name: 'ТФ' }],
+    groups: [{ code, course: 1, faculty: 'ТФ' }],
+    lessons: [{ group: 'ТЕСТ-31', date: currentMonday(), pair: 5, subject: `Службова пара ${code}`, type: 'OTHER' }],
+  });
+  if (res.status !== 200) throw new Error(`Не вдалося створити групу ${code}: ${res.status}`);
+  const groups = (await (await fetch(`${API}/groups`, { headers: authHeaders(admin) })).json()) as { id: string; code: string }[];
+  const group = groups.find((g) => g.code === code);
+  if (!group) throw new Error(`Групу ${code} не знайдено після імпорту`);
+  return group.id;
 }

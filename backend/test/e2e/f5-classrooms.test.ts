@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { API, authHeaders, setupStudent } from './helpers';
 
-type Room = { id: string; number: string; label: string; building: { code: string; name: string } };
+type Room = { id: string; number: string; label: string; building: { code: string; name: string; address: string } };
 
-async function searchRooms(token: string, q?: string): Promise<{ status: number; rooms: Room[] }> {
-  const url = q === undefined ? `${API}/classrooms` : `${API}/classrooms?q=${encodeURIComponent(q)}`;
+async function searchRooms(token: string, q?: string, building?: string): Promise<{ status: number; rooms: Room[] }> {
+  const params = new URLSearchParams();
+  if (q !== undefined) params.set('q', q);
+  if (building !== undefined) params.set('building', building);
+  const url = `${API}/classrooms${params.size ? `?${params}` : ''}`;
   const res = await fetch(url, { headers: authHeaders(token) });
   return { status: res.status, rooms: res.status === 200 ? ((await res.json()) as Room[]) : [] };
 }
@@ -53,8 +56,49 @@ describe('F5: пошук аудиторій', () => {
     for (const r of rooms) {
       expect(r.building.code, r.label).toBeTruthy();
       expect(r.building.name, r.label).toBeTruthy();
+      expect(r.building.address, r.label).toBeTruthy();
       expect(r.label.endsWith(`/${r.building.code}`)).toBe(true);
     }
+  });
+
+  it('фільтр building лишає аудиторії лише цього корпусу, регістр не важливий', async () => {
+    const token = await setupStudent('f5.filter@lnu.edu.ua');
+    const t = await searchRooms(token, undefined, 'Т');
+    expect(t.status).toBe(200);
+    expect(t.rooms.length).toBeGreaterThan(0);
+    expect(t.rooms.every((r) => r.building.code === 'Т')).toBe(true);
+    expect(t.rooms.map((r) => r.label)).toContain('218/Т');
+    expect(t.rooms.map((r) => r.label)).not.toContain('N10/Б');
+
+    // регістр не важливий: «т» дає той самий набір, що й «Т»
+    const lower = await searchRooms(token, undefined, 'т');
+    expect(lower.rooms.map((r) => r.id).sort()).toEqual(t.rooms.map((r) => r.id).sort());
+
+    const b = await searchRooms(token, undefined, 'Б');
+    expect(b.rooms.every((r) => r.building.code === 'Б')).toBe(true);
+    expect(b.rooms.map((r) => r.label)).toContain('N10/Б');
+  });
+
+  it('повторений параметр (?building=Т&building=Б, ?q=a&q=b) дає 400 INVALID_QUERY, а не 500', async () => {
+    const token = await setupStudent('f5.repeated@lnu.edu.ua');
+    for (const query of ['building=%D0%A2&building=%D0%91', 'q=N1&q=N2']) {
+      const res = await fetch(`${API}/classrooms?${query}`, { headers: authHeaders(token) });
+      expect(res.status, query).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('INVALID_QUERY');
+    }
+  });
+
+  it('building і q працюють разом, невідомий корпус дає порожній список', async () => {
+    const token = await setupStudent('f5.combo@lnu.edu.ua');
+    const both = await searchRooms(token, 'N1', 'Б');
+    expect(both.rooms.map((r) => r.label).sort()).toEqual(['N10/Б', 'N11/Б']);
+    expect((await searchRooms(token, 'N1', 'Т')).rooms).toEqual([]);
+
+    const unknown = await searchRooms(token, undefined, 'Я');
+    expect(unknown.status).toBe(200);
+    expect(unknown.rooms).toEqual([]);
+    // порожнє значення фільтра ігнорується
+    expect((await searchRooms(token, undefined, '')).rooms.length).toBeGreaterThan(0);
   });
 
   it('без токена повертає 401', async () => {

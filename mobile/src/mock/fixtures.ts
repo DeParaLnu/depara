@@ -1,4 +1,4 @@
-import type { Group, LessonType, Substitution } from '../api';
+import type { Building, Group, LessonType, Substitution } from '../api';
 
 // Мок-дані для розробки без бекенда і SSO (режим MOCK=1). Розклад взято з тестового тижня
 // backend/prisma/seed/schedule.seed.json (група ТЕСТ-31), а дати не фіксовані: у кожному тижні
@@ -23,6 +23,12 @@ export const MOCK_GROUPS: Group[] = [
 /** Розклад є лише в цієї групи. В інших груп тиждень порожній (так перевіряється порожній стан). */
 export const MOCK_SCHEDULE_GROUP_ID = 'mock-g-test-31';
 
+/** Корпуси з backend/prisma/seed/schedule.seed.json: за літерою з «номер/код корпусу» мок віддає building. */
+export const MOCK_BUILDINGS: Record<string, Building> = {
+  Б: { code: 'Б', name: 'Корпус на Драгоманова', address: 'вул. Драгоманова' },
+  Т: { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Тарнавського' },
+};
+
 export const PAIR_TIMES: Record<number, { start: string; end: string }> = {
   1: { start: '08:30', end: '09:50' },
   2: { start: '10:10', end: '11:30' },
@@ -41,7 +47,7 @@ export type MockLesson = {
   subgroup: number;
   teacher: string | null;
   room: string | null; // «номер/код корпусу»
-  substitution?: Omit<Substitution, 'id'>;
+  substitution?: Omit<Substitution, 'id' | 'newBuilding'>;
 };
 
 export const MOCK_LESSONS: MockLesson[] = [

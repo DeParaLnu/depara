@@ -90,7 +90,7 @@ function renderLogin() {
   $('#nav').innerHTML = ''; $('#who').textContent = '';
   $('#view').innerHTML = `
     <div class="card center"><h2>Увійти через ЛНУ</h2>
-      <div class="hint">Демо-режим: Google замінено на ввід пошти. Лише домен @lnu.edu.ua.</div>
+      <div class="hint">Демо-режим: вхід через Microsoft замінено на ввід пошти. Лише домен @lnu.edu.ua.</div>
       <input id="email" placeholder="name@lnu.edu.ua" value="student1@lnu.edu.ua">
       <button class="btn" id="go">Увійти</button>
       <div class="hint">Швидкий вибір:</div>
@@ -102,7 +102,7 @@ function renderLogin() {
     </div>`;
   document.querySelectorAll('[data-e]').forEach((b) => (b.onclick = () => ($('#email').value = b.dataset.e)));
   $('#go').onclick = async () => {
-    const r = await api('POST', '/auth/google', { idToken: 'test:' + $('#email').value.trim(), deviceId: DEVICE });
+    const r = await api('POST', '/auth/microsoft', { idToken: 'test:' + $('#email').value.trim(), deviceId: DEVICE });
     if (!r.ok) return r.data?.error === 'NON_LNU_EMAIL' ? toast('Це не пошта ЛНУ. Оберіть інший акаунт (NON_LNU_EMAIL)') : fail(r);
     S.token = r.data.accessToken; S.refresh = r.data.refreshToken; save();
     await boot();
@@ -142,7 +142,9 @@ async function renderSchedule() {
   const now = new Date(); const today = iso(now); const hm = now.toTimeString().slice(0, 5);
   $('#view').innerHTML = `
     <div class="row"><button class="btn ghost small" id="prev">← тиждень</button><b>${esc(r.data.weekStart)}</b><button class="btn ghost small" id="next">тиждень →</button></div>
-    ${days.length ? '' : '<div class="card center">На цьому тижні пар немає.<div class="hint">Для демо: npm run seed -- --shift-to-current-week</div></div>'}
+    ${days.length ? '' : r.data.published
+      ? '<div class="card center">На цьому тижні пар немає.</div>'
+      : '<div class="card center">Розклад ще не опубліковано.<div class="hint">Для демо: npm run seed:demo</div></div>'}
     ${days.map((d) => `<div class="day">${new Date(d + 'T00:00:00Z').toLocaleDateString('uk-UA', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })}</div>${byDay[d].map((l) => lessonCard(l, d === today && l.start <= hm && hm <= l.end)).join('')}`).join('')}`;
   $('#prev').onclick = () => { S.date = addDays(r.data.weekStart, -7); renderSchedule(); };
   $('#next').onclick = () => { S.date = addDays(r.data.weekStart, 7); renderSchedule(); };
@@ -203,7 +205,7 @@ function openSubForm(lessonId) {
 function renderRooms() {
   $('#view').innerHTML = `<input id="q" placeholder="Номер аудиторії, напр. 218"><div id="res"></div>`;
   const run = async () => { const r = await api('GET', '/classrooms?q=' + encodeURIComponent($('#q').value)); if (!r.ok) return fail(r);
-    $('#res').innerHTML = r.data.map((c) => `<div class="card"><b>${esc(c.label)}</b><div class="meta">${esc(c.building.name)}</div>
+    $('#res').innerHTML = r.data.map((c) => `<div class="card"><b>${esc(c.label)}</b><div class="meta">${esc(c.building.name)}, ${esc(c.building.address)}</div>
       <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.building.name + ' Львів')}" target="_blank">Прокласти маршрут ↗</a></div>`).join('') || '<div class="card center">Нічого не знайдено</div>'; };
   $('#q').oninput = run; run();
 }

@@ -5,6 +5,12 @@ import { mondayOf } from '../lib/dates';
 import { isIsoDate } from '../lib/validation';
 import { requireAuth } from '../plugins/auth';
 
+type RoomWithBuilding = { building: { code: string; name: string; address: string } } | null;
+
+// Корпус аудиторії для екрана деталей пари (назва, адреса, маршрут)
+const buildingOf = (room: RoomWithBuilding) =>
+  room ? { code: room.building.code, name: room.building.name, address: room.building.address } : null;
+
 // F3: розклад на тиждень з ETag
 export async function scheduleRoutes(app: FastifyInstance) {
   app.get('/schedule/week', { preHandler: requireAuth }, async (req, reply) => {
@@ -35,8 +41,13 @@ export async function scheduleRoutes(app: FastifyInstance) {
       orderBy: [{ date: 'asc' }, { pairNumber: 'asc' }, { subgroup: 'asc' }],
     });
 
+    // Порожній тиждень і «деканат ще не опублікував» різні стани: розклад опубліковано, якщо в групи є хоч одна пара.
+    // Окрема перевірка потрібна лише для порожнього тижня.
+    const published = lessons.length > 0 || (await prisma.lesson.count({ where: { groupId: user.groupId }, take: 1 })) > 0;
+
     const body = {
       weekStart: start.toISOString().slice(0, 10),
+      published,
       lessons: lessons.map((l) => ({
         id: l.id,
         date: l.date.toISOString().slice(0, 10),
@@ -49,6 +60,7 @@ export async function scheduleRoutes(app: FastifyInstance) {
         subgroup: l.subgroup,
         teacher: l.teacher?.fullName ?? null,
         room: l.classroom ? `${l.classroom.number}/${l.classroom.building.code}` : null,
+        building: buildingOf(l.classroom),
         substitution: l.substitution
           ? {
               id: l.substitution.id,
@@ -58,6 +70,7 @@ export async function scheduleRoutes(app: FastifyInstance) {
               newRoom: l.substitution.newClassroom
                 ? `${l.substitution.newClassroom.number}/${l.substitution.newClassroom.building.code}`
                 : null,
+              newBuilding: buildingOf(l.substitution.newClassroom),
               newDate: l.substitution.newDate?.toISOString().slice(0, 10) ?? null,
               newPairNumber: l.substitution.newPairNumber,
             }
