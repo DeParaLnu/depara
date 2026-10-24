@@ -30,3 +30,16 @@ export function useWeek(date: string) {
   const token = useToken();
   return useQuery({ queryKey: ['week', date], queryFn: () => api.week(token!, date), enabled: !!token });
 }
+
+/** Підпис «ТЕСТ-31 · підгрупа 1» і ознака старости для заголовків екранів розкладу. */
+export function useGroupLabel() {
+  const me = useMe();
+  const groups = useGroups();
+  const group = groups.data?.find((g) => g.id === me.data?.groupId);
+  const subgroup = me.data ? (me.data.subgroup === 0 ? 'усі підгрупи' : `підгрупа ${me.data.subgroup}`) : '';
+  return {
+    subtitle: [group?.code, subgroup].filter(Boolean).join(' · '),
+    isHeadman: me.data?.role === 'HEADMAN',
+    refetchMe: me.refetch,
+  };
+}
