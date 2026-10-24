@@ -19,6 +19,8 @@ async function startSession(userId: string, deviceId: string) {
   };
 }
 
+const isUniqueViolation = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+
 function publicUser(u: { id: string; email: string; role: string; groupId: string | null }) {
   return { id: u.id, email: u.email, role: u.role, groupId: u.groupId };
 }
@@ -74,20 +76,27 @@ export async function authRoutes(app: FastifyInstance) {
           return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
         }
       } else {
-        user = await prisma.user.create({
-          data: {
-            email: identity.email,
-            microsoftOid: identity.oid,
-            fullName: identity.name ?? identity.email.split('@')[0],
-            role: isBootstrapAdmin ? 'ADMIN' : 'STUDENT',
-          },
-        });
+        try {
+          user = await prisma.user.create({
+            data: {
+              email: identity.email,
+              microsoftOid: identity.oid,
+              fullName: identity.name ?? identity.email.split('@')[0],
+              role: isBootstrapAdmin ? 'ADMIN' : 'STUDENT',
+            },
+          });
+        } catch (e) {
+          // Паралельний перший вхід того самого oid (подвійний тап, повтор) уже створив запис: це той самий
+          // власник, беремо його. Якщо запису з цим oid нема, пошту зайняв хтось інший: далі це 409.
+          if (!isUniqueViolation(e)) throw e;
+          const winner = await prisma.user.findUnique({ where: { microsoftOid: identity.oid } });
+          if (!winner) throw e;
+          user = winner;
+        }
       }
     } catch (e) {
-      // Нова пошта вже належить іншому запису (або гонка двох створень): не вгадуємо, хто з них хто
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
-      }
+      // Нова пошта вже належить іншому запису: не вгадуємо, хто з них хто
+      if (isUniqueViolation(e)) return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
       throw e;
     }
 

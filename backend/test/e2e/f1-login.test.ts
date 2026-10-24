@@ -217,6 +217,16 @@ describe('F1: прив\'язка акаунта до oid', () => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: legacy.id } })).microsoftOid).toBe(oid);
   });
 
+  it('два одночасні перші входи нового користувача з тим самим oid: усі успішні, акаунт один', async () => {
+    const email = `f1.new-double.${run}@lnu.edu.ua`;
+    const oid = `new-double-oid-${run}`;
+    const results = await Promise.all([asOid(email, oid), asOid(email, oid), asOid(email, oid)]);
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200]);
+    const ids = new Set(await Promise.all(results.map(async (r) => ((await r.json()) as LoginBody).user.id)));
+    expect(ids.size).toBe(1);
+    expect(await prisma.user.count({ where: { email } })).toBe(1);
+  });
+
   it('два одночасні перші входи з різними oid в один вільний запис: прив\'язується лише один', async () => {
     const email = `f1.race.${run}@lnu.edu.ua`;
     await prisma.user.create({ data: { email, fullName: 'Race', microsoftOid: null } });
