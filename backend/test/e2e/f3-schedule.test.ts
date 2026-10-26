@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API, authHeaders, currentMonday, loginRaw, setupStudent } from './helpers';
+import { adminToken, API, authHeaders, currentMonday, emptyGroup, loginRaw, send, setupStudent } from './helpers';
 
 type Lesson = { date: string; pairNumber: number; subgroup: number; room: string | null; subject: string };
 
@@ -81,5 +81,48 @@ describe('F3: розклад на тиждень', () => {
     const lessons = await week(await setupStudent('f3.suball@lnu.edu.ua', 0));
     const mondayPair2 = lessons.filter((l) => l.date === currentMonday() && l.pairNumber === 2);
     expect(mondayPair2.map((l) => l.room).sort()).toEqual(['129а/Т', '406/Т']);
+  });
+
+  // Критерій: «порожній тиждень» і «розклад не опубліковано» розрізняються
+  it('published: true для групи з розкладом, також на порожньому тижні', async () => {
+    const token = await setupStudent('f3.published@lnu.edu.ua');
+    const now = (await (await fetch(`${API}/schedule/week`, { headers: authHeaders(token) })).json()) as {
+      published: boolean;
+      lessons: unknown[];
+    };
+    expect(now.published).toBe(true);
+    expect(now.lessons.length).toBeGreaterThan(0);
+
+    const past = (await (await fetch(`${API}/schedule/week?date=2020-01-06`, { headers: authHeaders(token) })).json()) as {
+      published: boolean;
+      lessons: unknown[];
+    };
+    expect(past.lessons).toEqual([]);
+    expect(past.published).toBe(true);
+  });
+
+  it('published: false для групи, якій деканат ще нічого не завантажив', async () => {
+    const admin = await adminToken();
+    const groupId = await emptyGroup(admin, 'ПУСТО-11');
+    const token = await setupStudent('f3.unpublished@lnu.edu.ua');
+    expect((await send('PATCH', '/me', token, { groupId })).status).toBe(200);
+
+    const res = await fetch(`${API}/schedule/week`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ published: false, lessons: [] });
+  });
+
+  // Критерій: на екрані деталей видно корпус і адресу
+  it('пара з аудиторією містить корпус з адресою, пара без аудиторії дає building: null', async () => {
+    const lessons = (await (
+      await fetch(`${API}/schedule/week`, { headers: authHeaders(await setupStudent('f3.building@lnu.edu.ua')) })
+    ).json()) as { lessons: (Lesson & { building: { code: string; name: string; address: string } | null })[] };
+    const withRoom = lessons.lessons.filter((l) => l.room);
+    expect(withRoom.length).toBeGreaterThan(0);
+    for (const l of withRoom) {
+      expect(l.building?.address, l.room!).toBeTruthy();
+      expect(l.room!.endsWith(`/${l.building!.code}`)).toBe(true);
+    }
+    for (const l of lessons.lessons.filter((x) => !x.room)) expect(l.building).toBeNull();
   });
 });

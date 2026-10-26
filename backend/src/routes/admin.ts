@@ -4,7 +4,7 @@ import { prisma } from '../db';
 import { invalidateGroupSchedule } from '../lib/cache';
 import { csvToLessons } from '../lib/csv';
 import { ImportError, importSchedule, validateImport } from '../lib/scheduleImport';
-import { isUuid } from '../lib/validation';
+import { isSubgroup, isUuid } from '../lib/validation';
 import { requireRole } from '../plugins/roles';
 
 const ROLES = Object.values(Role) as string[];
@@ -45,6 +45,26 @@ export async function adminRoutes(app: FastifyInstance) {
 
     const user = await prisma.user.update({ where: { id }, data: { role: role as Role } });
     return { id: user.id, email: user.email, role: user.role };
+  });
+
+  // Призначити групу (і підгрупу) користувачу: так само, як PATCH /me, але для іншої людини.
+  // Без підгрупи ставиться 0 (бачити всі), бо підгрупа старої групи для нової не має сенсу.
+  app.patch('/admin/users/:id/group', { preHandler: requireRole('ADMIN') }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { groupId, subgroup } = (req.body ?? {}) as { groupId?: unknown; subgroup?: unknown };
+
+    if (!isUuid(id)) return reply.code(400).send({ error: 'INVALID_ID' });
+    if (!groupId) return reply.code(400).send({ error: 'GROUP_REQUIRED' });
+    if (!isUuid(groupId)) return reply.code(400).send({ error: 'INVALID_GROUP_ID' });
+    if (subgroup !== undefined && !isSubgroup(subgroup)) return reply.code(400).send({ error: 'INVALID_SUBGROUP' });
+
+    if (!(await prisma.user.findUnique({ where: { id } }))) return reply.code(404).send({ error: 'USER_NOT_FOUND' });
+    if (!(await prisma.studyGroup.findUnique({ where: { id: groupId } }))) {
+      return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
+    }
+
+    const user = await prisma.user.update({ where: { id }, data: { groupId, subgroup: subgroup ?? 0 } });
+    return { id: user.id, email: user.email, groupId: user.groupId, subgroup: user.subgroup };
   });
 
   // Імпорт розкладу: JSON (Content-Type: application/json) або CSV (text/csv)

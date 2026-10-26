@@ -26,7 +26,7 @@ export const SEED = {
  * тому сценарії не залежать від порядку запуску.
  */
 export async function loginAsStudent(): Promise<void> {
-  await byTestId('login-google-button').click();
+  await byTestId('login-button').click();
 
   const faculty = byTestId('faculty-list');
   const tabs = byTestId('tab-today');

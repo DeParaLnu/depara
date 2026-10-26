@@ -1,6 +1,6 @@
-import type { Lesson, Me, Session, WeekSchedule } from '../api';
+import type { Building, Lesson, Me, Session, WeekSchedule } from '../api';
 import { addDays, fromIsoDate, mondayOf, toIsoDate } from '../lib/date';
-import { MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MOCK_SCHEDULE_GROUP_ID, PAIR_TIMES } from './fixtures';
+import { MOCK_BUILDINGS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MOCK_SCHEDULE_GROUP_ID, PAIR_TIMES } from './fixtures';
 
 // Підміна fetch для режиму MOCK=1. Повертає справжній Response, тож api.ts проходить ті самі
 // шляхи (логування, коди помилок), що й з реальним сервером. Стан живе в памʼяті до перезапуску.
@@ -17,10 +17,15 @@ const reply = (status: number, body: unknown) =>
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+// «218/Т» -> корпус з довідника мока (як building у відповіді бекенда)
+const buildingOf = (room: string | null): Building | null =>
+  room ? (MOCK_BUILDINGS[room.slice(room.lastIndexOf('/') + 1)] ?? null) : null;
+
 function weekOf(dateParam: string | null): WeekSchedule {
   const monday = mondayOf(dateParam ? fromIsoDate(dateParam) : new Date());
   const weekStart = toIsoDate(monday);
-  if (state.groupId !== MOCK_SCHEDULE_GROUP_ID) return { weekStart, lessons: [] };
+  // Як у бекенді: група без жодної пари = «розклад ще не опубліковано»
+  if (state.groupId !== MOCK_SCHEDULE_GROUP_ID) return { weekStart, published: false, lessons: [] };
 
   const lessons: Lesson[] = MOCK_LESSONS.filter((l) => state.subgroup === 0 || [0, state.subgroup].includes(l.subgroup))
     .sort((a, b) => a.day - b.day || a.pair - b.pair || a.subgroup - b.subgroup)
@@ -36,9 +41,12 @@ function weekOf(dateParam: string | null): WeekSchedule {
       subgroup: l.subgroup,
       teacher: l.teacher,
       room: l.room,
-      substitution: l.substitution ? { id: `mock-sub-${weekStart}-${i}`, ...l.substitution } : null,
+      building: buildingOf(l.room),
+      substitution: l.substitution
+        ? { id: `mock-sub-${weekStart}-${i}`, ...l.substitution, newBuilding: buildingOf(l.substitution.newRoom) }
+        : null,
     }));
-  return { weekStart, lessons };
+  return { weekStart, published: true, lessons };
 }
 
 export async function mockFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -48,7 +56,7 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
   const authorization = (init.headers as Record<string, string> | undefined)?.Authorization;
   const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : {};
 
-  if (method === 'POST' && route === '/auth/google') {
+  if (method === 'POST' && route === '/auth/microsoft') {
     state = { groupId: null, subgroup: 0 };
     const session: Session = { accessToken: 'mock-access', refreshToken: 'mock-refresh', needsOnboarding: true };
     return reply(200, session);

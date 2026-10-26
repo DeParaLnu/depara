@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import cors from '@fastify/cors';
 import Fastify, { type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { config } from './config';
 import { adminRoutes } from './routes/admin';
@@ -53,6 +54,18 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
     if (body === '') return done(null, undefined);
     parseJson(req, body as string, done);
   });
+
+  // CORS лише для веб-адмінки (CORS_ORIGINS). Авторизація йде через Bearer-заголовок, а не cookie,
+  // тому credentials не потрібні. Чужі origin просто не отримують Access-Control-Allow-Origin.
+  if (config.corsOrigins.length > 0) {
+    app.register(cors, {
+      origin: config.corsOrigins,
+      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['authorization', 'content-type', 'if-none-match', 'x-request-id'],
+      exposedHeaders: ['etag', 'x-request-id'],
+      maxAge: 600,
+    });
+  }
 
   app.get('/health', async () => ({ status: 'ok' }));
 

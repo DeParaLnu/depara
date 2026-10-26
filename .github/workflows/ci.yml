@@ -62,6 +62,7 @@ jobs:
       NODE_ENV: test
       AUTH_MODE: fake
       ADMIN_EMAILS: e2e.admin@lnu.edu.ua
+      CORS_ORIGINS: http://localhost:5173
       JWT_SECRET: ci-only-secret
     steps:
       - uses: actions/checkout@v4

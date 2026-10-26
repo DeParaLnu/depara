@@ -10,10 +10,17 @@ function resolveJwtSecret(): string {
 
 export const config = {
   jwtSecret: resolveJwtSecret(),
-  allowedEmailDomain: 'lnu.edu.ua',
+  allowedEmailDomain: (process.env.ALLOWED_EMAIL_DOMAIN ?? 'lnu.edu.ua').trim().toLowerCase(),
   accessTokenTtl: '15m',
   refreshTokenTtlSeconds: 30 * 24 * 60 * 60,
-  googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
+  // Вхід через Microsoft Entra. Поки тенант не зареєстровано, обидві змінні порожні і /auth/microsoft відповідає 503.
+  microsoftClientId: process.env.MICROSOFT_CLIENT_ID ?? '', // aud ID-токена (Application/Client ID)
+  microsoftTenantId: process.env.MICROSOFT_TENANT_ID ?? '', // tid організації, з якої пускаємо
+  // Origin веб-адмінки (через кому). Порожньо = CORS вимкнений. Мобільному застосунку CORS не потрібен.
+  corsOrigins: (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean),
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
   // Пошти, які отримують роль ADMIN при вході (перший адмін; далі ролі міняє PATCH /admin/users/:id/role).
   adminEmails: (process.env.ADMIN_EMAILS ?? '')

@@ -2,7 +2,7 @@
 # Smoke-перевірка проду після деплою: API живий, а все тестове в ньому вимкнене.
 #   1. GET  /health          -> 200 {"status":"ok"}
 #   2. GET  /dev             -> 404 (демо-консоль існує лише при AUTH_MODE=fake)
-#   3. POST /auth/google з фейковим токеном test:<email> -> НЕ 200 (очікуємо 401 або 503;
+#   3. POST /auth/microsoft з фейковим токеном test:<email> -> НЕ 200 (очікуємо 401 або 503;
 #      404 теж гаразд, коли після переходу на Microsoft цей маршрут приберуть)
 #      Якщо тут 200, на проді увімкнено NODE_ENV=test і AUTH_MODE=fake: будь-хто увійде будь-ким.
 #   4. Відповідь містить x-request-id (Caddy і API зіставляють логи)
@@ -42,11 +42,11 @@ if [ "$code" = 404 ]; then ok "/dev 404"; else bad "/dev відповів $code,
 
 # 3. Фейковий вхід
 code="$(status -X POST -H 'content-type: application/json' \
-  -d '{"idToken":"test:smoke@lnu.edu.ua","deviceId":"smoke-check"}' "$base/auth/google" || true)"
+  -d '{"idToken":"test:smoke@lnu.edu.ua","deviceId":"smoke-check"}' "$base/auth/microsoft" || true)"
 case "$code" in
   401 | 404 | 503) ok "фейковий вхід відхилено ($code)" ;;
   200) bad "фейковий вхід ПРАЦЮЄ на проді (200): негайно приберіть NODE_ENV=test / AUTH_MODE=fake" ;;
-  *) bad "POST /auth/google відповів $code, очікували 401 або 503" ;;
+  *) bad "POST /auth/microsoft відповів $code, очікували 401 або 503" ;;
 esac
 
 if [ "$fail" = 0 ]; then echo "Smoke пройдено: $base"; else echo "Smoke НЕ пройдено: $base" >&2; fi

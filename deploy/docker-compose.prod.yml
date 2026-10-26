@@ -45,7 +45,10 @@ services:
       DIRECT_URL: postgresql://depara:${POSTGRES_PASSWORD}@postgres:5432/depara
       REDIS_URL: redis://:${REDIS_PASSWORD:?задайте REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${JWT_SECRET:?задайте JWT_SECRET}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-lnu.edu.ua}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     depends_on:
       postgres:
