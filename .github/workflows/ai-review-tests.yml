@@ -1,0 +1,19 @@
+name: ai-review-tests
+
+# Тести ШІ-ревʼюера (на підставних API, без ключів). Запускаються лише коли змінюється tools/ai-review.
+on:
+  pull_request:
+    paths: ['tools/ai-review/**', '.github/workflows/ai-review*.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s tools/ai-review -v
