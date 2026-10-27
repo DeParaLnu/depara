@@ -70,18 +70,19 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
         </Pressable>
       </View>
 
-      <View style={styles.strip}>
-        <DayStrip days={days} selected={selected} today={now} markedDates={markedDates} onSelect={onSelect} />
-      </View>
-
       {state.kind === 'ready' && state.offline && (
         <View style={styles.offline} accessibilityRole="alert">
-          <Ionicons name="cloud-offline-outline" size={18} color={colors.textMuted} />
+          <Ionicons name="cloud-offline-outline" size={20} color={colors.textSecondary} />
           <Text style={styles.offlineText}>
-            Офлайн. Показано збережений розклад{state.updatedAt ? `, оновлено ${clock(state.updatedAt)}` : ''}
+            <Text style={styles.offlineBold}>Офлайн.</Text> Показано збережений розклад
+            {state.updatedAt ? `, оновлено ${clock(state.updatedAt)}` : ''}
           </Text>
         </View>
       )}
+
+      <View style={styles.strip}>
+        <DayStrip days={days} selected={selected} today={now} markedDates={markedDates} onSelect={onSelect} />
+      </View>
 
       {state.kind === 'loading' ? (
         <View style={styles.center}>
@@ -117,34 +118,37 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 16, gap: 12 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 21, gap: 12 },
   headerText: { flex: 1, gap: 4 },
-  title: { fontSize: 22, fontWeight: '800', color: colors.text },
+  title: { fontSize: 22, lineHeight: 27, fontWeight: '700', color: colors.text },
   subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  subtitle: { fontSize: 13, color: colors.textMuted },
-  roleBadge: { backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
-  roleBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  subtitle: { fontSize: 14, lineHeight: 19, color: colors.textMuted },
+  roleBadge: { height: 22, justifyContent: 'center', backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 9 },
+  roleBadgeText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '700' },
   refresh: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 41,
+    borderRadius: 14,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
   refreshPressed: { backgroundColor: colors.tagBlue },
-  strip: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
+  strip: { paddingHorizontal: 21, paddingTop: 16, paddingBottom: 14 },
   offline: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 10,
-    borderRadius: 12,
+    gap: 10,
+    marginHorizontal: 21,
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
     backgroundColor: colors.chip,
   },
-  offlineText: { flex: 1, fontSize: 12, color: colors.textMuted },
+  offlineText: { flex: 1, fontSize: 14, lineHeight: 18, color: colors.textSecondary },
+  offlineBold: { fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  list: { paddingHorizontal: 16, paddingBottom: 24, gap: 10, flexGrow: 1 },
+  list: { paddingHorizontal: 21, paddingBottom: 24, gap: 11, flexGrow: 1 },
 });

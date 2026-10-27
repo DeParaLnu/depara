@@ -16,7 +16,7 @@ export function StateView({ icon, title, description, actionLabel, onAction }: P
   return (
     <View style={styles.container}>
       <View style={styles.iconWrap}>
-        <Ionicons name={icon} size={32} color={colors.primary} />
+        <Ionicons name={icon} size={48} color={colors.primary} />
       </View>
       <Text style={styles.title} accessibilityRole="header">
         {title}
@@ -39,19 +39,19 @@ export function StateView({ icon, title, description, actionLabel, onAction }: P
 const styles = StyleSheet.create({
   container: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingVertical: 48, gap: 10 },
   iconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.tagBlue,
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    backgroundColor: '#EEF5FF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: 18,
   },
-  title: { fontSize: 18, fontWeight: '700', color: colors.text, textAlign: 'center' },
-  description: { fontSize: 14, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
+  title: { fontSize: 22, lineHeight: 28, fontWeight: '700', color: colors.text, textAlign: 'center' },
+  description: { fontSize: 16, color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
   button: {
-    marginTop: 8,
-    minHeight: 48,
+    marginTop: 12,
+    minHeight: 56,
     paddingHorizontal: 24,
     borderRadius: 14,
     backgroundColor: colors.primary,

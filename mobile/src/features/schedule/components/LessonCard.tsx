@@ -73,8 +73,8 @@ export function LessonCard({ lesson, status }: Props) {
 
       <View style={styles.tags}>
         {type && (
-          <View style={styles.tag}>
-            <Text style={styles.tagText}>{type}</Text>
+          <View style={[styles.tag, lesson.type === 'LECTURE' && styles.tagLecture]}>
+            <Text style={[styles.tagText, lesson.type === 'LECTURE' && styles.tagLectureText]}>{type}</Text>
           </View>
         )}
         {audience && (
@@ -84,7 +84,7 @@ export function LessonCard({ lesson, status }: Props) {
         )}
         {oldRoom && !roomChanged && !cancelled && (
           <View style={styles.room}>
-            <Ionicons name="location-outline" size={14} color={colors.textMuted} />
+            <Ionicons name="location-outline" size={15} color={colors.textSecondary} />
             <Text style={styles.roomText}>{oldRoom}</Text>
           </View>
         )}
@@ -120,45 +120,48 @@ export function LessonCard({ lesson, status }: Props) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     gap: 6,
     overflow: 'hidden',
   },
-  cardNow: { backgroundColor: colors.surfaceSoft, borderColor: colors.accent, borderWidth: 1.5 },
+  cardNow: { backgroundColor: colors.surfaceSoft, borderColor: colors.accent, borderWidth: 1.8 },
   cardChanged: { backgroundColor: colors.warningBg, borderColor: colors.warningBadge, paddingLeft: 18 },
   cardCancelled: { backgroundColor: colors.chip },
   cardDone: { opacity: 0.6 },
   stripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: colors.warning },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  time: { fontSize: 13, color: colors.textMuted, fontVariant: ['tabular-nums'] },
-  subject: { fontSize: 16, fontWeight: '700', color: colors.text },
+  time: { fontSize: 13, lineHeight: 18, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
+  subject: { fontSize: 16, lineHeight: 20, fontWeight: '700', color: colors.text },
   subjectCancelled: { color: colors.textMuted, textDecorationLine: 'line-through' },
-  meta: { fontSize: 13, color: colors.textMuted },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 2 },
-  tag: { backgroundColor: colors.tagBlue, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  tagText: { fontSize: 12, fontWeight: '600', color: colors.tagBlueText },
+  meta: { fontSize: 13, lineHeight: 18, color: colors.textMuted },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4 },
+  tag: { height: 22, justifyContent: 'center', backgroundColor: colors.tagBlue, borderRadius: 12, paddingHorizontal: 9 },
+  tagText: { fontSize: 12, lineHeight: 16, fontWeight: '700', color: colors.tagBlueText },
+  tagLecture: { backgroundColor: colors.primary },
+  tagLectureText: { color: '#FFFFFF' },
   tagNeutral: { backgroundColor: colors.chip },
-  tagNeutralText: { color: colors.textMuted },
-  room: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  roomText: { fontSize: 12, color: colors.textMuted },
-  roomOld: { fontSize: 12, color: colors.textMuted, textDecorationLine: 'line-through' },
-  roomNew: { fontSize: 12, fontWeight: '700', color: colors.text },
+  tagNeutralText: { color: colors.textSecondary },
+  room: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  roomText: { fontSize: 13, lineHeight: 18, color: colors.textSecondary },
+  roomOld: { fontSize: 13, color: colors.textMuted, textDecorationLine: 'line-through' },
+  roomNew: { fontSize: 13, fontWeight: '700', color: colors.text },
   note: { fontSize: 12, color: colors.warningText, marginTop: 2 },
-  badge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  badgeText: { fontSize: 11, fontWeight: '700' },
+  badge: { height: 22, justifyContent: 'center', borderRadius: 12, paddingHorizontal: 9 },
+  badgeText: { fontSize: 12, lineHeight: 16, fontWeight: '700' },
   badgeNow: { backgroundColor: colors.accent },
   badgeNowText: { color: '#FFFFFF' },
   badgeNext: { backgroundColor: colors.chip },
-  badgeNextText: { color: colors.textMuted },
+  badgeNextText: { color: colors.textSecondary },
   badgeWarning: { backgroundColor: colors.warningBadge },
   badgeWarningText: { color: colors.warningText },
   badgeDanger: { backgroundColor: colors.dangerBg },
   badgeDangerText: { color: colors.danger },
-  progressBlock: { marginTop: 6, gap: 4 },
-  progressTrack: { height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: 'hidden' },
-  progressFill: { height: 4, backgroundColor: colors.accent },
-  progressText: { fontSize: 12, color: colors.textMuted },
+  progressBlock: { marginTop: 6, gap: 8 },
+  progressTrack: { height: 5, borderRadius: 3, backgroundColor: colors.surfaceTint, overflow: 'hidden' },
+  progressFill: { height: 5, backgroundColor: colors.accent },
+  progressText: { fontSize: 13, lineHeight: 18, color: colors.textMuted },
 });

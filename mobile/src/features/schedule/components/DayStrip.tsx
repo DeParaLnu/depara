@@ -40,20 +40,20 @@ export function DayStrip({ days, selected, today, markedDates, onSelect }: Props
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 6 },
+  row: { flexDirection: 'row', gap: 4 },
   chip: {
     flex: 1,
-    minHeight: 56,
-    borderRadius: 12,
+    height: 63,
+    borderRadius: 14,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
+    gap: 4,
   },
   chipSelected: { backgroundColor: colors.primary },
   chipToday: { borderWidth: 1.5, borderColor: colors.primary },
-  weekday: { fontSize: 11, color: colors.textMuted },
-  date: { fontSize: 15, fontWeight: '700', color: colors.text },
+  weekday: { fontSize: 13, lineHeight: 16, color: colors.textWeekday },
+  date: { fontSize: 17, lineHeight: 20, fontWeight: '700', color: colors.text },
   textSelected: { color: '#FFFFFF' },
-  dot: { position: 'absolute', top: 6, right: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning },
+  dot: { position: 'absolute', top: 6, right: 12, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.warning },
 });

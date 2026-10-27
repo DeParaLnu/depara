@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -45,6 +46,7 @@ export function OnboardingScreen() {
   const [faculty, setFaculty] = useState<string | null>(null);
   const [groupId, setGroupId] = useState<string | null>(null);
   const [subgroup, setSubgroup] = useState<number>(0);
+  const [course, setCourse] = useState<number | null>(null);
 
   const faculties = useMemo(() => toFaculties(groups.data ?? []), [groups.data]);
   const facultyGroups = useMemo(
@@ -53,6 +55,12 @@ export function OnboardingScreen() {
         .filter((g) => g.faculty === faculty)
         .sort((a, b) => a.course - b.course || a.code.localeCompare(b.code, 'uk')),
     [groups.data, faculty],
+  );
+  const courses = useMemo(() => [...new Set(facultyGroups.map((g) => g.course))], [facultyGroups]);
+  const activeCourse = course ?? courses[0] ?? null;
+  const courseGroups = useMemo(
+    () => facultyGroups.filter((g) => g.course === activeCourse),
+    [facultyGroups, activeCourse],
   );
 
   const save = useMutation({
@@ -70,25 +78,30 @@ export function OnboardingScreen() {
   const goBack = () => {
     setFaculty(null);
     setGroupId(null);
+    setCourse(null);
     save.reset();
   };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
-      {faculty && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Назад до вибору факультету"
-          onPress={goBack}
-          hitSlop={12}
-          style={styles.back}
-        >
-          <Text style={styles.backText}>‹ Факультети</Text>
-        </Pressable>
-      )}
-      <Text style={styles.title} accessibilityRole="header">
-        {faculty ? 'Оберіть групу' : 'Оберіть факультет'}
-      </Text>
+      <View style={styles.topBar}>
+        {faculty ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Назад до вибору факультету"
+            onPress={goBack}
+            hitSlop={12}
+            style={styles.back}
+          >
+            <Ionicons name="chevron-back" size={28} color={colors.primary} />
+          </Pressable>
+        ) : (
+          <View style={styles.back} />
+        )}
+        <Text style={styles.title} accessibilityRole="header">
+          {faculty ? 'Оберіть групу' : 'Ваш факультет'}
+        </Text>
+      </View>
       <Text style={styles.subtitle}>
         {faculty ? faculty : 'Далі оберете свою групу, щоб бачити розклад'}
       </Text>
@@ -124,19 +137,48 @@ export function OnboardingScreen() {
               accessibilityRole="button"
               accessibilityLabel={item.name}
               onPress={() => setFaculty(item.name)}
-              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+              style={({ pressed }) => [styles.option, pressed && styles.optionSelected]}
             >
-              <Text style={styles.cardTitle}>{item.name}</Text>
-              <Text style={styles.cardMeta}>{groupsLabel(item.groups)}</Text>
+              <View style={styles.radio} />
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>{item.name}</Text>
+                <Text style={styles.optionMeta}>{groupsLabel(item.groups)}</Text>
+              </View>
             </Pressable>
           )}
           ListEmptyComponent={groups.isError ? null : <Text style={styles.subtitle}>Факультетів поки немає</Text>}
         />
       ) : (
         <>
+          {courses.length > 1 && (
+            <View style={styles.block}>
+              <Text style={styles.sectionLabel}>Курс</Text>
+              <View style={styles.segments} accessibilityRole="radiogroup">
+                {courses.map((c) => {
+                  const selected = c === activeCourse;
+                  return (
+                    <Pressable
+                      key={c}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`${c} курс`}
+                      onPress={() => {
+                        setCourse(c);
+                        setGroupId(null);
+                      }}
+                      style={[styles.segment, selected && styles.segmentSelected]}
+                    >
+                      <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{c}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+          <Text style={[styles.sectionLabel, styles.block]}>Група</Text>
           <FlatList
             testID="group-list"
-            data={facultyGroups}
+            data={courseGroups}
             keyExtractor={(g) => g.id}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => {
@@ -147,16 +189,18 @@ export function OnboardingScreen() {
                   accessibilityState={{ selected }}
                   accessibilityLabel={`${item.code}, ${item.course} курс`}
                   onPress={() => setGroupId(item.id)}
-                  style={[styles.card, selected && styles.cardSelected]}
+                  style={[styles.option, selected && styles.optionSelected]}
                 >
-                  <Text style={styles.cardTitle}>{item.code}</Text>
-                  <Text style={styles.cardMeta}>{item.course} курс</Text>
+                  <View style={[styles.radio, selected && styles.radioSelected]}>
+                    {selected && <View style={styles.radioDot} />}
+                  </View>
+                  <Text style={[styles.optionTitle, selected && styles.optionTitleSelected]}>{item.code}</Text>
                 </Pressable>
               );
             }}
           />
           <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-            <Text style={styles.footerLabel}>Підгрупа</Text>
+            <Text style={styles.sectionLabel}>Підгрупа</Text>
             <View style={styles.segments} accessibilityRole="radiogroup">
               {SUBGROUPS.map((s) => {
                 const selected = s.value === subgroup;
@@ -202,43 +246,50 @@ export function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingHorizontal: 20 },
-  back: { alignSelf: 'flex-start', paddingVertical: 4, marginBottom: 8 },
-  backText: { fontSize: 16, color: colors.accent, fontWeight: '600' },
-  title: { fontSize: 28, fontWeight: '800', color: colors.text },
-  subtitle: { fontSize: 15, color: colors.textMuted, marginTop: 6, marginBottom: 20 },
-  list: { gap: 12, paddingBottom: 24 },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 18,
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  back: { width: 32, height: 32, justifyContent: 'center' },
+  title: { flex: 1, fontSize: 24, lineHeight: 30, fontWeight: '800', color: colors.text, textAlign: 'right' },
+  subtitle: { fontSize: 15, color: colors.textMuted, marginTop: 6, marginBottom: 20, textAlign: 'right' },
+  block: { marginBottom: 8 },
+  sectionLabel: { fontSize: 13, fontWeight: '700', color: colors.textTime, textTransform: 'uppercase', letterSpacing: 0.3 },
+  list: { paddingBottom: 24 },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    minHeight: 48,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  cardPressed: { borderColor: colors.primary },
-  cardSelected: { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.surfaceSoft },
-  cardTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
-  cardMeta: { fontSize: 14, color: colors.textMuted, marginTop: 4 },
+  optionSelected: { backgroundColor: '#EEF5FF', borderBottomColor: 'transparent', borderRadius: 14 },
+  optionText: { flex: 1, gap: 2 },
+  optionTitle: { flex: 1, fontSize: 17, lineHeight: 22, color: '#374151' },
+  optionTitleSelected: { fontWeight: '700', color: colors.primary },
+  optionMeta: { fontSize: 13, color: colors.textMuted },
+  radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  radioSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   errorBox: { gap: 12, alignItems: 'center', marginBottom: 12 },
   error: { fontSize: 15, color: colors.error, textAlign: 'center' },
   retry: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, backgroundColor: colors.primary },
   retryText: { color: colors.surface, fontWeight: '600' },
-  footer: { gap: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
-  footerLabel: { fontSize: 14, fontWeight: '600', color: colors.text },
-  segments: { flexDirection: 'row', gap: 8 },
+  footer: { gap: 12, paddingTop: 12 },
+  segments: { flexDirection: 'row', gap: 4, padding: 3, borderRadius: 14, backgroundColor: colors.chip, marginTop: 8 },
   segment: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 40,
     borderRadius: 12,
-    backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  segmentSelected: { backgroundColor: colors.primary },
-  segmentText: { fontSize: 15, fontWeight: '600', color: colors.text },
-  segmentTextSelected: { color: colors.surface },
+  segmentSelected: { backgroundColor: colors.surface },
+  segmentText: { fontSize: 15, fontWeight: '600', color: '#374151' },
+  segmentTextSelected: { color: colors.primary, fontWeight: '700' },
   primary: {
-    minHeight: 52,
+    minHeight: 56,
     borderRadius: 14,
     backgroundColor: colors.primary,
     alignItems: 'center',
