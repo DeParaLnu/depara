@@ -389,6 +389,7 @@ class ReviewTests(unittest.TestCase):
         posted = Stub.state["posted"]
         self.assertEqual(len(Stub.state["chat_requests"]), 1)  # жодного запиту перевірки чи підсумку
         self.assertIn("Витік секрету", posted)
+        self.assertIn("не перевірено другою перевіркою", posted.split("Витік секрету")[1].split("\n")[0])  # позначка біля самого пункту
         self.assertNotIn("Відсутня валідація", posted)
         self.assertNotIn("Назва змінної", posted)
         self.assertIn("Другою перевіркою не охоплено пунктів: 3", posted)

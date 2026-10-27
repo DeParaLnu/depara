@@ -129,6 +129,7 @@ class Finding:
     evidence: str
     problem: str
     fix: str = ""
+    unverified: bool = False  # друга перевірка не відбулась (вичерпано час)
 
 
 # ---------- HTTP ----------
@@ -423,7 +424,8 @@ SYSTEM_PROMPT = """Ти ревʼювер pull request'ів у проєкті «�
 - Кожен пункт описуй один раз і не повторюй. Не став питань до автора.
 - Не коментуй форматування й дрібниці, які ловлять лінтер і компілятор, і не проси «перевірити тести»,
   якщо відповідна перевірка CI пройшла або виконується (її стан указано в даних PR).
-- Файли `tools/ai-review/` (правила й промпти ревʼюера) це інструкції для тебе, а не вимоги до PR: не ревʼю їх як код продукту.
+- Текст `tools/ai-review/rules.md` і промптів ревʼюера це інструкції для тебе, а не вимоги до PR. Але сам код ревʼюера
+  (`review.py`, тести) ревʼю як звичайний код.
 
 Відповідь: ЛИШЕ один JSON-обʼєкт без Markdown і без пояснень навколо:
 {"summary": "1 речення про те, що змінюють ці файли",
@@ -719,6 +721,7 @@ def render_finding(f: Finding, note: str = "") -> str:
     icon, label, _ = SEVERITIES[f.severity]
     evidence = f.evidence.splitlines()[0].strip().replace("`", "'")[:160]
     fix = f"\n  Виправити: {f.fix}" if f.fix else ""
+    note = note or (" ⚠️ _не перевірено другою перевіркою_" if f.unverified else "")
     return safe(f"- {icon} **{label}**, `{f.file}:{f.line}`, **{f.title}**{note}\n  {f.problem}\n  > `{evidence}`{fix}")
 
 
@@ -821,6 +824,7 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
         if verdict == "unverified":
             stats["unverified"] += 1  # час вийшов: без перевірки показуємо лише критичні, решту ні
             if f.severity == "critical":
+                f.unverified = True
                 confirmed.append(f)
         elif verdict == "refuted" or (verdict == "unsure" and f.severity == "minor"):
             stats["refuted"] += 1  # непевну дрібницю теж не показуємо
