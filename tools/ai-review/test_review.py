@@ -65,6 +65,8 @@ class Stub(BaseHTTPRequestHandler):
         s, body = Stub.state, self._body()
         if self.path == "/v1/chat/completions":
             s["chat_requests"].append(body)
+            if s.get("tick"):
+                s["tick"]()
             if s.get("reject_json_mode") and "response_format" in body:
                 return self._send(400, {"error": "response_format не підтримується"})
             return self._send(200, {"choices": [{"message": s["replies"].pop(0)}]})
@@ -245,7 +247,7 @@ class ReviewTests(unittest.TestCase):
         """Регресія: lstrip('./') з'їдав крапку в .github/…"""
         Stub.state["diff"] = DIFF.replace("backend/src/a.ts", ".github/workflows/x.yml")
         Stub.state["replies"] = [
-            say({"summary": "s", "findings": [finding(file=".github/workflows/x.yml", evidence="on: push", line=2)]}),
+            say({"summary": "s", "findings": [finding(file=".github/workflows/x.yml", line=2)]}),
             say({"verdict": "confirmed"}),
         ]
         self.run_main()
@@ -275,6 +277,128 @@ class ReviewTests(unittest.TestCase):
         self.assertIn("Критична одна", posted)
         self.assertNotIn("Дрібна одна", posted)
         self.assertIn("1 поза лімітом", posted)
+
+    # ---------- зауваження CodeRabbit до PR #54 ----------
+
+    def test_chunk_limit_applies_to_annotated_text_and_big_files_are_split(self):
+        """Ліміт стосується того, що бачить модель (з номерами рядків), а великий файл ділиться за блоками змін."""
+        hunks = "".join(f"@@ -{i * 100},1 +{i * 100},1 @@\n+{'x' * 450}\n" for i in range(1, 7))
+        diff = f"diff --git a/backend/src/big.ts b/backend/src/big.ts\n--- a/backend/src/big.ts\n+++ b/backend/src/big.ts\n{hunks}"
+        cfg = review.Config(chunk_chars=1100, max_chunks=10)
+        chunks, skipped = review.plan_chunks(diff, cfg)
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual(skipped, [])
+        for group in chunks:
+            self.assertLessEqual(sum(len(text) for _, text in group), cfg.chunk_chars)
+            for _, text in group:
+                self.assertIn("+++ b/backend/src/big.ts", text)  # кожна частина має заголовок файла
+        # жоден блок змін не загубився
+        joined = "".join(text for g in chunks for _, text in g)
+        self.assertEqual(joined.count("@@ -"), 6)
+
+    def test_oversized_single_hunk_is_truncated_with_marker(self):
+        diff = ("diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n+" + "y" * 5000 + "\n")
+        chunks, _ = review.plan_chunks(diff, review.Config(chunk_chars=1000))
+        text = chunks[0][0][1]
+        self.assertLessEqual(len(text), 1000)
+        self.assertIn("diff обрізано", text)
+
+    def test_partially_reviewed_file_is_reported(self):
+        hunks = "".join(f"@@ -{i * 100},1 +{i * 100},1 @@\n+{'x' * 450}\n" for i in range(1, 7))
+        diff = f"diff --git a/backend/src/big.ts b/backend/src/big.ts\n--- a/backend/src/big.ts\n+++ b/backend/src/big.ts\n{hunks}"
+        _, skipped = review.plan_chunks(diff, review.Config(chunk_chars=1100, max_chunks=1))
+        self.assertEqual(skipped, ["backend/src/big.ts (переглянуто частково)"])
+
+    def test_evidence_must_be_a_line_of_the_diff(self):
+        """Рядок, якого немає в diff, відкидається, навіть якщо він є у файлі."""
+        (self.root / "backend" / "src" / "a.ts").write_text(A_TS + "const hidden = secret();\n")
+        Stub.state["replies"] = [
+            say({"summary": "s", "findings": [
+                finding(title="Рядок поза змінами", evidence="const hidden = secret();", line=4, problem="поза diff"),
+                finding(),
+            ]}),
+            say({"verdict": "confirmed"}),
+        ]
+        self.run_main()
+        posted = Stub.state["posted"]
+        self.assertNotIn("Рядок поза змінами", posted)
+        self.assertIn("Порожній список ламає підсумок", posted)
+        self.assertIn("1 без підтвердження цитатою", posted)
+
+    def test_anchor_accepts_context_and_removed_lines_but_not_headers(self):
+        diff_by_path = dict(review.split_diff(DIFF))
+        ctx = review.parse_finding(finding(evidence="import x from 'y';", line=0))
+        self.assertTrue(review.anchor_finding(ctx, diff_by_path))
+        self.assertEqual(ctx.line, 1)
+        removed = review.parse_finding(finding(evidence="const total = 0;", line=0))
+        self.assertTrue(review.anchor_finding(removed, diff_by_path))
+        self.assertEqual(removed.line, 2)  # позиція видаленого рядка в новій версії
+        header = review.parse_finding(finding(evidence="+++ b/backend/src/a.ts", line=0))
+        self.assertFalse(review.anchor_finding(header, diff_by_path))
+        nofile = review.parse_finding(finding(file="nope.ts"))
+        self.assertFalse(review.anchor_finding(nofile, diff_by_path))
+
+    def test_request_gets_only_the_remaining_time(self):
+        seen = []
+
+        def fake_request(method, url, headers, body=None, timeout=60):
+            seen.append(timeout)
+            return json.dumps({"choices": [{"message": {"content": "{}"}}]}), {}
+
+        clock = {"t": 0.0}
+        budget = review.Budget(100, clock=lambda: clock["t"]).sub(85)  # лишилось 15 с
+        cfg = review.Config(api_key="k", timeout=120)
+        orig = review.request
+        review.request = fake_request
+        try:
+            review.chat(cfg, [], None, budget=budget)
+            clock["t"] = 8.0  # лишилось 7 с: менше мінімуму, запиту не буде
+            with self.assertRaises(RuntimeError):
+                review.chat(cfg, [], None, budget=budget)
+        finally:
+            review.request = orig
+        self.assertEqual(seen, [15])
+
+    def test_verification_skipped_when_time_is_spent(self):
+        """Час вийшов після ревʼю шматків: пункти не перевіряються, важливі лишаються з приміткою, дрібні ні."""
+        clock = {"t": 0.0}
+        real = review.time.monotonic
+        review.time.monotonic = lambda: clock["t"]
+        Stub.state["tick"] = lambda: clock.update(t=95.0)  # після першого запиту до моделі «минуло» 95 с зі 100
+        Stub.state["replies"] = [say({"summary": "s", "findings": [
+            finding(severity="important", title="Важливе без перевірки"),
+            finding(severity="minor", title="Дрібне без перевірки", evidence="import x from 'y';", line=1, problem="інше"),
+        ]})]
+        os.environ["AI_REVIEW_BUDGET_SECONDS"] = "100"
+        try:
+            self.run_main()
+        finally:
+            review.time.monotonic = real
+            del os.environ["AI_REVIEW_BUDGET_SECONDS"]
+        posted = Stub.state["posted"]
+        self.assertEqual(len(Stub.state["chat_requests"]), 1)  # жодного запиту перевірки чи підсумку
+        self.assertIn("Важливе без перевірки", posted)
+        self.assertNotIn("Дрібне без перевірки", posted)
+        self.assertIn("Другою перевіркою не охоплено пунктів: 2", posted)
+
+    def test_chunks_after_the_chunk_budget_are_skipped_with_a_note(self):
+        clock = {"t": 0.0}
+        real = review.time.monotonic
+        review.time.monotonic = lambda: clock["t"]
+        Stub.state["diff"] = (DIFF.split("diff --git a/backend/package-lock.json")[0]
+                              + "diff --git a/backend/src/b.ts b/backend/src/b.ts\n--- a/backend/src/b.ts\n+++ b/backend/src/b.ts\n@@ -1 +1 @@\n+" + "z" * 300 + "\n")
+        Stub.state["tick"] = lambda: clock.update(t=80.0)  # після першого шматка бюджет шматків (70 с) вичерпано
+        Stub.state["replies"] = [say({"summary": "перший шматок", "findings": []})]
+        os.environ["AI_REVIEW_BUDGET_SECONDS"] = "100"
+        os.environ["AI_REVIEW_CHUNK_CHARS"] = "400"
+        try:
+            self.run_main()
+        finally:
+            review.time.monotonic = real
+            del os.environ["AI_REVIEW_BUDGET_SECONDS"], os.environ["AI_REVIEW_CHUNK_CHARS"]
+        posted = Stub.state["posted"]
+        self.assertEqual(len(Stub.state["chat_requests"]), 1)
+        self.assertIn("вичерпано часовий бюджет. Пропущено: backend/src/b.ts", posted)
 
     # ---------- поведінка при збоях ----------
 

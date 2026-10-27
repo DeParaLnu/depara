@@ -63,7 +63,7 @@ class Config:
     max_steps: int = 5  # звернень до інструментів на один шматок diff
     max_diff_chars: int = 120_000  # загалом на PR
     chunk_chars: int = 9_000  # розмір одного шматка diff: малі моделі гірше тримають довгий контекст
-    max_chunks: int = 6
+    max_chunks: int = 10  # реальну межу ставить часовий бюджет
     max_findings: int = 7  # скільки пунктів лишити в коментарі
     budget_seconds: int = 420  # після цього решта шматків пропускається (job має ліміт 10 хв)
     verify: bool = True
@@ -91,6 +91,25 @@ class Config:
             verify=e.get("AI_REVIEW_VERIFY") != "0",
             dry_run=e.get("DRY_RUN") == "1",
         )
+
+
+MIN_REQUEST_SECONDS = 10  # менше часу на один запит до моделі не залишаємо
+TRUNCATION_MARKER = "\n… (diff обрізано)\n"
+
+
+class Budget:
+    """Загальний часовий бюджет ревʼю: job в Actions має жорсткий ліміт, і вбитий job не публікує коментар."""
+
+    def __init__(self, seconds: float, clock=None, end: float | None = None):
+        self.clock = clock or (lambda: time.monotonic())
+        self.end = end if end is not None else self.clock() + seconds
+
+    def remaining(self) -> float:
+        return self.end - self.clock()
+
+    def sub(self, reserve: float) -> "Budget":
+        """Той самий бюджет, але останні reserve секунд лишаються для наступних етапів."""
+        return Budget(0, self.clock, self.end - reserve)
 
 
 @dataclass
@@ -206,8 +225,44 @@ def _priority(path: str) -> int:
     return 0
 
 
+def _truncate(text: str, limit: int, marker: str = TRUNCATION_MARKER) -> str:
+    """Обрізає text так, щоб разом із marker не перевищити limit."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] if limit <= len(marker) else text[: limit - len(marker)] + marker
+
+
+def split_hunks(annotated: str, limit: int) -> list[str]:
+    """Ділить пронумерований diff одного файла на частини не більші за limit.
+
+    Різати можна лише між блоками змін (@@), кожна частина починається із заголовка файла. Блок, що сам
+    більший за ліміт, обрізається з позначкою."""
+    lines = annotated.splitlines(keepends=True)
+    first = next((i for i, ln in enumerate(lines) if ln.startswith("@@")), len(lines))
+    header = "".join(lines[:first])
+    hunks: list[str] = []
+    for ln in lines[first:]:
+        if ln.startswith("@@") or not hunks:
+            hunks.append("")
+        hunks[-1] += ln
+    if not hunks:
+        return [_truncate(header, limit)]
+    pieces: list[str] = []
+    current = header
+    for hunk in hunks:
+        hunk = _truncate(hunk, max(0, limit - len(header)))
+        if current != header and len(current) + len(hunk) > limit:
+            pieces.append(current)
+            current = header
+        current += hunk
+    pieces.append(current)
+    return pieces
+
+
 def plan_chunks(diff: str, cfg: Config) -> tuple[list[list[tuple[str, str]]], list[str]]:
-    """Групує файли в шматки не більші за chunk_chars. Повертає (шматки, пропущені файли з причиною)."""
+    """Групує файли в шматки не більші за chunk_chars (разом із номерами рядків, які бачить модель).
+
+    Повертає (шматки з пронумерованим diff, пропущені файли з причиною)."""
     files, skipped = [], []
     for path, text in split_diff(diff):
         if any(fnmatch.fnmatch(path, p) for p in IGNORED_PATTERNS):
@@ -219,23 +274,26 @@ def plan_chunks(diff: str, cfg: Config) -> tuple[list[list[tuple[str, str]]], li
     groups: list[list[tuple[str, str]]] = []
     current: list[tuple[str, str]] = []
     size = total = 0
+    dropped: list[str] = []
     for path, text in files:
-        if len(text) > cfg.chunk_chars * 2:
-            text = text[: cfg.chunk_chars * 2] + "\n… (diff файла обрізано)\n"
-        if total + len(text) > cfg.max_diff_chars:
-            skipped.append(f"{path} (не вмістився в ліміт)")
-            continue
-        if current and size + len(text) > cfg.chunk_chars:
-            groups.append(current)
-            current, size = [], 0
-        current.append((path, text))
-        size += len(text)
-        total += len(text)
+        for piece in split_hunks(annotate_diff(text), cfg.chunk_chars):
+            if total + len(piece) > cfg.max_diff_chars:
+                dropped.append(path)
+                continue
+            if current and size + len(piece) > cfg.chunk_chars:
+                groups.append(current)
+                current, size = [], 0
+            current.append((path, piece))
+            size += len(piece)
+            total += len(piece)
     if current:
         groups.append(current)
-    for extra in groups[cfg.max_chunks:]:
-        skipped.extend(f"{p} (не вмістився в ліміт)" for p, _ in extra)
-    return groups[: cfg.max_chunks], skipped
+    kept, extra = groups[: cfg.max_chunks], groups[cfg.max_chunks:]
+    dropped.extend(p for g in extra for p, _ in g)
+    included = {p for g in kept for p, _ in g}
+    for path in dict.fromkeys(dropped):
+        skipped.append(f"{path} ({'переглянуто частково' if path in included else 'не вмістився в ліміт'})")
+    return kept, skipped
 
 
 def filter_diff(diff: str, max_chars: int) -> tuple[str, list[str]]:
@@ -373,7 +431,14 @@ VERIFY_PROMPT = """Ти перевіряєш чуже зауваження до 
 
 
 def chat(cfg: Config, messages: list[dict], tools: list[dict] | None, temperature: float = 0.1,
-         json_mode: bool = False, max_tokens: int = 3000) -> dict:
+         json_mode: bool = False, max_tokens: int = 3000, budget: Budget | None = None) -> dict:
+    timeout = cfg.timeout
+    if budget is not None:
+        # запит отримує лише час, що лишився: інакше він міг би тривати за межі ліміту job
+        left = budget.remaining()
+        if left < MIN_REQUEST_SECONDS:
+            raise RuntimeError("вичерпано часовий бюджет")
+        timeout = max(1, min(cfg.timeout, int(left)))
     body: dict = {"model": cfg.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     if tools:
         body["tools"] = tools
@@ -381,7 +446,7 @@ def chat(cfg: Config, messages: list[dict], tools: list[dict] | None, temperatur
     if json_mode:
         body["response_format"] = {"type": "json_object"}
     text, _ = request("POST", f"{cfg.base_url}/chat/completions",
-                   {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}, body, cfg.timeout)
+                   {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}, body, timeout)
     return json.loads(text)["choices"][0]["message"]
 
 
@@ -412,10 +477,10 @@ def parse_json_object(text: str) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def run_agent(cfg: Config, messages: list[dict], tools: RepoTools) -> str:
+def run_agent(cfg: Config, messages: list[dict], tools: RepoTools, budget: Budget | None = None) -> str:
     """Цикл «модель просить інструмент, ми виконуємо» до фінальної відповіді."""
     for _ in range(cfg.max_steps):
-        msg = chat(cfg, messages, TOOL_SCHEMAS)
+        msg = chat(cfg, messages, TOOL_SCHEMAS, budget=budget)
         calls = msg.get("tool_calls") or []
         entry: dict = {"role": "assistant", "content": msg.get("content") or ""}
         if calls:
@@ -428,16 +493,16 @@ def run_agent(cfg: Config, messages: list[dict], tools: RepoTools) -> str:
             result = tools.call(fn.get("name", ""), parse_args(fn.get("arguments")))
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
     messages.append({"role": "user", "content": "Ліміт кроків вичерпано. Дай відповідь у тому самому JSON-форматі за тим, що вже відомо."})
-    return clean(chat(cfg, messages, None).get("content"))
+    return clean(chat(cfg, messages, None, budget=budget).get("content"))
 
 
-def ask_json(cfg: Config, messages: list[dict], temperature: float = 0.0) -> dict | None:
+def ask_json(cfg: Config, messages: list[dict], temperature: float = 0.0, budget: Budget | None = None) -> dict | None:
     """Запит без інструментів, відповідь JSON. Якщо API не знає response_format, пробуємо без нього."""
     for json_mode in (True, False):
         try:
-            return parse_json_object(chat(cfg, messages, None, temperature, json_mode, 1200).get("content") or "")
+            return parse_json_object(chat(cfg, messages, None, temperature, json_mode, 1200, budget).get("content") or "")
         except RuntimeError:
-            if not json_mode:
+            if not json_mode or (budget is not None and budget.remaining() < MIN_REQUEST_SECONDS):
                 raise
     return None
 
@@ -471,22 +536,42 @@ def parse_finding(raw: object) -> Finding | None:
     return Finding(file, line, severity, title or problem[:80], evidence, problem or title, norm(str(raw.get("fix") or ""))[:400])
 
 
-def anchor_finding(f: Finding, tools: RepoTools, diff_by_path: dict[str, str]) -> bool:
-    """Перевіряє, що цитата справді є у файлі (або в diff), і виправляє номер рядка.
+def diff_candidates(chunk: str) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """Рядки diff одного файла: (додані й контекстні з номерами нової версії, видалені з позицією)."""
+    present, removed, new, in_hunk = [], [], 0, False
+    for raw in chunk.splitlines():
+        m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)
+        if m:
+            new, in_hunk = int(m.group(1)), True
+        elif not in_hunk:
+            continue
+        elif raw.startswith("-"):
+            removed.append((new, norm(raw[1:])))
+        elif raw.startswith(("+", " ")):
+            present.append((new, norm(raw[1:])))
+            new += 1
+    return present, removed
 
+
+def anchor_finding(f: Finding, diff_by_path: dict[str, str]) -> bool:
+    """Перевіряє, що цитата справді є серед рядків diff цього файла, і виправляє номер рядка.
+
+    Рядок, якого нема в diff (навіть якщо він є у файлі), не приймається: ревʼю стосується змін PR.
     Хибні цитати й вигадані файли відкидаємо: так відсіюються галюцинації, яких не видно за текстом відповіді."""
     first = norm(strip_diff_markers(f.evidence.splitlines()[0])) if f.evidence.strip() else ""
-    if len(first) < 4:
+    chunk = diff_by_path.get(f.file)
+    if len(first) < 4 or not chunk:
         return False
-    text = tools.read_text(f.file)
-    if text is not None:
-        hits = [i for i, ln in enumerate(text.splitlines(), 1) if first in norm(ln)]
-        if not hits:
-            return False
+    present, removed = diff_candidates(chunk)
+    hits = [n for n, text in present if first in text]
+    if hits:
         f.line = min(hits, key=lambda i: abs(i - f.line)) if f.line else hits[0]
         return True
-    chunk = diff_by_path.get(f.file)  # файла немає в робочій копії (видалений): шукаємо в diff
-    return bool(chunk) and any(first in norm(ln[1:]) for ln in chunk.splitlines() if ln[:1] in "-+ ")
+    removed_hits = [n for n, text in removed if first in text]  # видалені рядки: номер = позиція в новій версії
+    if removed_hits:
+        f.line = removed_hits[0]
+        return True
+    return False
 
 
 def enclosing_name(lines: list[str], idx: int) -> str | None:
@@ -526,15 +611,20 @@ def code_window(f: Finding, tools: RepoTools, diff_by_path: dict[str, str], radi
     return "\n".join(out)[:6000]
 
 
-def verify_finding(cfg: Config, f: Finding, tools: RepoTools, diff_by_path: dict[str, str]) -> str:
-    """Окремий короткий запит: чи правильне твердження для цього фрагмента. Збій запиту не відкидає пункт."""
+def verify_finding(cfg: Config, f: Finding, tools: RepoTools, diff_by_path: dict[str, str],
+                   budget: Budget | None = None) -> str:
+    """Окремий короткий запит: чи правильне твердження для цього фрагмента.
+
+    Збій запиту не відкидає пункт. Якщо часовий бюджет вичерпано, повертає «unverified» без запиту."""
+    if budget is not None and budget.remaining() < MIN_REQUEST_SECONDS:
+        return "unverified"
     claim = f"Файл {f.file}:{f.line}\nТвердження: {f.title}. {f.problem}"
     messages = [{"role": "system", "content": VERIFY_PROMPT},
                 {"role": "user", "content": f"{claim}\n\nФрагмент коду:\n{code_window(f, tools, diff_by_path)}"}]
     try:
-        data = ask_json(cfg, messages) or {}
+        data = ask_json(cfg, messages, budget=budget) or {}
     except RuntimeError:
-        return "unsure"
+        return "unverified" if budget is not None and budget.remaining() < MIN_REQUEST_SECONDS else "unsure"
     verdict = str(data.get("verdict") or "").lower()
     return verdict if verdict in ("confirmed", "refuted", "unsure") else "unsure"
 
@@ -573,28 +663,30 @@ def pr_context(pr: dict, ci: str, skipped: list[str]) -> str:
     )
 
 
-def review_chunk(cfg: Config, system: str, context: str, files: list[tuple[str, str]], tools: RepoTools) -> dict:
-    diff = "".join(annotate_diff(text) for _, text in files)
+def review_chunk(cfg: Config, system: str, context: str, files: list[tuple[str, str]], tools: RepoTools,
+                 budget: Budget | None = None) -> dict:
+    diff = "".join(text for _, text in files)  # текст уже пронумерований у plan_chunks
+    names = ", ".join(dict.fromkeys(p for p, _ in files))
     messages = [{"role": "system", "content": system},
-                {"role": "user", "content": f"{context}\n\nОця частина diff (файли: {', '.join(p for p, _ in files)}):\n<diff>\n{diff}\n</diff>"}]
-    text = run_agent(cfg, messages, tools)
+                {"role": "user", "content": f"{context}\n\nОця частина diff (файли: {names}):\n<diff>\n{diff}\n</diff>"}]
+    text = run_agent(cfg, messages, tools, budget)
     data = parse_json_object(text)
     if data is None:  # одна спроба виправити формат
         messages.append({"role": "user", "content": "Це не коректний JSON. Поверни ЛИШЕ JSON-обʼєкт за описаною схемою."})
-        data = ask_json(cfg, messages)
+        data = ask_json(cfg, messages, budget=budget)
     return data or {}
 
 
-def summarize(cfg: Config, pr: dict, summaries: list[str]) -> str:
+def summarize(cfg: Config, pr: dict, summaries: list[str], budget: Budget | None = None) -> str:
     summaries = [s for s in dict.fromkeys(summaries) if s]
     if len(summaries) <= 1:
         return summaries[0] if summaries else ""
     messages = [{"role": "system", "content": "Склади з частин одне підсумкове речення (до 2 речень) українською про те, що робить PR. Лише текст."},
                 {"role": "user", "content": f"Назва PR: {pr.get('title', '')}\nЧастини:\n- " + "\n- ".join(summaries)}]
     try:
-        out = clean(chat(cfg, messages, None, 0.1, False, 300).get("content"))
+        out = clean(chat(cfg, messages, None, 0.1, False, 300, budget).get("content"))
         return out or " ".join(summaries[:2])
-    except RuntimeError:
+    except RuntimeError:  # збій моделі чи вичерпаний бюджет: склеюємо підсумки частин самі
         return " ".join(summaries[:2])
 
 
@@ -650,20 +742,25 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
     context = pr_context(pr, ci, skipped)
     diff_by_path = {path: text for path, text in split_diff(diff)}
 
-    stats = {"raw": 0, "no_evidence": 0, "refuted": 0, "duplicates": 0, "over_limit": 0}
+    stats = {"raw": 0, "no_evidence": 0, "refuted": 0, "duplicates": 0, "over_limit": 0, "unverified": 0}
     notes: list[str] = []
     summaries: list[str] = []
     raw_findings: list[Finding] = []
-    started = time.monotonic()
+    # Один бюджет на все ревʼю: ~70% на шматки, решта на перевірку пунктів і підсумок. Кожен запит до моделі
+    # отримує лише час, що лишився до межі свого етапу, тож job не перевищить ліміт Actions.
+    budget = Budget(cfg.budget_seconds)
+    chunk_budget = budget.sub(cfg.budget_seconds * 0.3)
+    verify_budget = budget.sub(MIN_REQUEST_SECONDS)  # останні секунди лишаються для підсумку
     for i, files in enumerate(chunks):
-        if time.monotonic() - started > cfg.budget_seconds:
+        if chunk_budget.remaining() < MIN_REQUEST_SECONDS:
             notes.append("Не всі файли встигли переглянутись: вичерпано часовий бюджет. Пропущено: "
-                         + ", ".join(p for part in chunks[i:] for p, _ in part))
+                         + ", ".join(dict.fromkeys(p for part in chunks[i:] for p, _ in part)))
             break
         try:
-            data = review_chunk(cfg, system, context, files, tools)
+            data = review_chunk(cfg, system, context, files, tools, chunk_budget)
         except RuntimeError as err:
-            notes.append(f"Частину файлів ({', '.join(p for p, _ in files)}) не переглянуто: {err}")
+            names = ", ".join(dict.fromkeys(p for p, _ in files))
+            notes.append(f"Частину файлів ({names}) не переглянуто: {err}")
             continue
         summaries.append(str(data.get("summary") or "").strip())
         items = data.get("findings") if isinstance(data.get("findings"), list) else []
@@ -676,7 +773,7 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
 
     anchored = []
     for f in raw_findings:
-        if anchor_finding(f, tools, diff_by_path):
+        if anchor_finding(f, diff_by_path):
             anchored.append(f)
         else:
             stats["no_evidence"] += 1
@@ -686,10 +783,12 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
 
     confirmed: list[Finding] = []
     for f in unique:
-        verdict = verify_finding(cfg, f, tools, diff_by_path) if cfg.verify else "confirmed"
-        if verdict == "refuted":
-            stats["refuted"] += 1
-        elif verdict == "unsure" and f.severity == "minor":
+        verdict = verify_finding(cfg, f, tools, diff_by_path, verify_budget) if cfg.verify else "confirmed"
+        if verdict == "unverified":
+            stats["unverified"] += 1  # час вийшов: важливі лишаємо з позначкою, дрібниці без перевірки не показуємо
+            if f.severity != "minor":
+                confirmed.append(f)
+        elif verdict == "refuted" or (verdict == "unsure" and f.severity == "minor"):
             stats["refuted"] += 1  # непевну дрібницю теж не показуємо
         else:
             confirmed.append(f)
@@ -699,7 +798,10 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
         notes.append("Не переглянуто: " + "; ".join(skipped))
     if service:
         notes.append(f"Службових файлів пропущено: {len(service)} (лок-файли, зображення).")
-    return render_review(summarize(cfg, pr, summaries), final, stats, notes)
+    if stats["unverified"]:
+        notes.append(f"Другою перевіркою не охоплено пунктів: {stats['unverified']} (вичерпано часовий бюджет); "
+                     "важливі лишено без перевірки, дрібні не показано.")
+    return render_review(summarize(cfg, pr, summaries, budget), final, stats, notes)
 
 
 def main() -> int:
