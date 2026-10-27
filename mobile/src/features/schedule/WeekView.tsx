@@ -21,6 +21,13 @@ const TYPE_SHORT: Record<Lesson['type'], { label: string; style: 'filled' | 'acc
   OTHER: { label: '–', style: 'neutral' },
 };
 
+// Куди перенесено пару: «Перенесено на 14.05, 3-а пара». Без цього рядок тижня виглядає так,
+// ніби пара лишилась у старому слоті
+const movedLabel = (sub: NonNullable<Lesson['substitution']>) =>
+  sub.kind === 'MOVED' && sub.newDate
+    ? `Перенесено на ${sub.newDate.slice(8, 10)}.${sub.newDate.slice(5, 7)}${sub.newPairNumber ? `, ${sub.newPairNumber}-а пара` : ''}`
+    : null;
+
 const changesLabel = (n: number) => {
   const mod10 = n % 10;
   const mod100 = n % 100;
@@ -34,18 +41,22 @@ function WeekRow({ lesson }: { lesson: Lesson }) {
   const cancelled = sub?.kind === 'CANCELLED';
   const type = TYPE_SHORT[lesson.type];
   const room = parseRoom(sub?.newRoom ?? lesson.room);
+  const moved = sub ? movedLabel(sub) : null;
   return (
     <View
       accessible
-      accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : sub ? ', заміна' : ''}`}
+      accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : moved ? `, ${moved.toLowerCase()}` : sub ? ', заміна' : ''}`}
       style={[styles.row, sub && !cancelled && styles.rowChanged]}
     >
       <Text style={styles.rowTime} numberOfLines={1}>
         {lesson.start}
       </Text>
-      <Text style={[styles.rowSubject, cancelled && styles.rowSubjectCancelled]} numberOfLines={2}>
-        {lesson.subject}
-      </Text>
+      <View style={styles.rowMain}>
+        <Text style={[styles.rowSubject, cancelled && styles.rowSubjectCancelled]} numberOfLines={2}>
+          {lesson.subject}
+        </Text>
+        {moved && <Text style={styles.rowMoved}>{moved}</Text>}
+      </View>
       <View
         style={[
           styles.typeBadge,
@@ -289,7 +300,9 @@ const styles = StyleSheet.create({
   },
   rowChanged: { borderLeftWidth: 3, borderLeftColor: colors.warning, paddingLeft: 9 },
   rowTime: { width: 50, fontSize: 15, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
-  rowSubject: { flex: 1, fontSize: 15, lineHeight: 19, fontWeight: '700', color: colors.text },
+  rowMain: { flex: 1, gap: 2 },
+  rowMoved: { fontSize: 13, lineHeight: 17, fontWeight: '700', color: colors.warningText },
+  rowSubject: { fontSize: 15, lineHeight: 19, fontWeight: '700', color: colors.text },
   rowSubjectCancelled: { color: colors.textMuted, textDecorationLine: 'line-through' },
   typeBadge: { minWidth: 44, height: 24, borderRadius: 12, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
   typeFilled: { backgroundColor: colors.primary },
