@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  checks: read  # статус CI потрапляє в контекст ревʼю
 
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}
