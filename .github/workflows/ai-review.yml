@@ -1,0 +1,41 @@
+name: ai-review
+
+# ШІ-ревʼю кожного PR: модель Together AI читає diff і файли репозиторію й лишає один коментар.
+# Вимкнено, доки в репозиторії не задано змінну AI_REVIEW_ENABLED=true і секрет TOGETHER_API_KEY.
+# Налаштування й обмеження: docs/ai-review.md.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Лише PR із цього ж репозиторію: у PR із форків секретів немає, і код скрипта не довіряємо
+    if: >-
+      vars.AI_REVIEW_ENABLED == 'true'
+      && github.event.pull_request.draft == false
+      && github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: ШІ-ревʼю
+        run: python3 tools/ai-review/review.py
+        env:
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          TOGETHER_MODEL: ${{ vars.TOGETHER_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
