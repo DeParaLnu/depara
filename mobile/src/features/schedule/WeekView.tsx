@@ -4,14 +4,70 @@ import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
 import { StateView } from '../../components/StateView';
-import { addDays, clock, headerTitle, toIsoDate, weekDays, weekRangeLabel } from '../../lib/date';
+import { clock, toIsoDate, weekdayFull, weekDays, weekRangeLabel } from '../../lib/date';
 import { colors, errorText } from '../../theme';
-import { LessonCard } from './components/LessonCard';
-import { withNext, type LessonStatus } from './lesson';
+import { parseRoom, withNext, type LessonStatus } from './lesson';
 import type { TodayState } from './TodayView';
 
 type Row = { kind: 'lesson'; lesson: Lesson; status: LessonStatus } | { kind: 'empty'; key: string };
-type DaySection = { key: string; day: Date; isToday: boolean; data: Row[] };
+type DaySection = { key: string; day: Date; isToday: boolean; changes: number; data: Row[] };
+
+// Скорочення типу пари для компактного рядка (макет «Розклад тижня»)
+const TYPE_SHORT: Record<Lesson['type'], { label: string; style: 'filled' | 'accent' | 'soft' | 'neutral' }> = {
+  LECTURE: { label: 'Л', style: 'filled' },
+  PRACTICE: { label: 'ПрС', style: 'accent' },
+  LAB: { label: 'Лаб', style: 'soft' },
+  EXAM: { label: 'Ісп', style: 'accent' },
+  OTHER: { label: '–', style: 'neutral' },
+};
+
+const changesLabel = (n: number) => {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} заміна`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} заміни`;
+  return `${n} замін`;
+};
+
+function WeekRow({ lesson }: { lesson: Lesson }) {
+  const sub = lesson.substitution;
+  const cancelled = sub?.kind === 'CANCELLED';
+  const type = TYPE_SHORT[lesson.type];
+  const room = parseRoom(sub?.newRoom ?? lesson.room);
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : sub ? ', заміна' : ''}`}
+      style={[styles.row, sub && !cancelled && styles.rowChanged]}
+    >
+      <Text style={styles.rowTime}>{lesson.start}</Text>
+      <Text style={[styles.rowSubject, cancelled && styles.rowSubjectCancelled]} numberOfLines={2}>
+        {lesson.subject}
+      </Text>
+      <View
+        style={[
+          styles.typeBadge,
+          type.style === 'filled' && styles.typeFilled,
+          type.style === 'accent' && styles.typeAccent,
+          type.style === 'soft' && styles.typeSoft,
+          type.style === 'neutral' && styles.typeNeutral,
+        ]}
+      >
+        <Text
+          style={[
+            styles.typeText,
+            (type.style === 'filled' || type.style === 'accent') && styles.typeTextLight,
+            type.style === 'soft' && styles.typeTextSoft,
+            type.style === 'neutral' && styles.typeTextNeutral,
+          ]}
+        >
+          {type.label}
+        </Text>
+      </View>
+      <Text style={styles.rowRoom}>{room && !cancelled ? `${room.number}${room.building ? `/${room.building}` : ''}` : ''}</Text>
+    </View>
+  );
+}
 
 type Props = {
   now: Date;
@@ -54,7 +110,14 @@ export function WeekView({
       const rows: Row[] = withStatus
         .filter((x) => x.lesson.date === iso)
         .map((x) => ({ kind: 'lesson', lesson: x.lesson, status: x.status }));
-      return { key: iso, day, isToday: iso === todayIso, data: rows.length ? rows : [{ kind: 'empty', key: `empty-${iso}` }] };
+      const changes = rows.filter((r) => r.kind === 'lesson' && r.lesson.substitution).length;
+      return {
+        key: iso,
+        day,
+        isToday: iso === todayIso,
+        changes,
+        data: rows.length ? rows : [{ kind: 'empty', key: `empty-${iso}` }],
+      };
     });
   }, [state, now, weekStart]);
 
@@ -63,10 +126,13 @@ export function WeekView({
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.title} accessibilityRole="header">
-            Тиждень
+            Розклад
           </Text>
           <View style={styles.subtitleRow}>
-            <Text style={styles.subtitle}>{subtitle}</Text>
+            <Text style={styles.subtitle} accessibilityRole="header">
+              {weekRangeLabel(weekStart)}
+              {subtitle ? ` · ${subtitle}` : ''}
+            </Text>
             {isHeadman && (
               <View style={styles.roleBadge}>
                 <Text style={styles.roleBadgeText}>Староста</Text>
@@ -74,48 +140,42 @@ export function WeekView({
             )}
           </View>
         </View>
+        <View style={styles.nav}>
+          <Pressable
+            testID="week-prev"
+            accessibilityRole="button"
+            accessibilityLabel="Попередній тиждень"
+            onPress={onPrev}
+            hitSlop={8}
+            style={({ pressed }) => [styles.navButton, pressed && styles.navPressed]}
+          >
+            <Ionicons name="chevron-back" size={20} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            testID="week-next"
+            accessibilityRole="button"
+            accessibilityLabel="Наступний тиждень"
+            onPress={onNext}
+            hitSlop={8}
+            style={({ pressed }) => [styles.navButton, pressed && styles.navPressed]}
+          >
+            <Ionicons name="chevron-forward" size={20} color={colors.primary} />
+          </Pressable>
+        </View>
       </View>
 
-      <View style={styles.nav}>
+      {!isCurrentWeek && (
         <Pressable
-          testID="week-prev"
+          testID="week-current"
           accessibilityRole="button"
-          accessibilityLabel="Попередній тиждень"
-          onPress={onPrev}
+          accessibilityLabel="Повернутись до поточного тижня"
+          onPress={onCurrent}
           hitSlop={8}
-          style={({ pressed }) => [styles.navButton, pressed && styles.navPressed]}
+          style={styles.currentWrap}
         >
-          <Ionicons name="chevron-back" size={20} color={colors.primary} />
+          <Text style={styles.currentLink}>До поточного тижня</Text>
         </Pressable>
-        <View style={styles.navCenter}>
-          <Text style={styles.range} accessibilityRole="header">
-            {weekRangeLabel(weekStart)}
-          </Text>
-          {isCurrentWeek ? (
-            <Text style={styles.navLabel}>Цей тиждень</Text>
-          ) : (
-            <Pressable
-              testID="week-current"
-              accessibilityRole="button"
-              accessibilityLabel="Повернутись до поточного тижня"
-              onPress={onCurrent}
-              hitSlop={8}
-            >
-              <Text style={styles.currentLink}>До поточного тижня</Text>
-            </Pressable>
-          )}
-        </View>
-        <Pressable
-          testID="week-next"
-          accessibilityRole="button"
-          accessibilityLabel="Наступний тиждень"
-          onPress={onNext}
-          hitSlop={8}
-          style={({ pressed }) => [styles.navButton, pressed && styles.navPressed]}
-        >
-          <Ionicons name="chevron-forward" size={20} color={colors.primary} />
-        </Pressable>
-      </View>
+      )}
 
       {state.kind === 'ready' && state.offline && (
         <View style={styles.offline} accessibilityRole="alert">
@@ -147,21 +207,23 @@ export function WeekView({
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           renderSectionHeader={({ section }) => (
-            <Text
-              style={[styles.dayTitle, section.isToday && styles.dayTitleToday]}
-              accessibilityRole="header"
-            >
-              {headerTitle(section.day, now)}
-            </Text>
+            <View style={styles.dayHeader}>
+              <Text
+                style={[styles.dayTitle, section.isToday && styles.dayTitleToday]}
+                accessibilityRole="header"
+              >
+                {`${weekdayFull(section.day)}, ${section.day.getDate()}`}
+              </Text>
+              {section.changes > 0 && (
+                <View style={styles.changesBadge}>
+                  <Text style={styles.changesText}>{changesLabel(section.changes)}</Text>
+                </View>
+              )}
+            </View>
           )}
           renderItem={({ item }) =>
-            item.kind === 'lesson' ? (
-              <LessonCard lesson={item.lesson} status={item.status} />
-            ) : (
-              <Text style={styles.emptyDay}>Пар немає</Text>
-            )
+            item.kind === 'lesson' ? <WeekRow lesson={item.lesson} /> : <Text style={styles.emptyDay}>Пар немає</Text>
           }
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
           renderSectionFooter={() => <View style={styles.sectionGap} />}
         />
       )}
@@ -171,43 +233,68 @@ export function WeekView({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 16, gap: 12 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 21, gap: 12 },
   headerText: { flex: 1, gap: 4 },
-  title: { fontSize: 22, fontWeight: '800', color: colors.text },
-  subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  subtitle: { fontSize: 13, color: colors.textMuted },
-  roleBadge: { backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
-  roleBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
-  nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
+  title: { fontSize: 24, lineHeight: 29, fontWeight: '700', color: colors.text },
+  subtitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  subtitle: { fontSize: 15, lineHeight: 20, color: colors.textMuted },
+  roleBadge: { height: 22, justifyContent: 'center', backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 9 },
+  roleBadgeText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  nav: { flexDirection: 'row', gap: 8 },
   navButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 14,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
   navPressed: { backgroundColor: colors.tagBlue },
-  navCenter: { flex: 1, alignItems: 'center', gap: 2 },
-  range: { fontSize: 16, fontWeight: '700', color: colors.text },
-  navLabel: { fontSize: 13, color: colors.textMuted },
-  currentLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  currentWrap: { alignSelf: 'flex-start', paddingHorizontal: 21, paddingTop: 10 },
+  currentLink: { fontSize: 13, fontWeight: '700', color: colors.primary },
   offline: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 10,
-    borderRadius: 12,
+    gap: 10,
+    marginHorizontal: 21,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
     backgroundColor: colors.chip,
   },
-  offlineText: { flex: 1, fontSize: 12, color: colors.textMuted },
+  offlineText: { flex: 1, fontSize: 14, lineHeight: 18, color: colors.textSecondary },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  list: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
-  dayTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginBottom: 8 },
+  list: { paddingHorizontal: 21, paddingTop: 16, paddingBottom: 24, flexGrow: 1 },
+  dayHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 24, marginBottom: 4 },
+  dayTitle: { fontSize: 13, fontWeight: '700', color: colors.textTime, textTransform: 'uppercase', letterSpacing: 0.3 },
   dayTitleToday: { color: colors.primary },
-  emptyDay: { fontSize: 13, color: colors.textMuted, paddingVertical: 4 },
-  separator: { height: 10 },
-  sectionGap: { height: 18 },
+  changesBadge: { height: 24, justifyContent: 'center', borderRadius: 12, paddingHorizontal: 12, backgroundColor: colors.warningBg },
+  changesText: { fontSize: 12, fontWeight: '700', color: colors.warningText },
+  emptyDay: { fontSize: 14, color: colors.textMuted, paddingVertical: 8 },
+  sectionGap: { height: 22 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 50,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  rowChanged: { borderLeftWidth: 3, borderLeftColor: colors.warning, paddingLeft: 9 },
+  rowTime: { width: 40, fontSize: 15, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
+  rowSubject: { flex: 1, fontSize: 15, lineHeight: 19, fontWeight: '700', color: colors.text },
+  rowSubjectCancelled: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  typeBadge: { minWidth: 44, height: 24, borderRadius: 12, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  typeFilled: { backgroundColor: colors.primary },
+  typeAccent: { backgroundColor: colors.accent },
+  typeSoft: { backgroundColor: colors.tagBlue },
+  typeNeutral: { backgroundColor: colors.chip },
+  typeText: { fontSize: 13, fontWeight: '700' },
+  typeTextLight: { color: '#FFFFFF' },
+  typeTextSoft: { color: colors.tagBlueText },
+  typeTextNeutral: { color: colors.textMuted },
+  rowRoom: { width: 54, textAlign: 'right', fontSize: 15, color: colors.textMuted },
 });

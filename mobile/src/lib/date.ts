@@ -57,6 +57,7 @@ export const weekdayShortCap = (d: Date) => {
   const s = WEEKDAYS_SHORT[d.getDay()];
   return s[0].toUpperCase() + s.slice(1);
 };
+export const weekdayFull = (d: Date) => WEEKDAYS_FULL[d.getDay()];
 export const dayMonth = (d: Date) => `${d.getDate()} ${MONTHS_GEN[d.getMonth()]}`;
 
 /** «пн 12 жовтня» для сьогодні, «Середа, 14 жовтня» для інших днів. */
