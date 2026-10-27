@@ -487,6 +487,27 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(self.run_main(), 0)
         self.assertNotIn("posted", Stub.state)
 
+    def test_unparseable_reply_is_not_reported_as_reviewed(self):
+        """Модель двічі повернула не-JSON: коментаря «проблем не знайдено» про неперевірений код не буде."""
+        Stub.state["replies"] = [say("це не json"), say("і це теж")]
+        self.assertEqual(self.run_main(), 0)
+        self.assertNotIn("posted", Stub.state)
+        self.assertEqual(len(Stub.state["chat_requests"]), 2)  # початковий запит і одна спроба виправити формат
+
+    def test_partially_unparseable_review_says_which_files_were_skipped(self):
+        Stub.state["diff"] = (DIFF.split("diff --git a/backend/package-lock.json")[0]
+                              + "diff --git a/backend/src/b.ts b/backend/src/b.ts\n--- a/backend/src/b.ts\n+++ b/backend/src/b.ts\n@@ -1 +1 @@\n+" + "z" * 300 + "\n")
+        Stub.state["replies"] = [say({"summary": "перший шматок", "findings": []}), say("не json"), say("знову не json")]
+        os.environ["AI_REVIEW_CHUNK_CHARS"] = "400"
+        try:
+            self.run_main()
+        finally:
+            del os.environ["AI_REVIEW_CHUNK_CHARS"]
+        posted = Stub.state["posted"]
+        self.assertIn("не переглянуто: модель не повернула коректний JSON", posted)
+        self.assertIn("backend/src/b.ts", posted.split("не повернула коректний JSON")[0].split("Частину файлів")[-1])
+        self.assertIn("перший шматок", posted)
+
     def test_missing_ci_permission_does_not_break_review(self):
         Stub.state["replies"] = [say({"summary": "ок", "findings": []})]
         Stub.state["checks"] = None  # заглушка віддасть некоректну відповідь

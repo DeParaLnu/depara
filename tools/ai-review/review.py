@@ -792,6 +792,9 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
         except (RuntimeError, KeyError, ValueError, IndexError) as err:
             notes.append(f"Частину файлів ({', '.join(names)}) не переглянуто: {err}")
             continue
+        if not data:  # review_chunk повертає {}, якщо відповідь не вдалося розібрати навіть після виправлення формату
+            notes.append(f"Частину файлів ({', '.join(names)}) не переглянуто: модель не повернула коректний JSON")
+            continue
         summaries.append(str(data.get("summary") or "").strip())
         items = data.get("findings") if isinstance(data.get("findings"), list) else []
         parsed = [f for f in map(parse_finding, items) if f]
