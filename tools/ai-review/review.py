@@ -142,15 +142,16 @@ class GitHub:
         return text
 
     def ci_summary(self, sha: str) -> str:
-        """Завершені перевірки CI для коміту. Потрібне, щоб модель не питала «чи проходять тести»."""
+        """Стан перевірок CI для коміту. Ревʼю стартує одночасно з CI, тому частина перевірок ще виконується:
+        і це корисно знати, щоб модель не питала «чи запускали тести»."""
         try:
             text, _ = request("GET", f"{self.base}/commits/{sha}/check-runs?per_page=100", self._headers())
             runs = json.loads(text).get("check_runs") or []
-            done = [f"{r['name']}: {r['conclusion']}" for r in runs
-                    if r.get("status") == "completed" and r.get("conclusion") and "review" not in r["name"].lower()]
+            state = [f"{r['name']}: {r['conclusion'] if r.get('status') == 'completed' else 'виконується'}"
+                     for r in runs if r.get("conclusion") != "skipped" and "review" not in r["name"].lower()]
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError):
             return ""  # немає права checks: read або мережа: ревʼю працює і без цього
-        return "; ".join(sorted(set(done)))
+        return "; ".join(sorted(set(state)))
 
     def upsert_comment(self, body: str) -> str:
         text, _ = request("GET", f"{self.base}/issues/{self.cfg.pr_number}/comments?per_page=100", self._headers())
@@ -355,7 +356,8 @@ SYSTEM_PROMPT = """Ти ревʼювер pull request'ів у проєкті «�
 - Не вигадуй. Краще мало зауважень, ніж хибне. Якщо проблем немає, поверни порожній список findings.
 - Кожен пункт описуй один раз і не повторюй. Не став питань до автора.
 - Не коментуй форматування й дрібниці, які ловлять лінтер і компілятор, і не проси «перевірити тести»,
-  якщо відповідна перевірка CI уже пройшла (її статус указано в даних PR).
+  якщо відповідна перевірка CI пройшла або виконується (її стан указано в даних PR).
+- Файли `tools/ai-review/` (правила й промпти ревʼюера) це інструкції для тебе, а не вимоги до PR: не ревʼю їх як код продукту.
 
 Відповідь: ЛИШЕ один JSON-обʼєкт без Markdown і без пояснень навколо:
 {"summary": "1 речення про те, що змінюють ці файли",
@@ -567,7 +569,7 @@ def pr_context(pr: dict, ci: str, skipped: list[str]) -> str:
         f"Назва: {pr.get('title', '')}\n"
         f"Опис:\n{(pr.get('body') or '')[:3000]}\n"
         f"Гілки: {pr.get('head', {}).get('ref', '?')} → {pr.get('base', {}).get('ref', '?')}\n"
-        f"Перевірки CI, що вже завершились: {ci or 'невідомо'}{notes}"
+        f"Перевірки CI цього коміту (запускаються паралельно з ревʼю): {ci or 'невідомо'}{notes}"
     )
 
 
@@ -619,7 +621,7 @@ def render_review(summary: str, findings: list[Finding], stats: dict, notes: lis
     if minor:
         body = "\n".join(render_finding(f) for f in minor)
         parts.append(f"<details><summary>Дрібниці ({len(minor)})</summary>\n\n{body}\n\n</details>")
-    checks = (f"Модель дала {stats['raw']} зауважень, показано {len(findings)}. Відсіяно: "
+    checks = (f"Пунктів від моделі: {stats['raw']}, показано: {len(findings)}. Відсіяно: "
               f"{stats['no_evidence']} без підтвердження цитатою, {stats['refuted']} спростовано чи не підтверджено перевіркою, "
               f"{stats['duplicates']} дублікатів, {stats['over_limit']} поза лімітом.")
     parts.append(f"<sub>{checks}</sub>")

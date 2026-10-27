@@ -159,8 +159,8 @@ class ReviewTests(unittest.TestCase):
         self.assertIn("ПРАВИЛО-ПРОЄКТУ", first[0]["content"])
         self.assertIn("   2| +const total = items.length;", first[1]["content"])
         self.assertIn("backend-e2e: success", first[1]["content"])
+        self.assertIn("CodeRabbit: виконується", first[1]["content"])  # паралельний CI теж корисно знати
         self.assertNotIn("review: success", first[1]["content"])
-        self.assertNotIn("CodeRabbit", first[1]["content"])
         self.assertNotIn("package-lock.json b/", first[1]["content"].split("<diff>")[1])
         self.assertNotIn("службовий файл", first[1]["content"])  # у запит до моделі службові файли не попадають
         self.assertIn("Службових файлів пропущено: 1", posted)
