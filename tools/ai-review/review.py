@@ -27,6 +27,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -66,6 +67,7 @@ class Config:
     max_chunks: int = 10  # реальну межу ставить часовий бюджет
     max_findings: int = 7  # скільки пунктів лишити в коментарі
     budget_seconds: int = 420  # після цього решта шматків пропускається (job має ліміт 10 хв)
+    workers: int = 3  # запитів до моделі паралельно (шматки й перевірка пунктів)
     verify: bool = True
     dry_run: bool = False
     timeout: int = 120
@@ -88,13 +90,19 @@ class Config:
             max_chunks=int(e.get("AI_REVIEW_MAX_CHUNKS") or cls.max_chunks),
             max_findings=int(e.get("AI_REVIEW_MAX_FINDINGS") or cls.max_findings),
             budget_seconds=int(e.get("AI_REVIEW_BUDGET_SECONDS") or cls.budget_seconds),
+            workers=max(1, int(e.get("AI_REVIEW_WORKERS") or cls.workers)),
             verify=e.get("AI_REVIEW_VERIFY") != "0",
             dry_run=e.get("DRY_RUN") == "1",
         )
 
 
 MIN_REQUEST_SECONDS = 10  # менше часу на один запит до моделі не залишаємо
+RETRY_WAIT = 2.0  # пауза перед повтором запиту при 429/5xx (збільшується з кожною спробою)
 TRUNCATION_MARKER = "\n… (diff обрізано)\n"
+
+
+class BudgetExhausted(RuntimeError):
+    """Часовий бюджет ревʼю вичерпано: запит до моделі не робимо."""
 
 
 class Budget:
@@ -432,22 +440,30 @@ VERIFY_PROMPT = """Ти перевіряєш чуже зауваження до 
 
 def chat(cfg: Config, messages: list[dict], tools: list[dict] | None, temperature: float = 0.1,
          json_mode: bool = False, max_tokens: int = 3000, budget: Budget | None = None) -> dict:
-    timeout = cfg.timeout
-    if budget is not None:
-        # запит отримує лише час, що лишився: інакше він міг би тривати за межі ліміту job
-        left = budget.remaining()
-        if left < MIN_REQUEST_SECONDS:
-            raise RuntimeError("вичерпано часовий бюджет")
-        timeout = max(1, min(cfg.timeout, int(left)))
     body: dict = {"model": cfg.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
     if json_mode:
         body["response_format"] = {"type": "json_object"}
-    text, _ = request("POST", f"{cfg.base_url}/chat/completions",
-                   {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}, body, timeout)
-    return json.loads(text)["choices"][0]["message"]
+    for attempt in range(3):
+        timeout = cfg.timeout
+        if budget is not None:
+            # запит отримує лише час, що лишився: інакше він міг би тривати за межі ліміту job
+            left = budget.remaining()
+            if left < MIN_REQUEST_SECONDS:
+                raise BudgetExhausted("вичерпано часовий бюджет")
+            timeout = max(1, min(cfg.timeout, int(left)))
+        try:
+            text, _ = request("POST", f"{cfg.base_url}/chat/completions",
+                              {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}, body, timeout)
+            return json.loads(text)["choices"][0]["message"]
+        except RuntimeError as err:
+            # 429 (ліміт запитів) і 5xx: короткий повтор, паралельні запити легко впираються в ліміт Together
+            if attempt == 2 or not re.search(r"HTTP (429|5\d\d)", str(err)):
+                raise
+            time.sleep(RETRY_WAIT * (attempt + 1))
+    raise RuntimeError("недосяжний стан повтору запиту")
 
 
 def clean(text: str | None) -> str:
@@ -501,8 +517,10 @@ def ask_json(cfg: Config, messages: list[dict], temperature: float = 0.0, budget
     for json_mode in (True, False):
         try:
             return parse_json_object(chat(cfg, messages, None, temperature, json_mode, 1200, budget).get("content") or "")
+        except BudgetExhausted:
+            raise
         except RuntimeError:
-            if not json_mode or (budget is not None and budget.remaining() < MIN_REQUEST_SECONDS):
+            if not json_mode:
                 raise
     return None
 
@@ -623,8 +641,10 @@ def verify_finding(cfg: Config, f: Finding, tools: RepoTools, diff_by_path: dict
                 {"role": "user", "content": f"{claim}\n\nФрагмент коду:\n{code_window(f, tools, diff_by_path)}"}]
     try:
         data = ask_json(cfg, messages, budget=budget) or {}
-    except RuntimeError:
-        return "unverified" if budget is not None and budget.remaining() < MIN_REQUEST_SECONDS else "unsure"
+    except BudgetExhausted:
+        return "unverified"
+    except (RuntimeError, KeyError, ValueError, IndexError):
+        return "unsure"
     verdict = str(data.get("verdict") or "").lower()
     return verdict if verdict in ("confirmed", "refuted", "unsure") else "unsure"
 
@@ -751,16 +771,23 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
     budget = Budget(cfg.budget_seconds)
     chunk_budget = budget.sub(cfg.budget_seconds * 0.3)
     verify_budget = budget.sub(MIN_REQUEST_SECONDS)  # останні секунди лишаються для підсумку
-    for i, files in enumerate(chunks):
+    def run_chunk(files: list[tuple[str, str]]) -> dict:
         if chunk_budget.remaining() < MIN_REQUEST_SECONDS:
-            notes.append("Не всі файли встигли переглянутись: вичерпано часовий бюджет. Пропущено: "
-                         + ", ".join(dict.fromkeys(p for part in chunks[i:] for p, _ in part)))
-            break
+            raise BudgetExhausted("вичерпано часовий бюджет")
+        return review_chunk(cfg, system, context, files, tools, chunk_budget)
+
+    budget_skipped: list[str] = []
+    with ThreadPoolExecutor(max_workers=cfg.workers) as pool:
+        futures = [pool.submit(run_chunk, files) for files in chunks]
+    for files, future in zip(chunks, futures):  # результати в порядку шматків, незалежно від того, хто закінчив раніше
+        names = list(dict.fromkeys(p for p, _ in files))
         try:
-            data = review_chunk(cfg, system, context, files, tools, chunk_budget)
-        except RuntimeError as err:
-            names = ", ".join(dict.fromkeys(p for p, _ in files))
-            notes.append(f"Частину файлів ({names}) не переглянуто: {err}")
+            data = future.result()
+        except BudgetExhausted:
+            budget_skipped.extend(names)
+            continue
+        except (RuntimeError, KeyError, ValueError, IndexError) as err:
+            notes.append(f"Частину файлів ({', '.join(names)}) не переглянуто: {err}")
             continue
         summaries.append(str(data.get("summary") or "").strip())
         items = data.get("findings") if isinstance(data.get("findings"), list) else []
@@ -768,6 +795,9 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
         raw_findings.extend(parsed)
         stats["raw"] += len(items)
         stats["no_evidence"] += len(items) - len(parsed)  # без файла чи цитати
+    if budget_skipped:
+        notes.append("Не всі файли встигли переглянутись: вичерпано часовий бюджет. Пропущено: "
+                     + ", ".join(dict.fromkeys(budget_skipped)))
     if not summaries and not raw_findings:
         raise RuntimeError("модель не повернула жодної придатної відповіді")
 
@@ -781,12 +811,16 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
     unique = dedupe(anchored)
     stats["duplicates"] = len(anchored) - len(unique)
 
+    if cfg.verify:
+        with ThreadPoolExecutor(max_workers=cfg.workers) as pool:
+            verdicts = list(pool.map(lambda f: verify_finding(cfg, f, tools, diff_by_path, verify_budget), unique))
+    else:
+        verdicts = ["confirmed"] * len(unique)
     confirmed: list[Finding] = []
-    for f in unique:
-        verdict = verify_finding(cfg, f, tools, diff_by_path, verify_budget) if cfg.verify else "confirmed"
+    for f, verdict in zip(unique, verdicts):  # unique відсортовано за серйозністю: критичні йдуть першими
         if verdict == "unverified":
-            stats["unverified"] += 1  # час вийшов: важливі лишаємо з позначкою, дрібниці без перевірки не показуємо
-            if f.severity != "minor":
+            stats["unverified"] += 1  # час вийшов: без перевірки показуємо лише критичні, решту ні
+            if f.severity == "critical":
                 confirmed.append(f)
         elif verdict == "refuted" or (verdict == "unsure" and f.severity == "minor"):
             stats["refuted"] += 1  # непевну дрібницю теж не показуємо
@@ -800,7 +834,7 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
         notes.append(f"Службових файлів пропущено: {len(service)} (лок-файли, зображення).")
     if stats["unverified"]:
         notes.append(f"Другою перевіркою не охоплено пунктів: {stats['unverified']} (вичерпано часовий бюджет); "
-                     "важливі лишено без перевірки, дрібні не показано.")
+                     "без перевірки показано лише критичні.")
     return render_review(summarize(cfg, pr, summaries, budget), final, stats, notes)
 
 

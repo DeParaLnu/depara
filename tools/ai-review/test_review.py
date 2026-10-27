@@ -67,6 +67,8 @@ class Stub(BaseHTTPRequestHandler):
             s["chat_requests"].append(body)
             if s.get("tick"):
                 s["tick"]()
+            if s.get("fail_codes"):
+                return self._send(s["fail_codes"].pop(0), {"error": "тимчасово"})
             if s.get("reject_json_mode") and "response_format" in body:
                 return self._send(400, {"error": "response_format не підтримується"})
             return self._send(200, {"choices": [{"message": s["replies"].pop(0)}]})
@@ -108,6 +110,9 @@ class ReviewTests(unittest.TestCase):
         (self.root / ".github" / "workflows" / "x.yml").write_text("name: x\non: push\n")
         (self.root / "tools" / "ai-review").mkdir(parents=True)
         (self.root / "tools" / "ai-review" / "rules.md").write_text("ПРАВИЛО-ПРОЄКТУ")
+        self._saved = (review.RETRY_WAIT, os.environ.get("AI_REVIEW_WORKERS"))
+        review.RETRY_WAIT = 0  # без пауз між повторами запитів
+        os.environ["AI_REVIEW_WORKERS"] = "1"  # відповіді заглушки видаються по черзі, тож паралельність вимикаємо
         Stub.state = {"comments": [], "chat_requests": [], "replies": []}
         self.server = HTTPServer(("127.0.0.1", 0), Stub)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -116,6 +121,11 @@ class ReviewTests(unittest.TestCase):
                                  repo="o/r", pr_number=7, repo_dir=self.root, timeout=5)
 
     def tearDown(self):
+        review.RETRY_WAIT = self._saved[0]
+        if self._saved[1] is None:
+            os.environ.pop("AI_REVIEW_WORKERS", None)
+        else:
+            os.environ["AI_REVIEW_WORKERS"] = self._saved[1]
         self.server.shutdown()
         self.tmp.cleanup()
 
@@ -360,14 +370,15 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(seen, [15])
 
     def test_verification_skipped_when_time_is_spent(self):
-        """Час вийшов після ревʼю шматків: пункти не перевіряються, важливі лишаються з приміткою, дрібні ні."""
+        """Час вийшов після ревʼю шматків: без перевірки показуємо лише критичні пункти."""
         clock = {"t": 0.0}
         real = review.time.monotonic
         review.time.monotonic = lambda: clock["t"]
         Stub.state["tick"] = lambda: clock.update(t=95.0)  # після першого запиту до моделі «минуло» 95 с зі 100
         Stub.state["replies"] = [say({"summary": "s", "findings": [
-            finding(severity="important", title="Важливе без перевірки"),
-            finding(severity="minor", title="Дрібне без перевірки", evidence="import x from 'y';", line=1, problem="інше"),
+            finding(severity="critical", title="Витік секрету", evidence="export default total;", line=3, problem="експортується приватне значення"),
+            finding(severity="important", title="Відсутня валідація"),
+            finding(severity="minor", title="Назва змінної", evidence="import x from 'y';", line=1, problem="неінформативне імʼя"),
         ]})]
         os.environ["AI_REVIEW_BUDGET_SECONDS"] = "100"
         try:
@@ -377,9 +388,11 @@ class ReviewTests(unittest.TestCase):
             del os.environ["AI_REVIEW_BUDGET_SECONDS"]
         posted = Stub.state["posted"]
         self.assertEqual(len(Stub.state["chat_requests"]), 1)  # жодного запиту перевірки чи підсумку
-        self.assertIn("Важливе без перевірки", posted)
-        self.assertNotIn("Дрібне без перевірки", posted)
-        self.assertIn("Другою перевіркою не охоплено пунктів: 2", posted)
+        self.assertIn("Витік секрету", posted)
+        self.assertNotIn("Відсутня валідація", posted)
+        self.assertNotIn("Назва змінної", posted)
+        self.assertIn("Другою перевіркою не охоплено пунктів: 3", posted)
+        self.assertIn("без перевірки показано лише критичні", posted)
 
     def test_chunks_after_the_chunk_budget_are_skipped_with_a_note(self):
         clock = {"t": 0.0}
@@ -399,6 +412,57 @@ class ReviewTests(unittest.TestCase):
         posted = Stub.state["posted"]
         self.assertEqual(len(Stub.state["chat_requests"]), 1)
         self.assertIn("вичерпано часовий бюджет. Пропущено: backend/src/b.ts", posted)
+
+    # ---------- швидкість: паралельність і повтори ----------
+
+    def test_verifications_run_in_parallel_and_keep_order(self):
+        import threading as th
+        import time as tm
+        lock, state = th.Lock(), {"now": 0, "max": 0}
+
+        def fake_chat(cfg, messages, tools, temperature=0.1, json_mode=False, max_tokens=3000, budget=None):
+            if messages[0]["content"] != review.VERIFY_PROMPT:  # ревʼю шматка
+                return {"role": "assistant", "content": json.dumps({"summary": "s", "findings": [
+                    finding(title="Перший пункт", evidence="import x from 'y';", line=1, problem="alpha one"),
+                    finding(title="Другий пункт", evidence="const total = items.length;", line=2, problem="beta two"),
+                    finding(title="Третій пункт", evidence="export default total;", line=3, problem="gamma three"),
+                ]}, ensure_ascii=False)}
+            with lock:
+                state["now"] += 1
+                state["max"] = max(state["max"], state["now"])
+            tm.sleep(0.3)
+            with lock:
+                state["now"] -= 1
+            refuted = "Другий" in messages[1]["content"]
+            return {"role": "assistant", "content": json.dumps({"verdict": "refuted" if refuted else "confirmed"})}
+
+        cfg = review.Config(api_key="k", repo_dir=self.root, workers=3, timeout=5)
+        real = review.chat
+        review.chat = fake_chat
+        started = tm.monotonic()
+        try:
+            out = review.run_review(cfg, {"title": "T"}, DIFF, "", review.RepoTools(self.root))
+        finally:
+            review.chat = real
+        elapsed = tm.monotonic() - started
+        self.assertGreaterEqual(state["max"], 2)  # перевірки йшли одночасно
+        self.assertLess(elapsed, 0.8)  # послідовно було б ≥0.9 с
+        self.assertIn("Перший пункт", out)
+        self.assertIn("Третій пункт", out)
+        self.assertNotIn("Другий пункт", out)  # вердикт дістався саме «своєму» пункту
+
+    def test_transient_http_errors_are_retried(self):
+        Stub.state["fail_codes"] = [429, 503]
+        Stub.state["replies"] = [say({"summary": "після повторів", "findings": []})]
+        self.run_main()
+        self.assertIn("після повторів", Stub.state["posted"])
+        self.assertEqual(len(Stub.state["chat_requests"]), 3)  # два збої й вдалий запит
+
+    def test_client_errors_are_not_retried(self):
+        Stub.state["fail_codes"] = [401, 401, 401]
+        self.run_main()
+        self.assertEqual(len(Stub.state["chat_requests"]), 1)
+        self.assertNotIn("posted", Stub.state)
 
     # ---------- поведінка при збоях ----------
 
