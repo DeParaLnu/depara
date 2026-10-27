@@ -40,7 +40,9 @@ function WeekRow({ lesson }: { lesson: Lesson }) {
       accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : sub ? ', заміна' : ''}`}
       style={[styles.row, sub && !cancelled && styles.rowChanged]}
     >
-      <Text style={styles.rowTime}>{lesson.start}</Text>
+      <Text style={styles.rowTime} numberOfLines={1}>
+        {lesson.start}
+      </Text>
       <Text style={[styles.rowSubject, cancelled && styles.rowSubjectCancelled]} numberOfLines={2}>
         {lesson.subject}
       </Text>
@@ -131,8 +133,10 @@ export function WeekView({
           <View style={styles.subtitleRow}>
             <Text style={styles.subtitle} accessibilityRole="header">
               {weekRangeLabel(weekStart)}
-              {subtitle ? ` · ${subtitle}` : ''}
             </Text>
+          </View>
+          <View style={styles.subtitleRow}>
+            <Text style={styles.subtitle}>{subtitle}</Text>
             {isHeadman && (
               <View style={styles.roleBadge}>
                 <Text style={styles.roleBadgeText}>Староста</Text>
@@ -284,7 +288,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   rowChanged: { borderLeftWidth: 3, borderLeftColor: colors.warning, paddingLeft: 9 },
-  rowTime: { width: 40, fontSize: 15, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
+  rowTime: { width: 50, fontSize: 15, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
   rowSubject: { flex: 1, fontSize: 15, lineHeight: 19, fontWeight: '700', color: colors.text },
   rowSubjectCancelled: { color: colors.textMuted, textDecorationLine: 'line-through' },
   typeBadge: { minWidth: 44, height: 24, borderRadius: 12, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
