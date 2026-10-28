@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
 import { StateView } from '../../components/StateView';
 import { clock, toIsoDate, weekdayFull, weekDays, weekRangeLabel } from '../../lib/date';
 import { colors, errorText } from '../../theme';
+import { LessonDetailsSheet } from './components/LessonDetailsSheet';
 import { parseRoom, withNext, type LessonStatus } from './lesson';
 import type { TodayState } from './TodayView';
 
@@ -36,16 +37,18 @@ const changesLabel = (n: number) => {
   return `${n} замін`;
 };
 
-function WeekRow({ lesson }: { lesson: Lesson }) {
+function WeekRow({ lesson, onPress }: { lesson: Lesson; onPress: () => void }) {
   const sub = lesson.substitution;
   const cancelled = sub?.kind === 'CANCELLED';
   const type = TYPE_SHORT[lesson.type];
   const room = parseRoom(sub?.newRoom ?? lesson.room);
   const moved = sub ? movedLabel(sub) : null;
   return (
-    <View
+    <Pressable
+      onPress={onPress}
       testID={`lesson-card-${lesson.date}-${lesson.pairNumber}-${lesson.id}`}
-      accessible
+      accessibilityRole="button"
+      accessibilityHint="Відкрити деталі пари"
       accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : moved ? `, ${moved.toLowerCase()}` : sub ? ', заміна' : ''}`}
       style={[styles.row, sub && !cancelled && styles.rowChanged]}
     >
@@ -79,7 +82,7 @@ function WeekRow({ lesson }: { lesson: Lesson }) {
         </Text>
       </View>
       <Text style={styles.rowRoom}>{room && !cancelled ? `${room.number}${room.building ? `/${room.building}` : ''}` : ''}</Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -114,6 +117,7 @@ export function WeekView({
   onRefresh,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
 
   const sections = useMemo<DaySection[]>(() => {
     const lessons = state.kind === 'ready' ? state.lessons : [];
@@ -249,11 +253,12 @@ export function WeekView({
             </View>
           )}
           renderItem={({ item }) =>
-            item.kind === 'lesson' ? <WeekRow lesson={item.lesson} /> : <Text style={styles.emptyDay}>Пар немає</Text>
+            item.kind === 'lesson' ? <WeekRow lesson={item.lesson} onPress={() => setOpenLesson(item.lesson)} /> : <Text style={styles.emptyDay}>Пар немає</Text>
           }
           renderSectionFooter={() => <View style={styles.sectionGap} />}
         />
       )}
+      <LessonDetailsSheet lesson={openLesson} onClose={() => setOpenLesson(null)} />
     </View>
   );
 }

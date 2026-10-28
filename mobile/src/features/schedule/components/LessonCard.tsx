@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Lesson } from '../../../api';
 import { colors } from '../../../theme';
 import { audienceLabel, lessonTypeLabel, roomLabel, substitutionBadge, type LessonStatus } from '../lesson';
 
-type Props = { lesson: Lesson; status: LessonStatus };
+type Props = { lesson: Lesson; status: LessonStatus; onPress?: () => void };
 
 const minutesLabel = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} год ${m % 60} хв` : `${m} хв`);
 
@@ -21,7 +21,7 @@ function a11yLabel(lesson: Lesson, status: LessonStatus) {
   return parts.join(', ');
 }
 
-export function LessonCard({ lesson, status }: Props) {
+export function LessonCard({ lesson, status, onPress }: Props) {
   const sub = lesson.substitution;
   const cancelled = sub?.kind === 'CANCELLED';
   const isNow = status.kind === 'now' && !cancelled;
@@ -34,9 +34,12 @@ export function LessonCard({ lesson, status }: Props) {
   const changed = !!sub && !cancelled;
 
   return (
-    <View
-      accessible
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint="Відкрити деталі пари"
       accessibilityLabel={a11yLabel(lesson, status)}
+      testID={`today-card-${lesson.date}-${lesson.pairNumber}-${lesson.id}`}
       style={[
         styles.card,
         isNow && styles.cardNow,
@@ -113,7 +116,7 @@ export function LessonCard({ lesson, status }: Props) {
           <Text style={styles.progressText}>залишилось {minutesLabel(status.remainingMin)}</Text>
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
 

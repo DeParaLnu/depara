@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
@@ -8,6 +8,7 @@ import { clock, headerTitle, mondayOf, toIsoDate, weekDays } from '../../lib/dat
 import { colors, errorText } from '../../theme';
 import { DayStrip } from './components/DayStrip';
 import { LessonCard } from './components/LessonCard';
+import { LessonDetailsSheet } from './components/LessonDetailsSheet';
 import { withNext } from './lesson';
 
 export type TodayState =
@@ -28,6 +29,7 @@ type Props = {
 
 // Екран «Сьогодні»: чисто презентаційний, дані й стан отримує ззовні (див. src/app/(tabs)/index.tsx)
 export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state, refreshing, onRefresh }: Props) {
+  const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
   const insets = useSafeAreaInsets();
   const days = useMemo(() => weekDays(mondayOf(now)), [now]);
 
@@ -113,7 +115,9 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
           keyExtractor={(item) => item.lesson.id}
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          renderItem={({ item }) => <LessonCard lesson={item.lesson} status={item.status} />}
+          renderItem={({ item }) => (
+            <LessonCard lesson={item.lesson} status={item.status} onPress={() => setOpenLesson(item.lesson)} />
+          )}
           ListEmptyComponent={
             <StateView
               icon="cafe-outline"
@@ -123,6 +127,7 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
           }
         />
       )}
+      <LessonDetailsSheet lesson={openLesson} onClose={() => setOpenLesson(null)} />
     </View>
   );
 }
