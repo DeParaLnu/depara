@@ -25,6 +25,25 @@ export const roomLabel = (room: string | null) => {
   return r.building ? `Корпус ${r.building} · ауд. ${r.number}` : `ауд. ${r.number}`;
 };
 
+/** Що показати в деталях пари з урахуванням заміни: нова аудиторія, викладач, корпус. */
+export function lessonDetails(lesson: Lesson) {
+  const sub = lesson.substitution;
+  const cancelled = sub?.kind === 'CANCELLED';
+  const roomChanged = !!sub?.newRoom;
+  const room = roomChanged ? sub!.newRoom : lesson.room;
+  const building = roomChanged ? (sub!.newBuilding ?? lesson.building) : lesson.building;
+  const parsed = parseRoom(room);
+  const label = roomLabel(room);
+  return {
+    cancelled,
+    teacher: sub?.newTeacher ?? lesson.teacher,
+    // «Корпус Т · ауд. 218, вул. Тарнавського»
+    location: label ? (building?.address ? `${label}, ${building.address}` : label) : null,
+    // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус
+    route: !cancelled && building && parsed ? { building, roomNumber: parsed.number } : null,
+  };
+}
+
 export const substitutionBadge = (s: Substitution) =>
   s.kind === 'CANCELLED' ? 'Скасовано' : s.kind === 'MOVED' ? 'Перенесено' : 'Заміна';
 

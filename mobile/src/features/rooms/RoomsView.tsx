@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Building, Classroom } from '../../api';
 import { StateView } from '../../components/StateView';
+import { openRoute } from '../../lib/maps';
 import { colors, errorText } from '../../theme';
 
 export type RoomsState =
@@ -48,15 +48,6 @@ export function RoomsView({
 }: Props) {
   const insets = useSafeAreaInsets();
   const [isFocused, setIsFocused] = useState(false);
-
-  const openMap = (building: Building, roomNumber?: string) => {
-    const destination = encodeURIComponent(
-      roomNumber
-        ? `${building.name}, ауд. ${roomNumber}, ${building.address} Львів`
-        : `${building.name}, ${building.address} Львів`,
-    );
-    void Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination}`);
-  };
 
   const safeId = (label: string) => label.replace(/\//g, '-');
 
@@ -176,7 +167,7 @@ export function RoomsView({
                   <View key={room.id}>
                     <TouchableOpacity
                       testID={`room-item-${idStr}`}
-                      onPress={() => openMap(room.building, room.number)}
+                      onPress={() => openRoute(room.building, room.number)}
                       style={styles.roomRow}
                       activeOpacity={0.7}
                       accessibilityRole="button"
@@ -209,7 +200,7 @@ export function RoomsView({
               {visibleBuildings.map((building, idx) => (
                 <View key={building.code}>
                   <TouchableOpacity
-                    onPress={() => openMap(building)}
+                    onPress={() => openRoute(building)}
                     style={styles.roomRow}
                     activeOpacity={0.7}
                     accessibilityRole="button"
