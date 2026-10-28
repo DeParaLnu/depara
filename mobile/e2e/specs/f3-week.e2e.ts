@@ -1,4 +1,4 @@
-import { allByTestIdPrefix, byTestId, loginAsStudent, openTab, weekDay } from '../helpers';
+import { allByTestIdPrefix, byTestId, byTestIdPrefix, loginAsStudent, openTab, weekDay } from '../helpers';
 
 // F3, сценарій «відкрити тиждень» (specs/f3-schedule.md, критерії приймання).
 // Дані: seed з --shift-to-current-week, група ТЕСТ-31, студент з підгрупою 0 (бачить усі підгрупи).
@@ -7,7 +7,7 @@ import { allByTestIdPrefix, byTestId, loginAsStudent, openTab, weekDay } from '.
 // Контракт testID для екрана «Тиждень» (src/app/(tabs)/week.tsx):
 //   week-screen              корінь екрана, коли дані завантажені
 //   week-day-YYYY-MM-DD      заголовок кожного дня тижня
-//   lesson-card-YYYY-MM-DD-N рядок пари в WeekView: дата і номер пари
+//   lesson-card-YYYY-MM-DD-N-<id> рядок пари в WeekView: дата, номер пари й id (в підгруп може бути кілька пар з одним номером)
 describe('F3: розклад на тиждень', () => {
   before(async () => {
     await loginAsStudent();
@@ -28,8 +28,8 @@ describe('F3: розклад на тиждень', () => {
     expect(mon).toBeLessThan(tue);
 
     // У понеділок у seed пари 2, 3, 4, 5: друга вище за четверту
-    const pair2 = await byTestId(`lesson-card-${weekDay(0)}-2`).getLocation('y');
-    const pair4 = await byTestId(`lesson-card-${weekDay(0)}-4`).getLocation('y');
+    const pair2 = await byTestIdPrefix(`lesson-card-${weekDay(0)}-2-`).getLocation('y');
+    const pair4 = await byTestIdPrefix(`lesson-card-${weekDay(0)}-4-`).getLocation('y');
     expect(pair2).toBeLessThan(pair4);
   });
 

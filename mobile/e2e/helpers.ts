@@ -6,6 +6,10 @@ export const byTestId = (id: string) =>
 export const allByTestId = (id: string) =>
   $$(`android=new UiSelector().resourceId("${id}")`);
 
+// Перший елемент, чий testID починається з префікса
+export const byTestIdPrefix = (prefix: string) =>
+  $(`android=new UiSelector().resourceIdMatches("^${prefix}.*")`);
+
 // Усі елементи, чий testID починається з префікса (картки пар мають id lesson-card-<дата>-<номер>)
 export const allByTestIdPrefix = (prefix: string) =>
   $$(`android=new UiSelector().resourceIdMatches("^${prefix}.*")`);

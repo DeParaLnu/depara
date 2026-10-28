@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
 import { StateView } from '../../components/StateView';
@@ -44,7 +44,7 @@ function WeekRow({ lesson }: { lesson: Lesson }) {
   const moved = sub ? movedLabel(sub) : null;
   return (
     <View
-      testID={`lesson-card-${lesson.date}-${lesson.pairNumber}`}
+      testID={`lesson-card-${lesson.date}-${lesson.pairNumber}-${lesson.id}`}
       accessible
       accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : moved ? `, ${moved.toLowerCase()}` : sub ? ', заміна' : ''}`}
       style={[styles.row, sub && !cancelled && styles.rowChanged]}
@@ -215,13 +215,16 @@ export function WeekView({
           onAction={onRefresh}
         />
       ) : !state.published ? (
-        <StateView
-          icon="calendar-outline"
-          title="Розклад ще не опубліковано"
-          description="Деканат ще не завантажив розклад для вашої групи. Перевірте пізніше."
-          actionLabel="Перевірити ще раз"
-          onAction={onRefresh}
-        />
+        // Прокручуваний контейнер: при великому системному шрифті кнопка «Перевірити ще раз» лишається досяжною
+        <ScrollView contentContainerStyle={styles.unpublished}>
+          <StateView
+            icon="calendar-outline"
+            title="Розклад ще не опубліковано"
+            description="Деканат ще не завантажив розклад для вашої групи. Перевірте пізніше."
+            actionLabel="Перевірити ще раз"
+            onAction={onRefresh}
+          />
+        </ScrollView>
       ) : (
         <SectionList
           testID="week-list"
@@ -256,6 +259,7 @@ export function WeekView({
 }
 
 const styles = StyleSheet.create({
+  unpublished: { flexGrow: 1, justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 21, gap: 12 },
   headerText: { flex: 1, gap: 4 },
