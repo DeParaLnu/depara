@@ -28,6 +28,8 @@ export default function RoomsRoute() {
       selectedBuilding={selectedBuilding}
       onSelectBuilding={setSelectedBuilding}
       buildings={buildingsQuery.data ?? []}
+      buildingsFailed={buildingsQuery.isError && !buildingsQuery.data}
+      onRetryBuildings={() => void buildingsQuery.refetch()}
       state={state}
       onRetry={() => void classroomsQuery.refetch()}
     />

@@ -28,6 +28,9 @@ type Props = {
   onSelectBuilding: (building: string | undefined) => void;
   /** Довідник корпусів з GET /buildings; поки не завантажений, чіпи й блок «Корпуси» не показуємо */
   buildings: Building[];
+  /** Довідник корпусів не завантажився: показуємо повідомлення з повтором замість мовчки сховати чіпи */
+  buildingsFailed?: boolean;
+  onRetryBuildings?: () => void;
   state: RoomsState;
   onRetry?: () => void;
 };
@@ -38,6 +41,8 @@ export function RoomsView({
   selectedBuilding,
   onSelectBuilding,
   buildings,
+  buildingsFailed = false,
+  onRetryBuildings,
   state,
   onRetry,
 }: Props) {
@@ -92,6 +97,19 @@ export function RoomsView({
           </Pressable>
         ) : null}
       </View>
+
+      {buildingsFailed ? (
+        <Pressable
+          testID="buildings-error"
+          accessibilityRole="button"
+          accessibilityLabel="Не вдалося завантажити корпуси. Спробувати ще раз"
+          onPress={onRetryBuildings}
+          style={styles.buildingsError}
+        >
+          <Ionicons name="refresh" size={16} color={colors.primary} />
+          <Text style={styles.buildingsErrorText}>Не вдалося завантажити корпуси. Спробувати ще раз</Text>
+        </Pressable>
+      ) : null}
 
       {/* Фільтр-чіпи корпусів */}
       <View style={styles.chipsRow}>
@@ -220,6 +238,8 @@ export function RoomsView({
 }
 
 const styles = StyleSheet.create({
+  buildingsError: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingVertical: 4 },
+  buildingsErrorText: { fontSize: 14, lineHeight: 19, color: colors.primary, fontWeight: '600' },
   screen: {
     flex: 1,
     backgroundColor: colors.background,
