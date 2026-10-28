@@ -96,8 +96,10 @@ class Config:
         )
 
 
+HEAD_CHARS = 1500  # скільки символів початку файла максимум, решта 6000 лишається для вікна навколо пункту
 HEAD_LINES = 25  # скільки рядків початку файла додається до фрагмента для перевірки
 MIN_REQUEST_SECONDS = 10  # менше часу на один запит до моделі не залишаємо
+TOOL_SECONDS = 20  # скільки максимум триває один виклик інструмента (рекурсивний search_text)
 RETRY_WAIT = 2.0  # пауза перед повтором запиту при 429/5xx (збільшується з кожною спробою)
 TRUNCATION_MARKER = "\n… (diff обрізано)\n"
 
@@ -361,7 +363,7 @@ class RepoTools:
                        if c.name not in DENIED_NAMES and not c.name.startswith(".env"))
         return json.dumps(names[:200], ensure_ascii=False)
 
-    def search_text(self, pattern: str, path: str = ".") -> str:
+    def search_text(self, pattern: str, path: str = ".", stop=None) -> str:
         base = self._resolve(path)
         try:
             rx = re.compile(pattern)
@@ -370,6 +372,9 @@ class RepoTools:
         out: list[str] = []
         files = [base] if base.is_file() else sorted(base.rglob("*"))
         for f in files:
+            if stop is not None and stop():
+                out.append("(пошук перервано: вичерпано час)")
+                break
             rel = f.relative_to(self.root)
             if not f.is_file() or any(x in DENIED_NAMES for x in rel.parts) or f.name.startswith(".env"):
                 continue
@@ -385,12 +390,17 @@ class RepoTools:
                 continue
         return "\n".join(out) or "Збігів немає"
 
-    def call(self, name: str, args: dict) -> str:
+    def call(self, name: str, args: dict, budget: "Budget | None" = None) -> str:
         fns = {"read_file": self.read_file, "list_files": self.list_files, "search_text": self.search_text}
         if name not in fns:
             return f"Помилка: невідомий інструмент {name}"
+        kwargs = dict(args)
+        if name == "search_text":
+            started = time.monotonic()  # довгий пошук не має винести шматок за межі бюджету
+            kwargs["stop"] = lambda: (time.monotonic() - started > TOOL_SECONDS
+                                      or (budget is not None and budget.remaining() < MIN_REQUEST_SECONDS))
         try:
-            return fns[name](**args)[:MAX_TOOL_RESULT_CHARS]
+            return fns[name](**kwargs)[:MAX_TOOL_RESULT_CHARS]
         except (TypeError, ValueError, OSError) as err:
             return f"Помилка: {err}"
 
@@ -470,7 +480,13 @@ def chat(cfg: Config, messages: list[dict], tools: list[dict] | None, temperatur
             # 429 (ліміт запитів) і 5xx: короткий повтор, паралельні запити легко впираються в ліміт Together
             if attempt == 2 or not re.search(r"HTTP (429|5\d\d)", str(err)):
                 raise
-            time.sleep(RETRY_WAIT * (attempt + 1))
+            wait = RETRY_WAIT * (attempt + 1)
+            if budget is not None:
+                room = budget.remaining() - MIN_REQUEST_SECONDS  # пауза не має з'їсти час на наступний запит
+                if room <= 0:
+                    raise BudgetExhausted("вичерпано часовий бюджет")
+                wait = min(wait, room)
+            time.sleep(wait)
     raise RuntimeError("недосяжний стан повтору запиту")
 
 
@@ -516,7 +532,7 @@ def run_agent(cfg: Config, messages: list[dict], tools: RepoTools, budget: Budge
         for call in calls:
             fn = call.get("function", {})
             args = parse_args(fn.get("arguments"))
-            result = tools.call(fn.get("name", ""), args)
+            result = tools.call(fn.get("name", ""), args, budget)
             if read_log is not None and fn.get("name") == "read_file" and not result.startswith("Помилка"):
                 read_log.add(re.sub(r"^(\./|/)+", "", str(args.get("path") or "").strip()))  # лише вдале читання
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
@@ -629,7 +645,7 @@ def code_window(f: Finding, tools: RepoTools, diff_by_path: dict[str, str], radi
     if lo > 1:  # початок файла: імпорти й глобальні перевірки часто спростовують «чогось нема»
         head = min(HEAD_LINES, lo - 1)  # без перетину з вікном навколо рядка
         out.append(f"… початок файла (рядки 1-{head}):")
-        out.extend(f"{i}: {lines[i - 1]}" for i in range(1, head + 1))
+        out.append("\n".join(f"{i}: {lines[i - 1]}" for i in range(1, head + 1))[:HEAD_CHARS])  # довгі рядки не з'їдять вікно навколо пункту
         out.append(f"\n… навколо рядка {f.line}:")
     out.extend(f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1))
     name = enclosing_name(lines, f.line - 1) if 1 <= f.line <= len(lines) else None
@@ -669,7 +685,7 @@ def verify_finding(cfg: Config, f: Finding, tools: RepoTools, diff_by_path: dict
 
 LOWER = {"critical": "important", "important": "minor", "minor": "minor"}
 # Код, де «критично» майже завжди завищення: вбудовані мок-дані, фікстури, документація і специфікації
-LOW_IMPACT = ("mobile/src/mock/", "docs/", "specs/", "mobile/e2e/", "backend/prisma/seed/")
+LOW_IMPACT = ("mobile/src/mock/", "docs/", "specs/", "mobile/e2e/", "backend/test/e2e/", "backend/prisma/seed/")
 TEST_MARKERS = ("/test/", "/tests/", ".test.", ".e2e.")  # у шляху; файли test_*.py перевіряємо за іменем
 
 

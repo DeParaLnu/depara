@@ -236,7 +236,8 @@ class ReviewTests(unittest.TestCase):
             return review.cap_severity(review.parse_finding(finding(file=path, severity=severity))).severity
         self.assertEqual(capped("mobile/src/mock/mockFetch.ts", "critical"), "minor")
         self.assertEqual(capped("docs/ai-review.md", "important"), "minor")
-        self.assertEqual(capped("backend/test/e2e/f5.test.ts", "critical"), "important")
+        self.assertEqual(capped("backend/test/e2e/f5.test.ts", "critical"), "minor")
+        self.assertEqual(capped("backend/test/unit/x.test.ts", "critical"), "important")
         self.assertEqual(capped("tools/ai-review/test_review.py", "critical"), "important")
         self.assertEqual(capped("backend/src/routes/auth.ts", "critical"), "critical")
         self.assertEqual(capped("backend/src/latest_config.py", "critical"), "critical")  # «test_» лише на початку імені
@@ -263,6 +264,28 @@ class ReviewTests(unittest.TestCase):
         window = review.code_window(f, review.RepoTools(self.root), {})
         self.assertIn("import a1 from 'm1'", window)
         self.assertIn("початок файла (рядки 1-15)", window)
+
+    def test_long_head_does_not_push_out_the_finding_window(self):
+        src = "\n".join(["x" * 500] * 15 + [f"line{i}" for i in range(1, 60)]) + "\n"
+        (self.root / "long.ts").write_text(src, "utf-8")
+        f = review.parse_finding(finding(file="long.ts", evidence="line15", line=30))
+        window = review.code_window(f, review.RepoTools(self.root), {})
+        self.assertIn("30: line15", window)
+        self.assertLessEqual(len(window), 6000)
+
+    def test_search_text_stops_when_time_is_up(self):
+        for i in range(30):
+            (self.root / f"f{i}.txt").write_text("needle\n", "utf-8")
+        out = review.RepoTools(self.root).call("search_text", {"pattern": "needle"}, review.Budget(0))
+        self.assertIn("пошук перервано", out)
+
+    def test_retry_wait_does_not_outlast_the_budget(self):
+        Stub.state["fail_codes"] = [429, 429]
+        review.RETRY_WAIT = 30  # без бюджету це була б пауза на 30 с
+        started = review.time.monotonic()
+        with self.assertRaises(review.BudgetExhausted):  # понад мінімум лишається 0.5 с: пауза обрізається до них
+            review.chat(self.cfg, [{"role": "user", "content": "x"}], None, budget=review.Budget(10.5))
+        self.assertLess(review.time.monotonic() - started, 3)
 
     def test_unsure_critical_is_shown_as_important(self):
         Stub.state["replies"] = [
