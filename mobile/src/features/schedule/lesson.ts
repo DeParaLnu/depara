@@ -37,10 +37,16 @@ export function lessonDetails(lesson: Lesson) {
   return {
     cancelled,
     teacher: sub?.newTeacher ?? lesson.teacher,
-    // «Корпус Т · ауд. 218, вул. Тарнавського»
-    location: label ? (building?.address ? `${label}, ${building.address}` : label) : null,
-    // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус
-    route: !cancelled && building && parsed ? { building, roomNumber: parsed.number } : null,
+    // «Корпус Т · ауд. 218, вул. Тарнавського»; без аудиторії лише «Корпус Т, вул. Тарнавського»
+    location: label
+      ? building?.address
+        ? `${label}, ${building.address}`
+        : label
+      : building
+        ? `${building.name}, ${building.address}`
+        : null,
+    // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус; аудиторія в запиті необовʼязкова
+    route: !cancelled && building ? { building, roomNumber: parsed?.number } : null,
   };
 }
 
