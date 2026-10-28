@@ -1,7 +1,7 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ApiError } from '../api';
 import { AppErrorBoundary } from '../components/AppErrorBoundary';
@@ -26,6 +26,13 @@ const onError = (error: unknown, source: string) => {
 };
 
 export default function RootLayout() {
+  const initSession = useSession((s) => s.initSession);
+  const isHydrated = useSession((s) => s.isHydrated);
+
+  useEffect(() => {
+    void initSession();
+  }, [initSession]);
+
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -40,6 +47,10 @@ export default function RootLayout() {
   const session = useSession((s) => s.session);
   const signedIn = !!session;
   const onboarding = signedIn && session.needsOnboarding;
+
+  if (!isHydrated) {
+    return null;
+  }
 
   return (
     <SafeAreaProvider>

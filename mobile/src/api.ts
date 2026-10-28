@@ -68,9 +68,50 @@ export class ApiError extends Error {
   }
 }
 
+export type SessionBridge = {
+  getSession: () => Session | null;
+  getDeviceId: () => Promise<string>;
+  onRefreshed: (tokens: { accessToken: string; refreshToken: string }) => Promise<void>;
+  onRefreshFailed: () => Promise<void>;
+};
+
+let sessionBridge: SessionBridge | null = null;
+export function setSessionBridge(bridge: SessionBridge) {
+  sessionBridge = bridge;
+}
+
+let refreshPromise: Promise<string | null> | null = null;
+
+async function handleTokenRefresh(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise;
+  if (!sessionBridge) return null;
+
+  refreshPromise = (async () => {
+    try {
+      const current = sessionBridge.getSession();
+      if (!current?.refreshToken) {
+        await sessionBridge.onRefreshFailed();
+        return null;
+      }
+      const deviceId = await sessionBridge.getDeviceId();
+      const res = await api.refresh(current.refreshToken, deviceId);
+      await sessionBridge.onRefreshed(res);
+      return res.accessToken;
+    } catch (e) {
+      log.warn('auth', 'помилка оновлення токена, скидаємо сесію', { error: e });
+      await sessionBridge.onRefreshFailed();
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 // Єдина точка всіх HTTP-запитів: тут логуємо метод, шлях, статус, код помилки з тіла і тривалість.
 // Токени, тіла відповідей і query-рядок у лог не потрапляють.
-async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, token?: string, isRetry = false): Promise<T> {
   const method = init.method ?? 'GET';
   const route = path.split('?')[0];
   const started = Date.now();
@@ -94,6 +135,21 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const code: string = body.error ?? `HTTP_${res.status}`;
+    // A1: авто-refresh при 401 TOKEN_EXPIRED (specs/f1-login.md)
+    if (
+      res.status === 401 &&
+      code === 'TOKEN_EXPIRED' &&
+      !isRetry &&
+      route !== '/auth/refresh' &&
+      route !== '/auth/microsoft' &&
+      sessionBridge
+    ) {
+      log.info('auth', 'access токен прострочено, виконуємо авто-refresh');
+      const newToken = await handleTokenRefresh();
+      if (newToken) {
+        return request<T>(path, init, newToken, true);
+      }
+    }
     log.warn('api', `${method} ${route} → ${res.status} ${code}`, { ms, requestId });
     throw new ApiError(code, res.status, requestId);
   }
@@ -104,6 +160,13 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
 export const api = {
   loginWithMicrosoft: (idToken: string, deviceId: string) =>
     request<Session>('/auth/microsoft', { method: 'POST', body: JSON.stringify({ idToken, deviceId }) }),
+  refresh: (refreshToken: string, deviceId: string) =>
+    request<{ accessToken: string; refreshToken: string }>('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken, deviceId }),
+    }),
+  logout: (refreshToken: string) =>
+    request<void>('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken }) }),
   groups: (token: string) => request<Group[]>('/groups', {}, token),
   me: (token: string) => request<Me>('/me', {}, token),
   setGroup: (token: string, groupId: string, subgroup: number) =>

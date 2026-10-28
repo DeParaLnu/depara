@@ -61,6 +61,19 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
     const session: Session = { accessToken: 'mock-access', refreshToken: 'mock-refresh', needsOnboarding: true };
     return reply(200, session);
   }
+
+  if (method === 'POST' && route === '/auth/refresh') {
+    if (!body.refreshToken || !body.deviceId) return reply(400, { error: 'INVALID_QUERY' });
+    if (body.refreshToken === 'mock-invalid-refresh') return reply(401, { error: 'INVALID_REFRESH_TOKEN' });
+    return reply(200, {
+      accessToken: `mock-access-${Date.now()}`,
+      refreshToken: `mock-refresh-${Date.now()}`,
+    });
+  }
+
+  if (method === 'POST' && route === '/auth/logout') {
+    return reply(204, null);
+  }
   if (!authorization) return reply(401, { error: 'UNAUTHORIZED' });
 
   if (method === 'GET' && route === '/groups') return reply(200, MOCK_GROUPS);
