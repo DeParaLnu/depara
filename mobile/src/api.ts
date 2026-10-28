@@ -26,6 +26,13 @@ export type SubstitutionKind = 'CANCELLED' | 'REPLACED' | 'MOVED' | 'ROOM_CHANGE
 // Корпус аудиторії: літера, назва й адреса (для екрана деталей і маршруту)
 export type Building = { code: string; name: string; address: string };
 
+export type Classroom = {
+  id: string;
+  number: string;
+  label: string; // «номер/код корпусу»
+  building: Building;
+};
+
 export type Substitution = {
   id: string;
   kind: SubstitutionKind;
@@ -177,4 +184,11 @@ export const api = {
     ),
   week: (token: string, date?: string) =>
     request<WeekSchedule>(`/schedule/week${date ? `?date=${date}` : ''}`, {}, token),
+  classrooms: (token: string, q?: string, building?: string) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (building) params.set('building', building);
+    const qs = params.toString();
+    return request<Classroom[]>(`/classrooms${qs ? `?${qs}` : ''}`, {}, token);
+  },
 };

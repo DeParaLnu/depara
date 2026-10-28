@@ -1,4 +1,4 @@
-import type { Building, Group, LessonType, Substitution } from '../api';
+import type { Building, Classroom, Group, LessonType, Substitution } from '../api';
 
 // Мок-дані для розробки без бекенда і SSO (режим MOCK=1). Розклад взято з тестового тижня
 // backend/prisma/seed/schedule.seed.json (група ТЕСТ-31), а дати не фіксовані: у кожному тижні
@@ -28,6 +28,19 @@ export const MOCK_BUILDINGS: Record<string, Building> = {
   Б: { code: 'Б', name: 'Корпус на Драгоманова', address: 'вул. Драгоманова' },
   Т: { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Тарнавського' },
 };
+
+/** Аудиторії з seed для тестування пошуку (F5) */
+export const MOCK_CLASSROOMS: Classroom[] = [
+  { id: 'mock-cr-1', number: '1', label: '1/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-3', number: '3', label: '3/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-5', number: '№5', label: '№5/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-9', number: '№9', label: '№9/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-n10', number: 'N10', label: 'N10/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-n11', number: 'N11', label: 'N11/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-129a', number: '129а', label: '129а/Т', building: MOCK_BUILDINGS.Т },
+  { id: 'mock-cr-218', number: '218', label: '218/Т', building: MOCK_BUILDINGS.Т },
+  { id: 'mock-cr-406', number: '406', label: '406/Т', building: MOCK_BUILDINGS.Т },
+];
 
 export const PAIR_TIMES: Record<number, { start: string; end: string }> = {
   1: { start: '08:30', end: '09:50' },
