@@ -23,7 +23,10 @@ export function useClassrooms(q?: string, building?: string) {
 
   return useQuery({
     queryKey: ['classrooms', trimmedQ ?? '', trimmedBuilding ?? ''],
-    queryFn: () => api.classrooms(token!, trimmedQ, trimmedBuilding),
+    queryFn: () => {
+      if (!token) throw new Error('UNAUTHORIZED');
+      return api.classrooms(token, trimmedQ, trimmedBuilding);
+    },
     enabled: !!token,
     staleTime: 60_000,
   });

@@ -19,6 +19,9 @@ import { colors, errorText } from '../../theme';
 export const KNOWN_BUILDINGS: Building[] = [
   { code: 'Б', name: 'Корпус Б', address: 'вул. Драгоманова' },
   { code: 'Т', name: 'Корпус Т', address: 'вул. Тарнавського' },
+  { code: 'Г', name: 'Головний корпус', address: 'вул. Університетська, 1' },
+  { code: 'К', name: 'Корпус на Кирила і Мефодія', address: 'вул. Кирила і Мефодія, 8' },
+  { code: 'С', name: 'Спортивний комплекс', address: 'вул. Козельницька, 2а' },
 ];
 
 export type RoomsState =
@@ -46,9 +49,13 @@ export function RoomsView({
   const insets = useSafeAreaInsets();
   const [isFocused, setIsFocused] = useState(false);
 
-  const openMap = (building: Building) => {
-    const query = encodeURIComponent(`${building.name} ${building.address} Львів`);
-    void Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+  const openMap = (building: Building, roomNumber?: string) => {
+    const destination = encodeURIComponent(
+      roomNumber
+        ? `${building.name}, ауд. ${roomNumber}, ${building.address} Львів`
+        : `${building.name}, ${building.address} Львів`,
+    );
+    void Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination}`);
   };
 
   const safeId = (label: string) => label.replace(/\//g, '-');
@@ -156,7 +163,7 @@ export function RoomsView({
                   <View key={room.id}>
                     <TouchableOpacity
                       testID={`room-item-${idStr}`}
-                      onPress={() => openMap(room.building)}
+                      onPress={() => openMap(room.building, room.number)}
                       style={styles.roomRow}
                       activeOpacity={0.7}
                       accessibilityRole="button"
