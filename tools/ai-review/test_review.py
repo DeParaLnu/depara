@@ -245,6 +245,23 @@ class ReviewTests(unittest.TestCase):
         data = review.review_chunk(self.cfg, "sys", "ctx", [("backend/src/a.ts", "x")], review.RepoTools(self.root))
         self.assertEqual(data["_read"], ["backend/src/a.ts"])
 
+    def test_failed_read_is_not_recorded(self):
+        Stub.state["replies"] = [
+            tool_call("read_file", {"path": "backend/src/a.ts", "start_line": "abc"}),
+            tool_call("read_file", {"path": "немає/такого.ts"}, "c2"),
+            say({"summary": "s", "findings": []}),
+        ]
+        data = review.review_chunk(self.cfg, "sys", "ctx", [("backend/src/a.ts", "x")], review.RepoTools(self.root))
+        self.assertEqual(data["_read"], [])
+
+    def test_window_includes_file_head_for_nearby_finding(self):
+        src = "\n".join([f"import a{i} from 'm{i}';" for i in range(1, 31)] + ["x"] * 20) + "\n"
+        (self.root / "near.ts").write_text(src, "utf-8")
+        f = review.parse_finding(finding(file="near.ts", evidence="x", line=30))  # вікно починається з 16-го рядка
+        window = review.code_window(f, review.RepoTools(self.root), {})
+        self.assertIn("import a1 from 'm1'", window)
+        self.assertIn("початок файла (рядки 1-15)", window)
+
     def test_unsure_critical_is_shown_as_important(self):
         Stub.state["replies"] = [
             tool_call("read_file", {"path": "backend/src/a.ts"}),

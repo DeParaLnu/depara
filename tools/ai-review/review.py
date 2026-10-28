@@ -441,8 +441,8 @@ SYSTEM_PROMPT = """Ти ревʼювер pull request'ів у проєкті «�
 VERIFY_PROMPT = """Ти перевіряєш чуже зауваження до коду. Нижче твердження ревʼювера і фрагмент коду (факт).
 Визнач, чи твердження справді правильне саме для цього коду. Звертай увагу на значення, кольори, типи й
 імпорти, які видно у фрагменті, і на початок файла (імпорти, глобальні перевірки). Якщо потрібна перевірка, імпорт чи
-обробка вже є у фрагменті чи вище по коду, це «refuted». Якщо серйозність завищена (мок, тестові дані, документація не
-є вразливістю), теж «refuted». Якщо не вистачає даних, щоб підтвердити, відповідай «unsure».
+обробка вже є у фрагменті чи вище по коду, це «refuted». Серйозність не оцінюй: лише чи правильне саме твердження.
+Якщо не вистачає даних, щоб підтвердити, відповідай «unsure».
 Відповідай ЛИШЕ JSON: {"verdict": "confirmed" | "refuted" | "unsure", "reason": "1 речення"}"""
 
 
@@ -516,9 +516,9 @@ def run_agent(cfg: Config, messages: list[dict], tools: RepoTools, budget: Budge
         for call in calls:
             fn = call.get("function", {})
             args = parse_args(fn.get("arguments"))
-            if read_log is not None and fn.get("name") == "read_file":
-                read_log.add(re.sub(r"^(\./|/)+", "", str(args.get("path") or "").strip()))
             result = tools.call(fn.get("name", ""), args)
+            if read_log is not None and fn.get("name") == "read_file" and not result.startswith("Помилка"):
+                read_log.add(re.sub(r"^(\./|/)+", "", str(args.get("path") or "").strip()))  # лише вдале читання
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
     messages.append({"role": "user", "content": "Ліміт кроків вичерпано. Дай відповідь у тому самому JSON-форматі за тим, що вже відомо."})
     return clean(chat(cfg, messages, None, budget=budget).get("content"))
@@ -626,9 +626,10 @@ def code_window(f: Finding, tools: RepoTools, diff_by_path: dict[str, str], radi
     lines = text.splitlines()
     lo, hi = max(1, f.line - radius), min(len(lines), f.line + radius)
     out = []
-    if lo > HEAD_LINES + 1:  # початок файла: імпорти й глобальні перевірки часто спростовують «чогось нема»
-        out.append(f"… початок файла (рядки 1-{HEAD_LINES}):")
-        out.extend(f"{i}: {lines[i - 1]}" for i in range(1, min(len(lines), HEAD_LINES) + 1))
+    if lo > 1:  # початок файла: імпорти й глобальні перевірки часто спростовують «чогось нема»
+        head = min(HEAD_LINES, lo - 1)  # без перетину з вікном навколо рядка
+        out.append(f"… початок файла (рядки 1-{head}):")
+        out.extend(f"{i}: {lines[i - 1]}" for i in range(1, head + 1))
         out.append(f"\n… навколо рядка {f.line}:")
     out.extend(f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1))
     name = enclosing_name(lines, f.line - 1) if 1 <= f.line <= len(lines) else None
