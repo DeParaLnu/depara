@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { mondayOf, toIsoDate } from '../../lib/date';
 import { errorCode, isNetworkError } from '../../lib/errors';
-import { useGroups, useMe, useNow, useWeek } from '../../features/schedule/hooks';
+import { useGroupLabel, useNow, useWeek } from '../../features/schedule/hooks';
 import { TodayView, type TodayState } from '../../features/schedule/TodayView';
 
 // Контейнер екрана «Сьогодні»: бере дані з API і віддає їх у TodayView
@@ -10,8 +10,7 @@ export default function TodayRoute() {
   const [selected, setSelected] = useState(() => new Date());
 
   const week = useWeek(toIsoDate(mondayOf(now)));
-  const me = useMe();
-  const groups = useGroups();
+  const { subtitle, isHeadman, refetchMe } = useGroupLabel();
 
   let state: TodayState;
   if (week.data) {
@@ -28,22 +27,18 @@ export default function TodayRoute() {
     state = { kind: 'loading' };
   }
 
-  const group = groups.data?.find((g) => g.id === me.data?.groupId);
-  const subgroup = me.data ? (me.data.subgroup === 0 ? 'усі підгрупи' : `підгрупа ${me.data.subgroup}`) : '';
-  const subtitle = [group?.code, subgroup].filter(Boolean).join(' · ');
-
   return (
     <TodayView
       now={now}
       selected={selected}
       onSelect={setSelected}
       subtitle={subtitle}
-      isHeadman={me.data?.role === 'HEADMAN'}
+      isHeadman={isHeadman}
       state={state}
       refreshing={week.isRefetching && !week.isPending}
       onRefresh={() => {
         void week.refetch();
-        void me.refetch();
+        void refetchMe();
       }}
     />
   );

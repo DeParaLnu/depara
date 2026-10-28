@@ -50,6 +50,8 @@ services:
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-lnu.edu.ua}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      PUBLIC_API: ${PUBLIC_API:-on}
+      PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-60}
     depends_on:
       postgres:
         condition: service_healthy

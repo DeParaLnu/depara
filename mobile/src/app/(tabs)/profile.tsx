@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../../features/auth/session';
@@ -16,20 +17,34 @@ const initials = (name: string) =>
 export default function ProfileRoute() {
   const insets = useSafeAreaInsets();
   const signOut = useSession((s) => s.signOut);
+  const guest = useSession((s) => (s.session ? null : s.guest));
+  const setGuestGroup = useSession((s) => s.setGuestGroup);
+  const leaveGuest = useSession((s) => s.leaveGuest);
   const me = useMe();
   const groups = useGroups();
-  const group = groups.data?.find((g) => g.id === me.data?.groupId);
-  const displayName = me.data?.fullName ?? me.data?.email ?? '';
-  const subgroup = me.data ? (me.data.subgroup === 0 ? 'Усі' : String(me.data.subgroup)) : '';
+  // Гість бачить свою локальну групу, користувач групу з профілю
+  const groupId = guest ? guest.groupId : me.data?.groupId;
+  const subgroupNo = guest ? guest.subgroup : me.data?.subgroup;
+  const group = groups.data?.find((g) => g.id === groupId);
+  const displayName = guest ? 'Гість' : (me.data?.fullName ?? me.data?.email ?? '');
+  const subgroup = subgroupNo === undefined ? '' : subgroupNo === 0 ? 'Усі' : String(subgroupNo);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 24 }]}>
       <View style={styles.hero}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials(displayName) || ' '}</Text>
+          {guest ? (
+            <Ionicons name="person-outline" size={40} color={colors.primary} />
+          ) : (
+            <Text style={styles.avatarText}>{initials(displayName) || ' '}</Text>
+          )}
         </View>
         <Text style={styles.name}>{displayName || ' '}</Text>
-        {me.data?.fullName ? <Text style={styles.email}>{me.data.email}</Text> : null}
+        {guest ? (
+          <Text style={styles.email}>Розклад без входу</Text>
+        ) : me.data?.fullName ? (
+          <Text style={styles.email}>{me.data.email}</Text>
+        ) : null}
       </View>
 
       <View>
@@ -43,15 +58,41 @@ export default function ProfileRoute() {
         </View>
       </View>
 
-      <Pressable
-        testID="sign-out-button"
-        accessibilityRole="button"
-        accessibilityLabel="Вийти з акаунту"
-        onPress={signOut}
-        style={({ pressed }) => [styles.signOut, pressed && styles.signOutPressed]}
-      >
-        <Text style={styles.signOutText}>Вийти з акаунту</Text>
-      </Pressable>
+      {guest ? (
+        <>
+          <Text style={styles.hint}>
+            Сповіщення, заміни від старости й синхронізація між пристроями доступні після входу.
+          </Text>
+          <Pressable
+            testID="guest-change-group"
+            accessibilityRole="button"
+            accessibilityLabel="Змінити групу"
+            onPress={() => setGuestGroup(null)}
+            style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
+          >
+            <Text style={styles.secondaryText}>Змінити групу</Text>
+          </Pressable>
+          <Pressable
+            testID="guest-sign-in"
+            accessibilityRole="button"
+            accessibilityLabel="Увійти"
+            onPress={leaveGuest}
+            style={({ pressed }) => [styles.primary, pressed && styles.primaryPressed]}
+          >
+            <Text style={styles.primaryText}>Увійти через пошту ЛНУ</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Pressable
+          testID="sign-out-button"
+          accessibilityRole="button"
+          accessibilityLabel="Вийти з акаунту"
+          onPress={signOut}
+          style={({ pressed }) => [styles.signOut, pressed && styles.signOutPressed]}
+        >
+          <Text style={styles.signOutText}>Вийти з акаунту</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -81,6 +122,28 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: 17, color: colors.text },
   rowValue: { fontSize: 17, fontWeight: '700', color: colors.text },
+  hint: { marginTop: 'auto', fontSize: 14, lineHeight: 20, color: colors.textMuted, textAlign: 'center', marginBottom: 12 },
+  secondary: {
+    minHeight: 54,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  secondaryPressed: { backgroundColor: colors.surfaceTint },
+  secondaryText: { color: colors.primary, fontWeight: '700', fontSize: 17 },
+  primary: {
+    minHeight: 54,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  primaryPressed: { backgroundColor: colors.primaryDark },
+  primaryText: { color: colors.surface, fontWeight: '700', fontSize: 17 },
   signOut: {
     marginTop: 'auto',
     marginBottom: 24,

@@ -29,6 +29,10 @@ export const config = {
     .filter(Boolean),
   // За Caddy довіряємо його X-Forwarded-For, щоб у логах був IP клієнта. Вмикається лише в проді (compose).
   trustProxy: process.env.TRUST_PROXY === 'true',
+  // Гостьовий режим: розклад, групи й аудиторії без входу (/public/*). PUBLIC_API=off вимикає все (404),
+  // якщо університет не погодить відкриті дані. Ліміт запитів на IP за хвилину захищає від масового вивантаження.
+  publicApi: (process.env.PUBLIC_API ?? 'on').trim().toLowerCase() !== 'off',
+  publicRateLimitPerMinute: Number(process.env.PUBLIC_RATE_LIMIT_PER_MINUTE) > 0 ? Number(process.env.PUBLIC_RATE_LIMIT_PER_MINUTE) : 60,
   // Фейковий вхід дозволений ЛИШЕ в тестовому режимі. У проді він завжди вимкнений.
   fakeAuth: process.env.NODE_ENV === 'test' && process.env.AUTH_MODE === 'fake',
 } as const;

@@ -2,10 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
 import { isSubgroup, isUuid } from '../lib/validation';
 import { requireAuth } from '../plugins/auth';
+import { publicGuard } from '../plugins/publicApi';
 
 // F2: список груп і вибір своєї
 export async function profileRoutes(app: FastifyInstance) {
-  app.get('/groups', { preHandler: requireAuth }, async () => {
+  const listGroups = async () => {
     const groups = await prisma.studyGroup.findMany({
       include: { faculty: true },
       orderBy: { code: 'asc' },
@@ -16,7 +17,10 @@ export async function profileRoutes(app: FastifyInstance) {
       course: g.course,
       faculty: g.faculty.shortName,
     }));
-  });
+  };
+  app.get('/groups', { preHandler: requireAuth }, listGroups);
+  // F10: список груп для гостя (вибір групи без входу)
+  app.get('/public/groups', { preHandler: publicGuard }, listGroups);
 
   app.get('/me', { preHandler: requireAuth }, async (req, reply) => {
     const user = await prisma.user.findUnique({ where: { id: req.userId } });

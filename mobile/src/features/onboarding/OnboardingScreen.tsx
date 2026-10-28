@@ -40,6 +40,10 @@ export function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const token = useSession((s) => s.session?.accessToken ?? '');
   const finishOnboarding = useSession((s) => s.finishOnboarding);
+  // Гість без входу: група зберігається на пристрої, а не в профілі на сервері
+  const isGuest = useSession((s) => !s.session && !!s.guest);
+  const setGuestGroup = useSession((s) => s.setGuestGroup);
+  const leaveGuest = useSession((s) => s.leaveGuest);
   const queryClient = useQueryClient();
   const groups = useGroups();
 
@@ -65,8 +69,13 @@ export function OnboardingScreen() {
 
   const save = useMutation({
     mutationKey: ['setGroup'],
-    mutationFn: () => api.setGroup(token, groupId!, subgroup),
+    mutationFn: async () => {
+      if (isGuest) return setGuestGroup(groupId!, subgroup);
+      await api.setGroup(token, groupId!, subgroup);
+    },
     onSuccess: async () => {
+      // Гість: вибір уже збережено, роутер сам відкриє вкладки
+      if (isGuest) return;
       await queryClient.invalidateQueries({ queryKey: ['me'] });
       finishOnboarding();
     },
@@ -90,6 +99,17 @@ export function OnboardingScreen() {
             accessibilityRole="button"
             accessibilityLabel="Назад до вибору факультету"
             onPress={goBack}
+            hitSlop={12}
+            style={styles.back}
+          >
+            <Ionicons name="chevron-back" size={28} color={colors.primary} />
+          </Pressable>
+        ) : isGuest ? (
+          <Pressable
+            testID="guest-back-to-login"
+            accessibilityRole="button"
+            accessibilityLabel="Назад до входу"
+            onPress={leaveGuest}
             hitSlop={12}
             style={styles.back}
           >

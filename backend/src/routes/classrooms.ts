@@ -1,10 +1,11 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db';
 import { requireAuth } from '../plugins/auth';
+import { publicGuard } from '../plugins/publicApi';
 
 // F5: пошук аудиторій, за номером (q) і/або корпусом (building = літера корпусу)
 export async function classroomRoutes(app: FastifyInstance) {
-  app.get('/classrooms', { preHandler: requireAuth }, async (req, reply) => {
+  const searchClassrooms = async (req: FastifyRequest, reply: FastifyReply) => {
     const { q, building } = req.query as { q?: unknown; building?: unknown };
     // Повторений параметр (?building=А&building=Б) Fastify віддає масивом: це не рядок, відхиляємо
     if ((q !== undefined && typeof q !== 'string') || (building !== undefined && typeof building !== 'string')) {
@@ -26,5 +27,8 @@ export async function classroomRoutes(app: FastifyInstance) {
       label: `${r.number}/${r.building.code}`,
       building: { code: r.building.code, name: r.building.name, address: r.building.address },
     }));
-  });
+  };
+  app.get('/classrooms', { preHandler: requireAuth }, searchClassrooms);
+  // F10: той самий пошук для гостя без входу
+  app.get('/public/classrooms', { preHandler: publicGuard }, searchClassrooms);
 }

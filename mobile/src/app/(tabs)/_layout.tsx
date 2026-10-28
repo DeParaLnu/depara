@@ -26,6 +26,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
+          tabBarButtonTestID: 'tab-today',
           title: 'Сьогодні',
           tabBarIcon: ({ color, focused, size }) => (
             <Ionicons name={focused ? 'home' : 'home-outline'} size={size} color={color} />
@@ -35,6 +36,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="week"
         options={{
+          tabBarButtonTestID: 'tab-week',
           title: 'Тиждень',
           tabBarIcon: ({ color, focused, size }) => (
             <Ionicons name={focused ? 'calendar' : 'calendar-outline'} size={size} color={color} />
@@ -44,6 +46,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="rooms"
         options={{
+          tabBarButtonTestID: 'tab-rooms',
           title: 'Аудиторії',
           tabBarIcon: ({ color, size }) => <Ionicons name="search" size={size} color={color} />,
         }}
@@ -51,6 +54,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
+          tabBarButtonTestID: 'tab-profile',
           title: 'Профіль',
           tabBarIcon: ({ color, focused, size }) => (
             <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />

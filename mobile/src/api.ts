@@ -114,4 +114,10 @@ export const api = {
     ),
   week: (token: string, date?: string) =>
     request<WeekSchedule>(`/schedule/week${date ? `?date=${date}` : ''}`, {}, token),
+  // Гостьовий режим (F10): ті самі дані без токена, групу й підгрупу передає клієнт
+  publicGroups: () => request<Group[]>('/public/groups'),
+  publicWeek: (groupId: string, subgroup: number, date?: string) =>
+    request<WeekSchedule>(
+      `/public/schedule/week?groupId=${encodeURIComponent(groupId)}&subgroup=${subgroup}${date ? `&date=${date}` : ''}`,
+    ),
 };

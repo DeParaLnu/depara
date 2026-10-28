@@ -15,6 +15,7 @@ const deviceId = `device-${Math.random().toString(36).slice(2)}`;
 export function LoginScreen() {
   const insets = useSafeAreaInsets();
   const setSession = useSession((s) => s.setSession);
+  const startGuest = useSession((s) => s.startGuest);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +64,17 @@ export function LoginScreen() {
               <Text style={styles.buttonText}>Увійдіть через корпоративну пошту ЛНУ (@lnu.edu.ua)</Text>
             </>
           )}
+        </Pressable>
+
+        <Pressable
+          testID="guest-button"
+          accessibilityRole="button"
+          accessibilityLabel="Переглянути розклад без входу"
+          onPress={startGuest}
+          disabled={loading}
+          style={({ pressed }) => [styles.guestButton, pressed && styles.guestButtonPressed]}
+        >
+          <Text style={styles.guestButtonText}>Переглянути розклад без входу</Text>
         </Pressable>
 
         <View style={styles.info}>
@@ -114,6 +126,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonText: { flex: 1, fontSize: 14, lineHeight: 18, fontWeight: '700', color: colors.surface },
+  guestButton: {
+    minHeight: 54,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  guestButtonPressed: { backgroundColor: colors.surfaceTint },
+  guestButtonText: { fontSize: 16, fontWeight: '700', color: colors.primary },
   info: {
     flexDirection: 'row',
     alignItems: 'flex-start',

@@ -20,6 +20,11 @@ const onError = (error: unknown, source: string) => {
       log.warn('auth', 'сервер відповів 401: сесію скинуто, повернення на екран входу');
       useSession.getState().signOut();
     }
+    // Гість обрав групу, якої вже немає (видалили на сервері): просимо обрати заново
+    if (error.code === 'GROUP_NOT_FOUND' && useSession.getState().guest?.groupId) {
+      log.warn('guest', 'обрана гостем група не знайдена: повернення до вибору групи');
+      useSession.getState().setGuestGroup(null);
+    }
     return;
   }
   log.error('query', `${source}: неочікувана помилка`, error);
@@ -38,8 +43,13 @@ export default function RootLayout() {
       }),
   );
   const session = useSession((s) => s.session);
+  const guest = useSession((s) => s.guest);
   const signedIn = !!session;
-  const onboarding = signedIn && session.needsOnboarding;
+  const isGuest = !signedIn && !!guest;
+  // Онбординг потрібен новому користувачу (без групи в профілі) і гостю, який ще не обрав групу
+  const onboarding = (signedIn && session.needsOnboarding) || (isGuest && !guest.groupId);
+  // Вкладки відкриті користувачу з групою і гостю з обраною групою (розклад без входу)
+  const inApp = (signedIn && !session.needsOnboarding) || (isGuest && !!guest.groupId);
 
   return (
     <SafeAreaProvider>
@@ -47,13 +57,13 @@ export default function RootLayout() {
         <StatusBar style="auto" />
         <AppErrorBoundary>
           <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Protected guard={!signedIn}>
+            <Stack.Protected guard={!signedIn && !isGuest}>
               <Stack.Screen name="sign-in" />
             </Stack.Protected>
             <Stack.Protected guard={onboarding}>
               <Stack.Screen name="onboarding" />
             </Stack.Protected>
-            <Stack.Protected guard={signedIn && !onboarding}>
+            <Stack.Protected guard={inApp}>
               <Stack.Screen name="(tabs)" />
             </Stack.Protected>
           </Stack>

@@ -21,13 +21,14 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 const buildingOf = (room: string | null): Building | null =>
   room ? (MOCK_BUILDINGS[room.slice(room.lastIndexOf('/') + 1)] ?? null) : null;
 
-function weekOf(dateParam: string | null): WeekSchedule {
+// Розклад тижня для групи й підгрупи: ним користуються і /schedule/week (група з профілю), і /public/schedule/week
+function weekOf(dateParam: string | null, groupId: string | null, subgroup: number): WeekSchedule {
   const monday = mondayOf(dateParam ? fromIsoDate(dateParam) : new Date());
   const weekStart = toIsoDate(monday);
   // Як у бекенді: група без жодної пари = «розклад ще не опубліковано»
-  if (state.groupId !== MOCK_SCHEDULE_GROUP_ID) return { weekStart, published: false, lessons: [] };
+  if (groupId !== MOCK_SCHEDULE_GROUP_ID) return { weekStart, published: false, lessons: [] };
 
-  const lessons: Lesson[] = MOCK_LESSONS.filter((l) => state.subgroup === 0 || [0, state.subgroup].includes(l.subgroup))
+  const lessons: Lesson[] = MOCK_LESSONS.filter((l) => subgroup === 0 || [0, subgroup].includes(l.subgroup))
     .sort((a, b) => a.day - b.day || a.pair - b.pair || a.subgroup - b.subgroup)
     .map((l, i) => ({
       id: `mock-${weekStart}-${i}`,
@@ -61,6 +62,21 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
     const session: Session = { accessToken: 'mock-access', refreshToken: 'mock-refresh', needsOnboarding: true };
     return reply(200, session);
   }
+
+  // Гостьовий режим (F10): ті самі дані без токена, група й підгрупа йдуть у запиті
+  if (method === 'GET' && route === '/public/groups') return reply(200, MOCK_GROUPS);
+  if (method === 'GET' && route === '/public/schedule/week') {
+    const params = new URLSearchParams(query);
+    const groupId = params.get('groupId');
+    const date = params.get('date');
+    const subgroupParam = params.get('subgroup');
+    if (!groupId) return reply(400, { error: 'INVALID_GROUP_ID' });
+    if (subgroupParam !== null && !/^[0-2]$/.test(subgroupParam)) return reply(400, { error: 'INVALID_SUBGROUP' });
+    if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply(400, { error: 'INVALID_DATE' });
+    if (!MOCK_GROUPS.some((g) => g.id === groupId)) return reply(404, { error: 'GROUP_NOT_FOUND' });
+    return reply(200, weekOf(date, groupId, Number(subgroupParam ?? 0)));
+  }
+
   if (!authorization) return reply(401, { error: 'UNAUTHORIZED' });
 
   if (method === 'GET' && route === '/groups') return reply(200, MOCK_GROUPS);
@@ -81,7 +97,7 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
     if (!state.groupId) return reply(409, { error: 'GROUP_NOT_SET' });
     const date = new URLSearchParams(query).get('date');
     if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply(400, { error: 'INVALID_DATE' });
-    return reply(200, weekOf(date));
+    return reply(200, weekOf(date, state.groupId, state.subgroup));
   }
 
   return reply(404, { error: 'NOT_FOUND' });
