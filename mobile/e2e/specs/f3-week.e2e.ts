@@ -1,4 +1,4 @@
-import { allByTestId, byTestId, loginAsStudent, openTab, weekDay } from '../helpers';
+import { allByTestIdPrefix, byTestId, loginAsStudent, openTab, weekDay } from '../helpers';
 
 // F3, сценарій «відкрити тиждень» (specs/f3-schedule.md, критерії приймання).
 // Дані: seed з --shift-to-current-week, група ТЕСТ-31, студент з підгрупою 0 (бачить усі підгрупи).
@@ -6,9 +6,8 @@ import { allByTestId, byTestId, loginAsStudent, openTab, weekDay } from '../help
 //
 // Контракт testID для екрана «Тиждень» (src/app/(tabs)/week.tsx):
 //   week-screen              корінь екрана, коли дані завантажені
-//   week-day-YYYY-MM-DD      заголовок дня (лише дні, у яких є пари)
-//   lesson-card              кожна картка пари (додати в LessonCard)
-//   lesson-card-YYYY-MM-DD-N картка конкретної пари: дата і номер пари
+//   week-day-YYYY-MM-DD      заголовок кожного дня тижня
+//   lesson-card-YYYY-MM-DD-N рядок пари в WeekView: дата і номер пари
 describe('F3: розклад на тиждень', () => {
   before(async () => {
     await loginAsStudent();
@@ -18,7 +17,7 @@ describe('F3: розклад на тиждень', () => {
 
   it('показує пари тижня', async () => {
     await byTestId(`week-day-${weekDay(0)}`).waitForDisplayed();
-    const cards = await allByTestId('lesson-card');
+    const cards = await allByTestIdPrefix('lesson-card-');
     expect(cards.length).toBeGreaterThan(0);
   });
 

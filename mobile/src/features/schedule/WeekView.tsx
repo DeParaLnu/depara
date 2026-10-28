@@ -44,6 +44,7 @@ function WeekRow({ lesson }: { lesson: Lesson }) {
   const moved = sub ? movedLabel(sub) : null;
   return (
     <View
+      testID={`lesson-card-${lesson.date}-${lesson.pairNumber}`}
       accessible
       accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : moved ? `, ${moved.toLowerCase()}` : sub ? ', заміна' : ''}`}
       style={[styles.row, sub && !cancelled && styles.rowChanged]}
@@ -135,7 +136,7 @@ export function WeekView({
   }, [state, now, weekStart]);
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]} testID={state.kind === 'ready' ? 'week-screen' : undefined}>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.title} accessibilityRole="header">
@@ -213,6 +214,14 @@ export function WeekView({
           actionLabel="Спробувати ще раз"
           onAction={onRefresh}
         />
+      ) : !state.published ? (
+        <StateView
+          icon="calendar-outline"
+          title="Розклад ще не опубліковано"
+          description="Деканат ще не завантажив розклад для вашої групи. Перевірте пізніше."
+          actionLabel="Перевірити ще раз"
+          onAction={onRefresh}
+        />
       ) : (
         <SectionList
           testID="week-list"
@@ -222,7 +231,7 @@ export function WeekView({
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           renderSectionHeader={({ section }) => (
-            <View style={styles.dayHeader}>
+            <View style={styles.dayHeader} testID={`week-day-${section.key}`}>
               <Text
                 style={[styles.dayTitle, section.isToday && styles.dayTitleToday]}
                 accessibilityRole="header"
