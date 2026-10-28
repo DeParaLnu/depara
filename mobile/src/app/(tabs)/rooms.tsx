@@ -1,13 +1,33 @@
-import { View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StateView } from '../../components/StateView';
+import { useState } from 'react';
+import { errorCode } from '../../lib/errors';
+import { useClassrooms, useDebounce } from '../../features/rooms/hooks';
+import { RoomsView, type RoomsState } from '../../features/rooms/RoomsView';
 
-// F5: пошук аудиторій ще не зроблено, лише заглушка для навігації
+// F5: екран «Аудиторії» з пошуком і фільтром за корпусом (specs/f5-search.md)
 export default function RoomsRoute() {
-  const insets = useSafeAreaInsets();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedBuilding, setSelectedBuilding] = useState<string | undefined>(undefined);
+
+  const debouncedQuery = useDebounce(searchQuery, 150);
+  const classroomsQuery = useClassrooms(debouncedQuery, selectedBuilding);
+
+  let state: RoomsState;
+  if (classroomsQuery.data) {
+    state = { kind: 'ready', rooms: classroomsQuery.data };
+  } else if (classroomsQuery.isError) {
+    state = { kind: 'error', code: errorCode(classroomsQuery.error) };
+  } else {
+    state = { kind: 'loading' };
+  }
+
   return (
-    <View style={{ flex: 1, justifyContent: 'center', paddingTop: insets.top }}>
-      <StateView icon="search" title="Аудиторії" description="Пошук аудиторій і корпусів зʼявиться найближчим часом." />
-    </View>
+    <RoomsView
+      searchQuery={searchQuery}
+      onSearchChange={setSearchQuery}
+      selectedBuilding={selectedBuilding}
+      onSelectBuilding={setSelectedBuilding}
+      state={state}
+      onRetry={() => void classroomsQuery.refetch()}
+    />
   );
 }

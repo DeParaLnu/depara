@@ -1,6 +1,6 @@
 import type { Building, Lesson, Me, Session, WeekSchedule } from '../api';
 import { addDays, fromIsoDate, mondayOf, toIsoDate } from '../lib/date';
-import { MOCK_BUILDINGS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MOCK_SCHEDULE_GROUP_ID, PAIR_TIMES } from './fixtures';
+import { MOCK_BUILDINGS, MOCK_CLASSROOMS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MOCK_SCHEDULE_GROUP_ID, PAIR_TIMES } from './fixtures';
 
 // Підміна fetch для режиму MOCK=1. Повертає справжній Response, тож api.ts проходить ті самі
 // шляхи (логування, коди помилок), що й з реальним сервером. Стан живе в памʼяті до перезапуску.
@@ -82,6 +82,21 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
     const date = new URLSearchParams(query).get('date');
     if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply(400, { error: 'INVALID_DATE' });
     return reply(200, weekOf(date));
+  }
+
+  if (method === 'GET' && route === '/classrooms') {
+    const params = new URLSearchParams(query);
+    const q = params.get('q')?.trim().toLowerCase();
+    const building = params.get('building')?.trim().toLowerCase();
+
+    let list = MOCK_CLASSROOMS;
+    if (q) {
+      list = list.filter((r) => r.number.toLowerCase().includes(q));
+    }
+    if (building) {
+      list = list.filter((r) => r.building.code.toLowerCase() === building);
+    }
+    return reply(200, list.slice(0, 20));
   }
 
   return reply(404, { error: 'NOT_FOUND' });
