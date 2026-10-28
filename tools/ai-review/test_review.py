@@ -272,6 +272,16 @@ class ReviewTests(unittest.TestCase):
         window = review.code_window(f, review.RepoTools(self.root), {})
         self.assertIn("30: line15", window)
         self.assertLessEqual(len(window), 6000)
+        self.assertIn("рядки 1-2, решту обрізано", window)  # реальний діапазон, а не заявлені 1-15
+
+    def test_capped_retry_pause_still_sends_the_retry(self):
+        Stub.state["fail_codes"] = [429]
+        Stub.state["replies"] = [say({"ok": True})]
+        review.RETRY_WAIT = 30
+        started = review.time.monotonic()
+        msg = review.chat(self.cfg, [{"role": "user", "content": "x"}], None, budget=review.Budget(12.0))
+        self.assertIn("ok", msg["content"])  # запас RETRY_MARGIN: після скороченої паузи повтор іще можливий
+        self.assertLess(review.time.monotonic() - started, 3)
 
     def test_search_text_stops_when_time_is_up(self):
         for i in range(30):

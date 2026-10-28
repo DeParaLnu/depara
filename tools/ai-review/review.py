@@ -100,6 +100,7 @@ HEAD_CHARS = 1500  # скільки символів початку файла �
 HEAD_LINES = 25  # скільки рядків початку файла додається до фрагмента для перевірки
 MIN_REQUEST_SECONDS = 10  # менше часу на один запит до моделі не залишаємо
 TOOL_SECONDS = 20  # скільки максимум триває один виклик інструмента (рекурсивний search_text)
+RETRY_MARGIN = 1.0  # запас часу понад MIN_REQUEST_SECONDS після паузи перед повтором
 RETRY_WAIT = 2.0  # пауза перед повтором запиту при 429/5xx (збільшується з кожною спробою)
 TRUNCATION_MARKER = "\n… (diff обрізано)\n"
 
@@ -482,7 +483,9 @@ def chat(cfg: Config, messages: list[dict], tools: list[dict] | None, temperatur
                 raise
             wait = RETRY_WAIT * (attempt + 1)
             if budget is not None:
-                room = budget.remaining() - MIN_REQUEST_SECONDS  # пауза не має з'їсти час на наступний запит
+                # пауза не має з'їсти час на наступний запит; запас RETRY_MARGIN покриває похибку sleep,
+                # тож після паузи перевірка бюджету в початку циклу не вб'є повтор
+                room = budget.remaining() - MIN_REQUEST_SECONDS - RETRY_MARGIN
                 if room <= 0:
                     raise BudgetExhausted("вичерпано часовий бюджет")
                 wait = min(wait, room)
@@ -644,8 +647,16 @@ def code_window(f: Finding, tools: RepoTools, diff_by_path: dict[str, str], radi
     out = []
     if lo > 1:  # початок файла: імпорти й глобальні перевірки часто спростовують «чогось нема»
         head = min(HEAD_LINES, lo - 1)  # без перетину з вікном навколо рядка
-        out.append(f"… початок файла (рядки 1-{head}):")
-        out.append("\n".join(f"{i}: {lines[i - 1]}" for i in range(1, head + 1))[:HEAD_CHARS])  # довгі рядки не з'їдять вікно навколо пункту
+        shown, size = [], 0
+        for i in range(1, head + 1):  # цілі рядки в межах HEAD_CHARS: довгі рядки не з'їдять вікно навколо пункту
+            ln = f"{i}: {lines[i - 1]}"
+            if size + len(ln) > HEAD_CHARS and shown:
+                break
+            shown.append(ln[:HEAD_CHARS])
+            size += len(ln) + 1
+        cut = ", решту обрізано" if len(shown) < head else ""  # перевірка має знати, що частини початку не бачить
+        out.append(f"… початок файла (рядки 1-{len(shown)}{cut}):")
+        out.append("\n".join(shown))
         out.append(f"\n… навколо рядка {f.line}:")
     out.extend(f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1))
     name = enclosing_name(lines, f.line - 1) if 1 <= f.line <= len(lines) else None
