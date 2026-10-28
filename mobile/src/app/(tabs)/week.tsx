@@ -19,6 +19,7 @@ export default function WeekRoute() {
     state = {
       kind: 'ready',
       lessons: week.data.lessons,
+      published: week.data.published,
       // Дані є, але останнє оновлення не вдалось через мережу: показуємо збережене з позначкою «Офлайн»
       offline: week.isError && isNetworkError(week.error),
       updatedAt: week.dataUpdatedAt ? new Date(week.dataUpdatedAt) : null,

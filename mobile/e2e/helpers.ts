@@ -6,6 +6,10 @@ export const byTestId = (id: string) =>
 export const allByTestId = (id: string) =>
   $$(`android=new UiSelector().resourceId("${id}")`);
 
+// Усі елементи, чий testID починається з префікса (картки пар мають id lesson-card-<дата>-<номер>)
+export const allByTestIdPrefix = (prefix: string) =>
+  $$(`android=new UiSelector().resourceIdMatches("^${prefix}.*")`);
+
 // accessibilityLabel з React Native на Android стає content-desc, Appium шукає його через "~"
 export const byLabel = (label: string) => $(`~${label}`);
 

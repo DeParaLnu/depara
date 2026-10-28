@@ -13,7 +13,7 @@ import { withNext } from './lesson';
 export type TodayState =
   | { kind: 'loading' }
   | { kind: 'error'; code: string }
-  | { kind: 'ready'; lessons: Lesson[]; offline: boolean; updatedAt: Date | null };
+  | { kind: 'ready'; lessons: Lesson[]; published: boolean; offline: boolean; updatedAt: Date | null };
 
 type Props = {
   now: Date;
@@ -94,6 +94,14 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
           title="Не вдалося завантажити розклад"
           description={errorText(state.code)}
           actionLabel="Спробувати ще раз"
+          onAction={onRefresh}
+        />
+      ) : !state.published ? (
+        <StateView
+          icon="calendar-outline"
+          title="Розклад ще не опубліковано"
+          description="Деканат ще не завантажив розклад для вашої групи. Перевірте пізніше."
+          actionLabel="Перевірити ще раз"
           onAction={onRefresh}
         />
       ) : (
