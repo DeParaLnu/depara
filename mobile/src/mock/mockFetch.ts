@@ -97,6 +97,8 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
     return reply(200, weekOf(date));
   }
 
+  if (method === 'GET' && route === '/buildings') return reply(200, Object.values(MOCK_BUILDINGS));
+
   if (method === 'GET' && route === '/classrooms') {
     const params = new URLSearchParams(query);
     const q = params.get('q')?.trim().toLowerCase();

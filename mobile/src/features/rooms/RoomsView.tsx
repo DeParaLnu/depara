@@ -16,14 +16,6 @@ import type { Building, Classroom } from '../../api';
 import { StateView } from '../../components/StateView';
 import { colors, errorText } from '../../theme';
 
-export const KNOWN_BUILDINGS: Building[] = [
-  { code: 'Б', name: 'Корпус Б', address: 'вул. Драгоманова' },
-  { code: 'Т', name: 'Корпус Т', address: 'вул. Тарнавського' },
-  { code: 'Г', name: 'Головний корпус', address: 'вул. Університетська, 1' },
-  { code: 'К', name: 'Корпус на Кирила і Мефодія', address: 'вул. Кирила і Мефодія, 8' },
-  { code: 'С', name: 'Спортивний комплекс', address: 'вул. Козельницька, 2а' },
-];
-
 export type RoomsState =
   | { kind: 'loading' }
   | { kind: 'ready'; rooms: Classroom[] }
@@ -34,6 +26,8 @@ type Props = {
   onSearchChange: (q: string) => void;
   selectedBuilding: string | undefined;
   onSelectBuilding: (building: string | undefined) => void;
+  /** Довідник корпусів з GET /buildings; поки не завантажений, чіпи й блок «Корпуси» не показуємо */
+  buildings: Building[];
   state: RoomsState;
   onRetry?: () => void;
 };
@@ -43,6 +37,7 @@ export function RoomsView({
   onSearchChange,
   selectedBuilding,
   onSelectBuilding,
+  buildings,
   state,
   onRetry,
 }: Props) {
@@ -62,8 +57,8 @@ export function RoomsView({
 
   // Визначаємо перелік корпусів для блоку «КОРПУСИ»
   const visibleBuildings = selectedBuilding
-    ? KNOWN_BUILDINGS.filter((b) => b.code.toLowerCase() === selectedBuilding.toLowerCase())
-    : KNOWN_BUILDINGS;
+    ? buildings.filter((b) => b.code.toLowerCase() === selectedBuilding.toLowerCase())
+    : buildings;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 16 }]} testID="rooms-screen">
@@ -109,7 +104,7 @@ export function RoomsView({
           >
             <Text style={[styles.chipText, !selectedBuilding && styles.chipTextActive]}>Усі</Text>
           </Pressable>
-          {KNOWN_BUILDINGS.map((b) => {
+          {buildings.map((b) => {
             const isActive = selectedBuilding?.toLowerCase() === b.code.toLowerCase();
             return (
               <Pressable

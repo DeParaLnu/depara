@@ -106,3 +106,27 @@ describe('F5: пошук аудиторій', () => {
     expect(res.status).toBe(401);
   });
 });
+
+// Довідник корпусів для чіпів-фільтрів (specs/f5-search.md)
+describe('F5: довідник корпусів', () => {
+  it('GET /buildings повертає корпуси з адресою, за літерою', async () => {
+    const token = await setupStudent('f5.buildings@lnu.edu.ua');
+    const res = await fetch(`${API}/buildings`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const buildings = (await res.json()) as { code: string; name: string; address: string }[];
+    expect(buildings.length).toBeGreaterThan(0);
+    const codes = buildings.map((b) => b.code);
+    expect(codes).toContain('Т');
+    expect(codes).toContain('Б');
+    expect(new Set(codes).size).toBe(codes.length);
+    for (const b of buildings) {
+      expect(b.name, b.code).toBeTruthy();
+      expect(b.address, b.code).toBeTruthy();
+    }
+  });
+
+  it('без токена GET /buildings дає 401', async () => {
+    const res = await fetch(`${API}/buildings`);
+    expect(res.status).toBe(401);
+  });
+});

@@ -184,6 +184,7 @@ export const api = {
     ),
   week: (token: string, date?: string) =>
     request<WeekSchedule>(`/schedule/week${date ? `?date=${date}` : ''}`, {}, token),
+  buildings: (token: string) => request<Building[]>('/buildings', {}, token),
   classrooms: (token: string, q?: string, building?: string) => {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
