@@ -16,7 +16,7 @@ async function getStorageItem(key: string): Promise<string | null> {
     }
   }
   try {
-    return await SecureStore.getItemAsync(key);
+    return (await SecureStore.getItemAsync(key)) ?? memoryStore.get(key) ?? null;
   } catch {
     return memoryStore.get(key) ?? null;
   }
