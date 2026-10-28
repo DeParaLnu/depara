@@ -210,6 +210,7 @@ class ReviewTests(unittest.TestCase):
 
     def test_unsure_minor_dropped_but_unsure_important_kept(self):
         Stub.state["replies"] = [
+            tool_call("read_file", {"path": "backend/src/a.ts"}),
             say({"summary": "s", "findings": [
                 finding(severity="minor", title="Дрібниця A", evidence="import x from 'y';", line=1, problem="p1"),
                 finding(severity="important", title="Важливе B", problem="p2"),
@@ -220,6 +221,47 @@ class ReviewTests(unittest.TestCase):
         posted = Stub.state["posted"]
         self.assertIn("Важливе B", posted)
         self.assertNotIn("Дрібниця A", posted)
+
+    def test_unread_file_lowers_severity_one_level(self):
+        """Модель заявила «critical», не відкривши файл: пункт понижується і без підтвердження не лишається критичним."""
+        f = review.demote_unread(review.parse_finding(finding(severity="critical")), set())
+        self.assertEqual(f.severity, "important")
+        f = review.demote_unread(review.parse_finding(finding(severity="critical")), {"backend/src/a.ts"})
+        self.assertEqual(f.severity, "critical")
+        f = review.demote_unread(review.parse_finding(finding(severity="minor")), set())
+        self.assertEqual(f.severity, "minor")
+
+    def test_severity_is_capped_for_mocks_docs_and_tests(self):
+        def capped(path, severity):
+            return review.cap_severity(review.parse_finding(finding(file=path, severity=severity))).severity
+        self.assertEqual(capped("mobile/src/mock/mockFetch.ts", "critical"), "minor")
+        self.assertEqual(capped("docs/ai-review.md", "important"), "minor")
+        self.assertEqual(capped("backend/test/e2e/f5.test.ts", "critical"), "important")
+        self.assertEqual(capped("tools/ai-review/test_review.py", "critical"), "important")
+        self.assertEqual(capped("backend/src/routes/auth.ts", "critical"), "critical")
+
+    def test_agent_records_files_it_read(self):
+        Stub.state["replies"] = [tool_call("read_file", {"path": "./backend/src/a.ts"}), say({"summary": "s", "findings": []})]
+        data = review.review_chunk(self.cfg, "sys", "ctx", [("backend/src/a.ts", "x")], review.RepoTools(self.root))
+        self.assertEqual(data["_read"], ["backend/src/a.ts"])
+
+    def test_unsure_critical_is_shown_as_important(self):
+        Stub.state["replies"] = [
+            tool_call("read_file", {"path": "backend/src/a.ts"}),
+            say({"summary": "s", "findings": [finding(severity="critical", title="Нечітке", evidence="import x from 'y';", line=1)]}),
+            say({"verdict": "unsure"}),
+        ]
+        self.run_main()
+        self.assertIn("важливо", Stub.state["posted"])
+        self.assertNotIn("критично", Stub.state["posted"])
+
+    def test_verification_window_includes_file_head(self):
+        src = "\n".join([f"import a{i} from 'm{i}';" for i in range(1, 31)] + ["x"] * 40) + "\n"
+        (self.root / "big.ts").write_text(src, "utf-8")
+        f = review.parse_finding(finding(file="big.ts", evidence="x", line=60))
+        window = review.code_window(f, review.RepoTools(self.root), {})
+        self.assertIn("початок файла", window)
+        self.assertIn("import a1 from 'm1'", window)
 
     def test_verification_can_be_disabled(self):
         self.cfg.verify = False
@@ -374,8 +416,15 @@ class ReviewTests(unittest.TestCase):
         clock = {"t": 0.0}
         real = review.time.monotonic
         review.time.monotonic = lambda: clock["t"]
-        Stub.state["tick"] = lambda: clock.update(t=95.0)  # після першого запиту до моделі «минуло» 95 с зі 100
-        Stub.state["replies"] = [say({"summary": "s", "findings": [
+        calls = {"n": 0}
+
+        def tick():  # після ревʼю шматка (другий запит: перший читає файл) «минуло» 95 с зі 100
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                clock.update(t=95.0)
+
+        Stub.state["tick"] = tick
+        Stub.state["replies"] = [tool_call("read_file", {"path": "backend/src/a.ts"}), say({"summary": "s", "findings": [
             finding(severity="critical", title="Витік секрету", evidence="export default total;", line=3, problem="експортується приватне значення"),
             finding(severity="important", title="Відсутня валідація"),
             finding(severity="minor", title="Назва змінної", evidence="import x from 'y';", line=1, problem="неінформативне імʼя"),
@@ -387,7 +436,7 @@ class ReviewTests(unittest.TestCase):
             review.time.monotonic = real
             del os.environ["AI_REVIEW_BUDGET_SECONDS"]
         posted = Stub.state["posted"]
-        self.assertEqual(len(Stub.state["chat_requests"]), 1)  # жодного запиту перевірки чи підсумку
+        self.assertEqual(len(Stub.state["chat_requests"]), 2)  # читання файла й ревʼю шматка; жодного запиту перевірки чи підсумку
         self.assertIn("Витік секрету", posted)
         self.assertIn("не перевірено другою перевіркою", posted.split("Витік секрету")[1].split("\n")[0])  # позначка біля самого пункту
         self.assertNotIn("Відсутня валідація", posted)
