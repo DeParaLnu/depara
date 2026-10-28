@@ -16,6 +16,19 @@ export function useDebounce<T>(value: T, delayMs = 150): T {
   return debouncedValue;
 }
 
+export function useBuildings() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ['buildings'],
+    queryFn: () => {
+      if (!token) throw new Error('UNAUTHORIZED');
+      return api.buildings(token);
+    },
+    enabled: !!token,
+    staleTime: 60 * 60_000, // корпуси майже не змінюються
+  });
+}
+
 export function useClassrooms(q?: string, building?: string) {
   const token = useToken();
   const trimmedQ = q?.trim() || undefined;
