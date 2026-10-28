@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
 import { StateView } from '../../components/StateView';
@@ -97,13 +97,16 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
           onAction={onRefresh}
         />
       ) : !state.published ? (
-        <StateView
-          icon="calendar-outline"
-          title="Розклад ще не опубліковано"
-          description="Деканат ще не завантажив розклад для вашої групи. Перевірте пізніше."
-          actionLabel="Перевірити ще раз"
-          onAction={onRefresh}
-        />
+        // Прокручуваний контейнер: при великому системному шрифті кнопка «Перевірити ще раз» лишається досяжною
+        <ScrollView contentContainerStyle={styles.unpublished}>
+          <StateView
+            icon="calendar-outline"
+            title="Розклад ще не опубліковано"
+            description="Деканат ще не завантажив розклад для вашої групи. Перевірте пізніше."
+            actionLabel="Перевірити ще раз"
+            onAction={onRefresh}
+          />
+        </ScrollView>
       ) : (
         <FlatList
           data={dayLessons}
@@ -125,6 +128,7 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
 }
 
 const styles = StyleSheet.create({
+  unpublished: { flexGrow: 1, justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 21, gap: 12 },
   headerText: { flex: 1, gap: 4 },
