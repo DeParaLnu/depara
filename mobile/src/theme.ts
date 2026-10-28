@@ -10,12 +10,13 @@ export const colors = {
   surfaceTint: '#DCEAFF', // залишок прогресу, кола з іконками
   chip: '#F1F4F8', // неактивні дні, нейтральні бейджі
   text: '#111827',
-  textMuted: '#7C8795', // викладач, підписи
+  textMuted: '#667281', // викладач, підписи
   textSecondary: '#4F5E70', // аудиторія, нейтральні бейджі
   textTime: '#5C6875', // час пари
   textWeekday: '#627080', // день тижня в смузі
-  tabInactive: '#728091',
+  tabInactive: '#667281',
   border: '#E7EBF1',
+  borderStrong: '#8A94A3', // контури контролів (радіо): ≥3:1 на білому
   tagBlue: '#DFF3FD',
   tagBlueText: '#166185',
   warning: '#F59E0B', // ~ ліва смуга заміни
