@@ -24,6 +24,10 @@
       "favicon": "./assets/favicon.png"
     },
     "scheme": "depara",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
     "experiments": {
       "typedRoutes": true
     }

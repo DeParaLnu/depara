@@ -7,9 +7,7 @@ import { config } from '../../config';
 import { reportError } from '../../lib/errors';
 import { colors, errorText } from '../../theme';
 import { useSession } from './session';
-
-// Поки немає сховища, deviceId живе до перезапуску застосунку
-const deviceId = `device-${Math.random().toString(36).slice(2)}`;
+import { getOrCreateDeviceId } from './storage';
 
 // F1: вхід через Microsoft (корпоративна пошта ЛНУ)
 export function LoginScreen() {
@@ -27,6 +25,7 @@ export function LoginScreen() {
     }
     setLoading(true);
     try {
+      const deviceId = await getOrCreateDeviceId();
       setSession(await api.loginWithMicrosoft(config.e2eIdToken, deviceId));
     } catch (e) {
       setError(errorText(reportError('auth', e)));
