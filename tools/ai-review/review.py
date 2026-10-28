@@ -61,7 +61,7 @@ class Config:
     repo: str = ""
     pr_number: int = 0
     repo_dir: Path = field(default_factory=Path.cwd)
-    max_steps: int = 5  # звернень до інструментів на один шматок diff
+    max_steps: int = 7  # звернень до інструментів на один шматок diff
     max_diff_chars: int = 120_000  # загалом на PR
     chunk_chars: int = 9_000  # розмір одного шматка diff: малі моделі гірше тримають довгий контекст
     max_chunks: int = 10  # реальну межу ставить часовий бюджет
@@ -96,7 +96,11 @@ class Config:
         )
 
 
+HEAD_CHARS = 1500  # скільки символів початку файла максимум, решта 6000 лишається для вікна навколо пункту
+HEAD_LINES = 25  # скільки рядків початку файла додається до фрагмента для перевірки
 MIN_REQUEST_SECONDS = 10  # менше часу на один запит до моделі не залишаємо
+TOOL_SECONDS = 20  # скільки максимум триває один виклик інструмента (рекурсивний search_text)
+RETRY_MARGIN = 1.0  # запас часу понад MIN_REQUEST_SECONDS після паузи перед повтором
 RETRY_WAIT = 2.0  # пауза перед повтором запиту при 429/5xx (збільшується з кожною спробою)
 TRUNCATION_MARKER = "\n… (diff обрізано)\n"
 
@@ -360,7 +364,7 @@ class RepoTools:
                        if c.name not in DENIED_NAMES and not c.name.startswith(".env"))
         return json.dumps(names[:200], ensure_ascii=False)
 
-    def search_text(self, pattern: str, path: str = ".") -> str:
+    def search_text(self, pattern: str, path: str = ".", stop=None) -> str:
         base = self._resolve(path)
         try:
             rx = re.compile(pattern)
@@ -369,6 +373,9 @@ class RepoTools:
         out: list[str] = []
         files = [base] if base.is_file() else sorted(base.rglob("*"))
         for f in files:
+            if stop is not None and stop():
+                out.append("(пошук перервано: вичерпано час)")
+                break
             rel = f.relative_to(self.root)
             if not f.is_file() or any(x in DENIED_NAMES for x in rel.parts) or f.name.startswith(".env"):
                 continue
@@ -384,12 +391,17 @@ class RepoTools:
                 continue
         return "\n".join(out) or "Збігів немає"
 
-    def call(self, name: str, args: dict) -> str:
+    def call(self, name: str, args: dict, budget: "Budget | None" = None) -> str:
         fns = {"read_file": self.read_file, "list_files": self.list_files, "search_text": self.search_text}
         if name not in fns:
             return f"Помилка: невідомий інструмент {name}"
+        kwargs = dict(args)
+        if name == "search_text":
+            started = time.monotonic()  # довгий пошук не має винести шматок за межі бюджету
+            kwargs["stop"] = lambda: (time.monotonic() - started > TOOL_SECONDS
+                                      or (budget is not None and budget.remaining() < MIN_REQUEST_SECONDS))
         try:
-            return fns[name](**args)[:MAX_TOOL_RESULT_CHARS]
+            return fns[name](**kwargs)[:MAX_TOOL_RESULT_CHARS]
         except (TypeError, ValueError, OSError) as err:
             return f"Помилка: {err}"
 
@@ -420,6 +432,9 @@ SYSTEM_PROMPT = """Ти ревʼювер pull request'ів у проєкті «�
 - Шукай реальні проблеми: помилки логіки, безпеку, пропущені перевірки, ламку поведінку, втрату даних, відсутні тести.
 - Перш ніж стверджувати щось про код, прочитай його: перевір сусідні рядки й файл (read_file, search_text).
   Не стверджуй, що щось «невидиме», «не працює» чи «не існує», не перевіривши значення, кольори й імпорти в коді.
+- Пункти «critical» і «important» пиши лише про файли, які ти відкрив через read_file: інакше їх буде понижено.
+  «Не вистачає перевірки/імпорту/типу» стверджуй, лише переконавшись, що їх нема ні в цьому файлі, ні вище по коду
+  (глобальний хук, guard на початку функції, імпорт угорі файла).
 - Не вигадуй. Краще мало зауважень, ніж хибне. Якщо проблем немає, поверни порожній список findings.
 - Кожен пункт описуй один раз і не повторюй. Не став питань до автора.
 - Не коментуй форматування й дрібниці, які ловлять лінтер і компілятор, і не проси «перевірити тести»,
@@ -436,7 +451,9 @@ SYSTEM_PROMPT = """Ти ревʼювер pull request'ів у проєкті «�
 
 VERIFY_PROMPT = """Ти перевіряєш чуже зауваження до коду. Нижче твердження ревʼювера і фрагмент коду (факт).
 Визнач, чи твердження справді правильне саме для цього коду. Звертай увагу на значення, кольори, типи й
-імпорти, які видно у фрагменті. Якщо код суперечить твердженню, це «refuted».
+імпорти, які видно у фрагменті, і на початок файла (імпорти, глобальні перевірки). Якщо потрібна перевірка, імпорт чи
+обробка вже є у фрагменті чи вище по коду, це «refuted». Серйозність не оцінюй: лише чи правильне саме твердження.
+Якщо не вистачає даних, щоб підтвердити, відповідай «unsure».
 Відповідай ЛИШЕ JSON: {"verdict": "confirmed" | "refuted" | "unsure", "reason": "1 речення"}"""
 
 
@@ -464,7 +481,15 @@ def chat(cfg: Config, messages: list[dict], tools: list[dict] | None, temperatur
             # 429 (ліміт запитів) і 5xx: короткий повтор, паралельні запити легко впираються в ліміт Together
             if attempt == 2 or not re.search(r"HTTP (429|5\d\d)", str(err)):
                 raise
-            time.sleep(RETRY_WAIT * (attempt + 1))
+            wait = RETRY_WAIT * (attempt + 1)
+            if budget is not None:
+                # пауза не має з'їсти час на наступний запит; запас RETRY_MARGIN покриває похибку sleep,
+                # тож після паузи перевірка бюджету в початку циклу не вб'є повтор
+                room = budget.remaining() - MIN_REQUEST_SECONDS - RETRY_MARGIN
+                if room <= 0:
+                    raise BudgetExhausted("вичерпано часовий бюджет")
+                wait = min(wait, room)
+            time.sleep(wait)
     raise RuntimeError("недосяжний стан повтору запиту")
 
 
@@ -495,7 +520,8 @@ def parse_json_object(text: str) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def run_agent(cfg: Config, messages: list[dict], tools: RepoTools, budget: Budget | None = None) -> str:
+def run_agent(cfg: Config, messages: list[dict], tools: RepoTools, budget: Budget | None = None,
+              read_log: set[str] | None = None) -> str:
     """Цикл «модель просить інструмент, ми виконуємо» до фінальної відповіді."""
     for _ in range(cfg.max_steps):
         msg = chat(cfg, messages, TOOL_SCHEMAS, budget=budget)
@@ -508,7 +534,10 @@ def run_agent(cfg: Config, messages: list[dict], tools: RepoTools, budget: Budge
             return clean(msg.get("content"))
         for call in calls:
             fn = call.get("function", {})
-            result = tools.call(fn.get("name", ""), parse_args(fn.get("arguments")))
+            args = parse_args(fn.get("arguments"))
+            result = tools.call(fn.get("name", ""), args, budget)
+            if read_log is not None and fn.get("name") == "read_file" and not result.startswith("Помилка"):
+                read_log.add(re.sub(r"^(\./|/)+", "", str(args.get("path") or "").strip()))  # лише вдале читання
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
     messages.append({"role": "user", "content": "Ліміт кроків вичерпано. Дай відповідь у тому самому JSON-форматі за тим, що вже відомо."})
     return clean(chat(cfg, messages, None, budget=budget).get("content"))
@@ -615,7 +644,21 @@ def code_window(f: Finding, tools: RepoTools, diff_by_path: dict[str, str], radi
         return (diff_by_path.get(f.file) or "")[:3000]
     lines = text.splitlines()
     lo, hi = max(1, f.line - radius), min(len(lines), f.line + radius)
-    out = [f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1)]
+    out = []
+    if lo > 1:  # початок файла: імпорти й глобальні перевірки часто спростовують «чогось нема»
+        head = min(HEAD_LINES, lo - 1)  # без перетину з вікном навколо рядка
+        shown, size = [], 0
+        for i in range(1, head + 1):  # цілі рядки в межах HEAD_CHARS: довгі рядки не з'їдять вікно навколо пункту
+            ln = f"{i}: {lines[i - 1]}"
+            if size + len(ln) > HEAD_CHARS and shown:
+                break
+            shown.append(ln[:HEAD_CHARS])
+            size += len(ln) + 1
+        cut = ", решту обрізано" if len(shown) < head else ""  # перевірка має знати, що частини початку не бачить
+        out.append(f"… початок файла (рядки 1-{len(shown)}{cut}):")
+        out.append("\n".join(shown))
+        out.append(f"\n… навколо рядка {f.line}:")
+    out.extend(f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1))
     name = enclosing_name(lines, f.line - 1) if 1 <= f.line <= len(lines) else None
     if name:
         shown = 0
@@ -649,6 +692,32 @@ def verify_finding(cfg: Config, f: Finding, tools: RepoTools, diff_by_path: dict
         return "unsure"
     verdict = str(data.get("verdict") or "").lower()
     return verdict if verdict in ("confirmed", "refuted", "unsure") else "unsure"
+
+
+LOWER = {"critical": "important", "important": "minor", "minor": "minor"}
+# Код, де «критично» майже завжди завищення: вбудовані мок-дані, фікстури, документація і специфікації
+LOW_IMPACT = ("mobile/src/mock/", "docs/", "specs/", "mobile/e2e/", "backend/test/e2e/", "backend/prisma/seed/")
+TEST_MARKERS = ("/test/", "/tests/", ".test.", ".e2e.")  # у шляху; файли test_*.py перевіряємо за іменем
+
+
+def cap_severity(f: Finding) -> Finding:
+    """Стеля серйозності за місцем у репозиторії: у моках і документації пункт не може бути вище «дрібно»,
+    у тестах не вище «важливо». Мала модель часто роздуває вагу таких зауважень."""
+    path = f.file
+    if path.startswith(LOW_IMPACT) or path.endswith(".md"):
+        f.severity = "minor"
+    elif f.severity == "critical" and (
+        any(m in f"/{path}" for m in TEST_MARKERS) or path.rsplit("/", 1)[-1].startswith("test_")
+    ):
+        f.severity = "important"
+    return f
+
+
+def demote_unread(f: Finding, read: set[str]) -> Finding:
+    """Модель заявила «critical/important», не відкривши файл через read_file: довіряємо менше, на рівень нижче."""
+    if f.severity != "minor" and f.file not in read:
+        f.severity = LOWER[f.severity]
+    return f
 
 
 def _words(text: str) -> set[str]:
@@ -691,11 +760,14 @@ def review_chunk(cfg: Config, system: str, context: str, files: list[tuple[str, 
     names = ", ".join(dict.fromkeys(p for p, _ in files))
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": f"{context}\n\nОця частина diff (файли: {names}):\n<diff>\n{diff}\n</diff>"}]
-    text = run_agent(cfg, messages, tools, budget)
+    read_log: set[str] = set()
+    text = run_agent(cfg, messages, tools, budget, read_log)
     data = parse_json_object(text)
     if data is None:  # одна спроба виправити формат
         messages.append({"role": "user", "content": "Це не коректний JSON. Поверни ЛИШЕ JSON-обʼєкт за описаною схемою."})
         data = ask_json(cfg, messages, budget=budget)
+    if data:
+        data["_read"] = sorted(read_log)  # які файли модель справді відкривала: від цього залежить довіра до серйозності
     return data or {}
 
 
@@ -798,6 +870,8 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
         summaries.append(str(data.get("summary") or "").strip())
         items = data.get("findings") if isinstance(data.get("findings"), list) else []
         parsed = [f for f in map(parse_finding, items) if f]
+        read = {str(x) for x in data.get("_read") or []}
+        parsed = [cap_severity(demote_unread(f, read)) for f in parsed]
         raw_findings.extend(parsed)
         stats["raw"] += len(items)
         stats["no_evidence"] += len(items) - len(parsed)  # без файла чи цитати
@@ -832,6 +906,8 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
         elif verdict == "refuted" or (verdict == "unsure" and f.severity == "minor"):
             stats["refuted"] += 1  # непевну дрібницю теж не показуємо
         else:
+            if verdict == "unsure" and f.severity == "critical":
+                f.severity = "important"  # «критично» лише з підтвердженням другою перевіркою
             confirmed.append(f)
     final = confirmed[: cfg.max_findings]
     stats["over_limit"] = len(confirmed) - len(final)
