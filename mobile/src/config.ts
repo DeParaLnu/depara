@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 
-const extra = (Constants.expoConfig?.extra ?? {}) as { e2e?: boolean; mock?: boolean; apiUrl?: string };
+const extra = (Constants.expoConfig?.extra ?? {}) as { e2e?: boolean; mock?: boolean; apiUrl?: string; privacyUrl?: string };
 
 export const config = {
   apiUrl: extra.apiUrl ?? 'http://localhost:3000',
@@ -8,5 +8,7 @@ export const config = {
   e2e: extra.e2e === true,
   // У збірці з MOCK=1 застосунок працює на вбудованих даних без бекенда (src/mock)
   mock: extra.mock === true,
+  // Посилання на політику конфіденційності (PRIVACY_URL при збірці); без нього підпис на екрані входу не показуємо
+  privacyUrl: extra.privacyUrl,
   e2eIdToken: 'test:student@lnu.edu.ua',
 };

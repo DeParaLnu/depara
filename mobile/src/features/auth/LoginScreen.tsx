@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../api';
 import { config } from '../../config';
@@ -74,7 +74,16 @@ export function LoginScreen() {
         </View>
       </View>
 
-      <Text style={styles.privacy}>Політика конфіденційності</Text>
+      {config.privacyUrl ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel="Політика конфіденційності"
+          onPress={() => void Linking.openURL(config.privacyUrl as string)}
+          hitSlop={8}
+        >
+          <Text style={styles.privacy}>Політика конфіденційності</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

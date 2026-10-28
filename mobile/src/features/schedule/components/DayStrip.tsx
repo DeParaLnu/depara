@@ -43,7 +43,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 4 },
   chip: {
     flex: 1,
-    height: 63,
+    minHeight: 63,
+    paddingVertical: 8,
     borderRadius: 14,
     backgroundColor: colors.chip,
     alignItems: 'center',

@@ -12,10 +12,10 @@ export default function RoomsRoute() {
   const classroomsQuery = useClassrooms(debouncedQuery, selectedBuilding);
 
   let state: RoomsState;
-  if (classroomsQuery.data) {
-    state = { kind: 'ready', rooms: classroomsQuery.data };
-  } else if (classroomsQuery.isError) {
+  if (classroomsQuery.isError) {
     state = { kind: 'error', code: errorCode(classroomsQuery.error) };
+  } else if (classroomsQuery.data) {
+    state = { kind: 'ready', rooms: classroomsQuery.data };
   } else {
     state = { kind: 'loading' };
   }

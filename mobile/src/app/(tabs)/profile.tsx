@@ -28,7 +28,9 @@ export default function ProfileRoute() {
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{initials(displayName) || ' '}</Text>
         </View>
-        <Text style={styles.name}>{displayName || ' '}</Text>
+        <Text style={styles.name} accessibilityRole="header">
+          {displayName || 'Профіль'}
+        </Text>
         {me.data?.fullName ? <Text style={styles.email}>{me.data.email}</Text> : null}
       </View>
 

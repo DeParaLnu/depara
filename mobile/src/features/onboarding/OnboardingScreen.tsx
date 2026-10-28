@@ -160,7 +160,8 @@ export function OnboardingScreen() {
                     <Pressable
                       key={c}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected }}
+                      accessibilityState={{ selected, checked: selected }}
+                      aria-checked={selected}
                       accessibilityLabel={`${c} курс`}
                       onPress={() => {
                         setCourse(c);
@@ -186,7 +187,8 @@ export function OnboardingScreen() {
               return (
                 <Pressable
                   accessibilityRole="radio"
-                  accessibilityState={{ selected }}
+                  accessibilityState={{ selected, checked: selected }}
+                  aria-checked={selected}
                   accessibilityLabel={`${item.code}, ${item.course} курс`}
                   onPress={() => setGroupId(item.id)}
                   style={[styles.option, selected && styles.optionSelected]}
@@ -208,7 +210,8 @@ export function OnboardingScreen() {
                   <Pressable
                     key={s.value}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected }}
+                    accessibilityState={{ selected, checked: selected }}
+                    aria-checked={selected}
                     accessibilityLabel={s.value === 0 ? 'Усі підгрупи' : `Підгрупа ${s.label}`}
                     onPress={() => setSubgroup(s.value)}
                     style={[styles.segment, selected && styles.segmentSelected]}
@@ -268,7 +271,7 @@ const styles = StyleSheet.create({
   optionTitle: { flex: 1, fontSize: 17, lineHeight: 22, color: '#374151' },
   optionTitleSelected: { fontWeight: '700', color: colors.primary },
   optionMeta: { fontSize: 13, color: colors.textMuted },
-  radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: colors.borderStrong, alignItems: 'center', justifyContent: 'center' },
   radioSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
   radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },

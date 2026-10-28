@@ -8,5 +8,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     e2e: process.env.E2E === '1',
     mock: process.env.MOCK === '1',
     apiUrl: process.env.API_URL ?? 'http://localhost:3000',
+    privacyUrl: process.env.PRIVACY_URL,
   },
 });
