@@ -239,6 +239,8 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(capped("backend/test/e2e/f5.test.ts", "critical"), "important")
         self.assertEqual(capped("tools/ai-review/test_review.py", "critical"), "important")
         self.assertEqual(capped("backend/src/routes/auth.ts", "critical"), "critical")
+        self.assertEqual(capped("backend/src/latest_config.py", "critical"), "critical")  # «test_» лише на початку імені
+        self.assertEqual(capped("test/helpers.ts", "critical"), "important")
 
     def test_agent_records_files_it_read(self):
         Stub.state["replies"] = [tool_call("read_file", {"path": "./backend/src/a.ts"}), say({"summary": "s", "findings": []})]

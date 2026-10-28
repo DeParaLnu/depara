@@ -670,7 +670,7 @@ def verify_finding(cfg: Config, f: Finding, tools: RepoTools, diff_by_path: dict
 LOWER = {"critical": "important", "important": "minor", "minor": "minor"}
 # Код, де «критично» майже завжди завищення: вбудовані мок-дані, фікстури, документація і специфікації
 LOW_IMPACT = ("mobile/src/mock/", "docs/", "specs/", "mobile/e2e/", "backend/prisma/seed/")
-TEST_MARKERS = ("/test/", "/tests/", ".test.", ".e2e.", "test_")
+TEST_MARKERS = ("/test/", "/tests/", ".test.", ".e2e.")  # у шляху; файли test_*.py перевіряємо за іменем
 
 
 def cap_severity(f: Finding) -> Finding:
@@ -679,7 +679,9 @@ def cap_severity(f: Finding) -> Finding:
     path = f.file
     if path.startswith(LOW_IMPACT) or path.endswith(".md"):
         f.severity = "minor"
-    elif any(m in path or path.split("/")[-1].startswith(m) for m in TEST_MARKERS) and f.severity == "critical":
+    elif f.severity == "critical" and (
+        any(m in f"/{path}" for m in TEST_MARKERS) or path.rsplit("/", 1)[-1].startswith("test_")
+    ):
         f.severity = "important"
     return f
 
