@@ -13,6 +13,10 @@ import { allByTestId, byTestId, loginAsStudent, openTab } from '../helpers';
 //                          (resource-id на Android надійніше без скісної риски)
 //   room-building-<id>     підпис корпусу в цьому рядку (назва або літера корпусу)
 //   rooms-error            стан помилки (не має зʼявлятися)
+//   rooms-empty            порожній результат: не знайдено ні аудиторій, ні корпусів
+//   building-item-<code>   рядок корпусу в блоці «Корпуси» (літера з GET /buildings), тап прокладає маршрут
+//
+// Корпуси в seed: Б (Драгоманова), Т (Тарнавського), Г (Головний, Університетська), К, С.
 const search = async (text: string) => {
   const input = byTestId('rooms-search-input');
   await input.clearValue();
@@ -49,6 +53,26 @@ describe('F5: пошук аудиторій', () => {
   it('порожній запит показує список без помилки', async () => {
     await search('');
     await byTestId('rooms-results').waitForDisplayed({ timeout: 10000 });
+    expect(await byTestId('rooms-error').isExisting()).toBe(false);
+  });
+
+  it('частина адреси знаходить корпус: «тарнав» дає корпус Т', async () => {
+    await search('тарнав');
+    await byTestId('building-item-Т').waitForDisplayed({ timeout: 10000 });
+    expect(await byTestId('building-item-Б').isExisting()).toBe(false);
+  });
+
+  it('літера корпусу знаходить лише цей корпус: «г» дає корпус Г', async () => {
+    await search('г');
+    await byTestId('building-item-Г').waitForDisplayed({ timeout: 10000 });
+    // «г» є в назві «Корпус на Драгоманова», але одна літера порівнюється лише з літерою корпусу
+    expect(await byTestId('building-item-Б').isExisting()).toBe(false);
+  });
+
+  it('запит без збігів показує зрозумілий порожній стан', async () => {
+    await search('zzz');
+    await byTestId('rooms-empty').waitForDisplayed({ timeout: 10000 });
+    expect((await allByTestId('room-item')).length).toBe(0);
     expect(await byTestId('rooms-error').isExisting()).toBe(false);
   });
 });

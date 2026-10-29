@@ -28,6 +28,10 @@ type Props = {
   onSelectBuilding: (building: string | undefined) => void;
   /** Довідник корпусів з GET /buildings; поки не завантажений, чіпи й блок «Корпуси» не показуємо */
   buildings: Building[];
+  /** Корпуси для блоку «Корпуси»: відфільтровані за обраним чіпом і запитом пошуку */
+  matchedBuildings: Building[];
+  /** Є непорожній запит: від цього залежить текст порожнього стану */
+  searching?: boolean;
   /** Довідник корпусів не завантажився: показуємо повідомлення з повтором замість мовчки сховати чіпи */
   buildingsFailed?: boolean;
   onRetryBuildings?: () => void;
@@ -41,6 +45,8 @@ export function RoomsView({
   selectedBuilding,
   onSelectBuilding,
   buildings,
+  matchedBuildings,
+  searching = false,
   buildingsFailed = false,
   onRetryBuildings,
   state,
@@ -50,11 +56,6 @@ export function RoomsView({
   const [isFocused, setIsFocused] = useState(false);
 
   const safeId = (label: string) => label.replace(/\//g, '-');
-
-  // Визначаємо перелік корпусів для блоку «КОРПУСИ»
-  const visibleBuildings = selectedBuilding
-    ? buildings.filter((b) => b.code.toLowerCase() === selectedBuilding.toLowerCase())
-    : buildings;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 16 }]} testID="rooms-screen">
@@ -69,7 +70,7 @@ export function RoomsView({
           testID="rooms-search-input"
           value={searchQuery}
           onChangeText={onSearchChange}
-          placeholder="Пошук аудиторії"
+          placeholder="Пошук аудиторії чи корпусу"
           placeholderTextColor={colors.textMuted}
           style={styles.searchInput}
           autoCapitalize="none"
@@ -152,13 +153,19 @@ export function RoomsView({
           testID="rooms-results"
           showsVerticalScrollIndicator={false}
         >
-          {state.rooms.length === 0 ? (
-            <StateView
-              icon="search-outline"
-              title="Нічого не знайдено"
-              description="Перевірте правильність номера аудиторії або оберіть інший корпус"
-            />
-          ) : (
+          {state.rooms.length === 0 && matchedBuildings.length === 0 ? (
+            <View testID="rooms-empty">
+              <StateView
+                icon="search-outline"
+                title="Нічого не знайдено"
+                description={
+                  searching
+                    ? 'Спробуйте номер аудиторії, літеру, назву чи адресу корпусу'
+                    : 'Перевірте правильність номера аудиторії або оберіть інший корпус'
+                }
+              />
+            </View>
+          ) : state.rooms.length === 0 ? null : (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>АУДИТОРІЇ</Text>
               {state.rooms.map((room, idx) => {
@@ -193,18 +200,20 @@ export function RoomsView({
             </View>
           )}
 
-          {/* Секція «КОРПУСИ» за макетом */}
-          {visibleBuildings.length > 0 ? (
-            <View style={[styles.section, styles.buildingsSection]}>
+          {/* Секція «КОРПУСИ» за макетом; під час пошуку лише корпуси, що підходять під запит */}
+          {matchedBuildings.length > 0 ? (
+            <View style={[styles.section, state.rooms.length > 0 && styles.buildingsSection]}>
               <Text style={styles.sectionTitle}>КОРПУСИ</Text>
-              {visibleBuildings.map((building, idx) => (
+              {matchedBuildings.map((building, idx) => (
                 <View key={building.code}>
                   <TouchableOpacity
+                    testID={`building-item-${building.code}`}
                     onPress={() => openRoute(building)}
                     style={styles.roomRow}
                     activeOpacity={0.7}
                     accessibilityRole="button"
                     accessibilityLabel={`${building.name}, ${building.address}`}
+                    accessibilityHint="Прокласти маршрут у картах"
                   >
                     <View style={styles.roomItemInner}>
                       <View style={styles.iconBox}>
@@ -217,7 +226,7 @@ export function RoomsView({
                       <Ionicons name="chevron-forward" size={18} color="#C4CBD4" />
                     </View>
                   </TouchableOpacity>
-                  {idx < visibleBuildings.length - 1 ? <View style={styles.separator} /> : null}
+                  {idx < matchedBuildings.length - 1 ? <View style={styles.separator} /> : null}
                 </View>
               ))}
             </View>
