@@ -5,6 +5,10 @@
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": { "API_URL": "https://api.depara.me" }
+    },
+    "preview-mock": {
+      "extends": "preview",
+      "env": { "MOCK": "1" }
     }
   }
 }
