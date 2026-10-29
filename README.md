@@ -48,6 +48,20 @@ E2E=1 API_URL=http://localhost:3000 npx expo start     # локальний бе
 Вхід у ньому один дотик, групу обирають зі списку, стан живе до перезапуску. Він потрібен для розробки екранів і демо без SSO.
 Після зміни прапорців перезапустіть сервер із `--clear`, інакше Metro може віддати збірку зі старим значенням.
 
+### APK для команди (EAS Build)
+
+Профілі в `mobile/eas.json` збирають APK для встановлення напряму на телефон (без Google Play):
+
+```bash
+cd mobile
+npx eas-cli@latest login                                  # акаунт Expo, один раз
+npx eas-cli@latest init                                   # лише вперше: привʼязує проєкт (додає projectId в app.json)
+npx eas-cli@latest build -p android --profile preview      # прод API https://api.depara.me
+npx eas-cli@latest build -p android --profile preview-mock # вбудовані дані (MOCK=1), для демо без входу
+```
+
+Після збірки EAS дає посилання і QR-код на APK. Поки на проді немає входу через Microsoft (#37), збірка `preview` доходить лише до екрана входу, тож для показу використовуйте `preview-mock`.
+
 ## Деплой
 
 Образ бекенда збирається з `backend/Dockerfile`. Основний варіант: VPS з Docker, бекапами і відкатом, див. [docs/deploy-vps.md](docs/deploy-vps.md) (файли в `deploy/`). Змінні середовища і запасний хостинг: [docs/deploy.md](docs/deploy.md).
