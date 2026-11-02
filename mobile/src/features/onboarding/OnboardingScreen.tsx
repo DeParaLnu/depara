@@ -146,7 +146,7 @@ export function OnboardingScreen() {
               </View>
             </Pressable>
           )}
-          ListEmptyComponent={groups.isError ? null : <Text style={styles.subtitle}>Факультетів поки немає</Text>}
+          ListEmptyComponent={groups.isError ? undefined : <Text style={styles.subtitle}>Факультетів поки немає</Text>}
         />
       ) : (
         <>
