@@ -73,14 +73,18 @@ jobs:
           nohup npm run start:test > api.log 2>&1 &
           npx --yes wait-on http://localhost:3000/health
 
-      - name: Збірка debug APK
+      # android/ не зберігається в git: prebuild генерує його з app.json (Continuous Native Generation).
+      # Release, а не debug: у debug-збірці немає JS, вона чекає на dev-сервер Metro.
+      # Release підписується debug-ключем із шаблону Expo, для емулятора цього досить.
+      - name: Збірка release APK з E2E=1
         working-directory: mobile
         env:
           E2E: '1'
           API_URL: http://10.0.2.2:3000
         run: |
           npm ci
-          cd android && ./gradlew assembleDebug
+          npx expo prebuild --platform android --no-install
+          cd android && ./gradlew assembleRelease
 
       - name: Увімкнути KVM
         # На власній машині KVM налаштовують один раз під час встановлення runner
@@ -92,6 +96,9 @@ jobs:
 
       - name: Appium E2E на емуляторі
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          # Відносний шлях Appium рахував би від своєї папки, тому повний
+          APK_PATH: ${{ github.workspace }}/mobile/android/app/build/outputs/apk/release/app-release.apk
         with:
           api-level: 34
           target: google_apis

@@ -14,9 +14,10 @@ export const config = {
     {
       platformName: 'Android',
       'appium:automationName': 'UiAutomator2',
+      // CI задає APK_PATH (release-збірка з E2E=1); локально за замовчуванням debug-збірка з expo run:android
       'appium:app':
         process.env.APK_PATH ??
-        '../android/app/build/outputs/apk/debug/app-debug.apk',
+        join(process.cwd(), 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk'),
       'appium:newCommandTimeout': 240,
     },
   ],
