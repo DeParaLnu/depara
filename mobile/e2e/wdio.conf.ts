@@ -6,6 +6,13 @@ import { join } from 'node:path';
 // Запуск іде з папки mobile (і локально, і в CI), тож шлях відносно неї
 const ARTIFACTS = join(process.cwd(), 'e2e', 'artifacts');
 
+const screenshotOnFailure = async (title: string, passed: boolean) => {
+  if (passed) return;
+  mkdirSync(ARTIFACTS, { recursive: true });
+  const name = title.replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 80);
+  await browser.saveScreenshot(join(ARTIFACTS, `${Date.now()}_${name}.png`));
+};
+
 export const config = {
   runner: 'local',
   specs: ['./specs/**/*.e2e.ts'],
@@ -25,11 +32,10 @@ export const config = {
   framework: 'mocha',
   reporters: ['spec'],
   mochaOpts: { timeout: 120000 },
-  // Скриншот при падінні: CI зберігає папку artifacts/ як артефакт запуску
-  afterTest: async (test: { title: string }, _ctx: unknown, result: { passed: boolean }) => {
-    if (result.passed) return;
-    mkdirSync(ARTIFACTS, { recursive: true });
-    const name = test.title.replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 80);
-    await browser.saveScreenshot(join(ARTIFACTS, `${Date.now()}_${name}.png`));
-  },
+  // Скриншот при падінні: CI зберігає папку artifacts/ як артефакт запуску.
+  // afterHook теж: коли падає before (вхід), afterTest не викликається
+  afterTest: (test: { title: string }, _ctx: unknown, result: { passed: boolean }) =>
+    screenshotOnFailure(test.title, result.passed),
+  afterHook: (test: { title: string }, _ctx: unknown, result: { passed: boolean }) =>
+    screenshotOnFailure(test.title, result.passed),
 };

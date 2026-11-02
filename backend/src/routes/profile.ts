@@ -14,7 +14,8 @@ export async function profileRoutes(app: FastifyInstance) {
       id: g.id,
       code: g.code,
       course: g.course,
-      faculty: g.faculty.shortName,
+      // Онбординг показує студентам цей рядок у списку факультетів, тож повна назва, а не short_name
+      faculty: g.faculty.name,
     }));
   });
 
