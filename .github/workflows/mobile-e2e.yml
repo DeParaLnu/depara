@@ -112,7 +112,10 @@ jobs:
           profile: pixel_6
           disable-animations: true
           working-directory: mobile
+          # hide_error_dialogs: на повільному емуляторі системний лаунчер ловить ANR, і вікно
+          # «Pixel Launcher isn't responding» перекриває застосунок, тож Appium не бачить кнопок
           script: |
+            adb shell settings put global hide_error_dialogs 1
             npm i -g appium
             appium driver install uiautomator2
             npm run e2e

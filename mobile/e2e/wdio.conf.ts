@@ -32,6 +32,12 @@ export const config = {
   framework: 'mocha',
   reporters: ['spec'],
   mochaOpts: { timeout: 120000 },
+  // Системне вікно ANR («… isn't responding»), що вже висить на емуляторі, перекриває застосунок.
+  // Нові такі вікна CI вимикає (hide_error_dialogs), а старе закриваємо кнопкою «Wait»
+  before: async () => {
+    const wait = $('android=new UiSelector().resourceId("android:id/aerr_wait")');
+    if (await wait.isExisting()) await wait.click();
+  },
   // Скриншот при падінні: CI зберігає папку artifacts/ як артефакт запуску.
   // afterHook теж: коли падає before (вхід), afterTest не викликається
   afterTest: (test: { title: string }, _ctx: unknown, result: { passed: boolean }) =>
