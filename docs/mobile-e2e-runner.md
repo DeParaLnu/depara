@@ -61,14 +61,21 @@ npx prisma migrate deploy
 npm run seed -- --shift-to-current-week
 npm run start:test
 
-# Термінал 2: збірка APK з фейковим входом і адресою хоста для емулятора
+# Термінал 2: debug-збірка з фейковим входом і адресою хоста для емулятора.
+# Сама запускає prebuild, ставить APK і лишає Metro працювати в цьому терміналі
 cd mobile
-E2E=1 API_URL=http://10.0.2.2:3000 npx expo run:android --variant debug   # debug + Metro, сам запускає prebuild
+E2E=1 API_URL=http://10.0.2.2:3000 npx expo run:android --variant debug
+
+# Термінал 3: тести, поки Metro віддає JS
+cd mobile
 npm run e2e                                                                # усі сценарії
 npx wdio run e2e/wdio.conf.ts --spec e2e/specs/f5-rooms.e2e.ts             # один сценарій
 
-# Або як у CI: release-APK з вбудованим JS, без Metro
-E2E=1 API_URL=http://10.0.2.2:3000 npx expo prebuild --platform android --clean
+# Або як у CI: release-APK з вбудованим JS, без Metro (термінали 2 і 3 не потрібні).
+# export, а не префікс команди: Gradle ще раз читає app.config.ts і без цих змінних вшив би e2e: false
+cd mobile
+export E2E=1 API_URL=http://10.0.2.2:3000
+npx expo prebuild --platform android --clean
 (cd android && ./gradlew assembleRelease)
 APK_PATH=$PWD/android/app/build/outputs/apk/release/app-release.apk npm run e2e
 ```
