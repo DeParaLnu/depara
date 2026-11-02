@@ -81,6 +81,9 @@ jobs:
         env:
           E2E: '1'
           API_URL: http://10.0.2.2:3000
+          # Job задає NODE_ENV=test для бекенда, а під ним babel-preset-expo вважає, що це Jest,
+          # і не підставляє EXPO_ROUTER_APP_ROOT: бандл падає з «Invalid call ... EXPO_ROUTER_APP_ROOT»
+          NODE_ENV: production
         run: |
           npm ci
           npx expo prebuild --platform android --no-install
@@ -106,10 +109,12 @@ jobs:
           profile: pixel_6
           disable-animations: true
           working-directory: mobile
+          # npm run e2e, а не npx wdio: npx у CI не знайшов локальний wdio і завантажив окремий пакет wdio,
+          # який не бачить @wdio/local-runner проєкту («Couldn't find plugin "local" runner»)
           script: |
             npm i -g appium
             appium driver install uiautomator2
-            npx wdio run e2e/wdio.conf.ts
+            npm run e2e
 
       - name: Логи API при падінні
         if: failure()
