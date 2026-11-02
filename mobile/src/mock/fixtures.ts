@@ -25,8 +25,8 @@ export const MOCK_SCHEDULE_GROUP_ID = 'mock-g-test-31';
 
 /** Корпуси з backend/prisma/seed/schedule.seed.json: за літерою з «номер/код корпусу» мок віддає building. */
 export const MOCK_BUILDINGS: Record<string, Building> = {
-  Б: { code: 'Б', name: 'Корпус на Драгоманова', address: 'вул. Драгоманова' },
-  Т: { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Тарнавського' },
+  Б: { code: 'Б', name: 'Корпус на Драгоманова', address: 'вул. Драгоманова, 50' },
+  Т: { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Генерала Тарнавського, 107' },
   Г: { code: 'Г', name: 'Головний корпус', address: 'вул. Університетська, 1' },
   К: { code: 'К', name: 'Корпус на Кирила і Мефодія', address: 'вул. Кирила і Мефодія, 8' },
   С: { code: 'С', name: 'Спортивний комплекс', address: 'вул. Козельницька, 2а' },

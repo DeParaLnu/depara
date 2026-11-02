@@ -36,7 +36,7 @@ export function lessonDetails(lesson: Lesson) {
   return {
     cancelled,
     teacher: sub?.newTeacher ?? lesson.teacher,
-    // «Корпус Т · ауд. 218, вул. Тарнавського»; без аудиторії лише «Корпус Т, вул. Тарнавського»
+    // «Корпус Т · ауд. 218, вул. Генерала Тарнавського, 107»; без аудиторії лише «Корпус на Тарнавського, вул. …»
     location: label
       ? building?.address
         ? `${label}, ${building.address}`
