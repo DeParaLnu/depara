@@ -66,7 +66,10 @@ npm run start:test
 cd mobile
 E2E=1 API_URL=http://10.0.2.2:3000 npx expo run:android --variant debug
 
-# Термінал 3: тести, поки Metro віддає JS
+# Термінал 3: тести, поки Metro віддає JS.
+# Appium у package.json немає (у CI workflow ставить його так само), тому один раз на машині:
+npm i -g appium
+appium driver install uiautomator2
 cd mobile
 npm run e2e                                                                # усі сценарії
 npx wdio run e2e/wdio.conf.ts --spec e2e/specs/f5-rooms.e2e.ts             # один сценарій
