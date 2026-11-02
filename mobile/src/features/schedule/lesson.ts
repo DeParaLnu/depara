@@ -32,7 +32,6 @@ export function lessonDetails(lesson: Lesson) {
   const roomChanged = !!sub?.newRoom;
   const room = roomChanged ? sub!.newRoom : lesson.room;
   const building = roomChanged ? (sub!.newBuilding ?? lesson.building) : lesson.building;
-  const parsed = parseRoom(room);
   const label = roomLabel(room);
   return {
     cancelled,
@@ -45,8 +44,8 @@ export function lessonDetails(lesson: Lesson) {
       : building
         ? `${building.name}, ${building.address}`
         : null,
-    // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус; аудиторія в запиті необовʼязкова
-    route: !cancelled && building ? { building, roomNumber: parsed?.number } : null,
+    // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус (веде на адресу корпусу)
+    route: !cancelled && building ? { building } : null,
   };
 }
 

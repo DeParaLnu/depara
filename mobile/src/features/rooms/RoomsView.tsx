@@ -174,7 +174,7 @@ export function RoomsView({
                   <View key={room.id}>
                     <TouchableOpacity
                       testID={`room-item-${idStr}`}
-                      onPress={() => openRoute(room.building, room.number)}
+                      onPress={() => openRoute(room.building)}
                       style={styles.roomRow}
                       activeOpacity={0.7}
                       accessibilityRole="button"
