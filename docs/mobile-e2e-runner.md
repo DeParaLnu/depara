@@ -63,10 +63,23 @@ npm run start:test
 
 # Термінал 2: збірка APK з фейковим входом і адресою хоста для емулятора
 cd mobile
-E2E=1 API_URL=http://10.0.2.2:3000 npx expo run:android --variant debug   # або ./gradlew assembleDebug в android/
+E2E=1 API_URL=http://10.0.2.2:3000 npx expo run:android --variant debug   # debug + Metro, сам запускає prebuild
 npm run e2e                                                                # усі сценарії
 npx wdio run e2e/wdio.conf.ts --spec e2e/specs/f5-rooms.e2e.ts             # один сценарій
+
+# Або як у CI: release-APK з вбудованим JS, без Metro
+E2E=1 API_URL=http://10.0.2.2:3000 npx expo prebuild --platform android --clean
+(cd android && ./gradlew assembleRelease)
+APK_PATH=$PWD/android/app/build/outputs/apk/release/app-release.apk npm run e2e
 ```
+
+Папки `mobile/android` і `mobile/ios` у git немає: їх генерує `npx expo prebuild` з `app.json` і `app.config.ts`
+(Continuous Native Generation). Нативні налаштування змінюють там або плагіном, а не руками в `android/`.
+Після зміни `E2E`, `API_URL` чи плагінів перегенеруйте папку з `--clean`.
+
+Чому в CI release, а не debug: debug-збірка не містить JS і завантажує його з dev-сервера Metro. Release-збірка
+підписується debug-ключем із шаблону Expo, а HTTP до тестового бекенда (`http://10.0.2.2:3000`) дозволяє плагін
+у `app.config.ts` лише при `E2E=1`.
 
 Повторний запуск на тій самій базі: студент уже має групу, тому `loginAsStudent()` пропускає онбординг.
 Сценарій F1 очікує саме онбординг, тож перед ним перезапустіть seed на чистій базі
