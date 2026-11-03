@@ -22,8 +22,14 @@ export function rateLimitKey(req: FastifyRequest): string {
   return `ip:${req.ip}`;
 }
 
-// Вхід, refresh і вихід ділять окремий лічильник (groupId) з власним, вищим ліміту на IP
-export const authRateLimit = (max: number) => ({ max, timeWindow: '1 minute', groupId: 'auth' });
+// Вхід, refresh і вихід ділять окремий лічильник (groupId) з власним, вищим ліміту на IP. Ключ саме IP, а не загальний:
+// інакше запит із дійсним Bearer-токеном рахувався б на користувача, і різні користувачі за одним IP не ділили б ліміт.
+export const authRateLimit = (max: number) => ({
+  max,
+  timeWindow: '1 minute',
+  groupId: 'auth',
+  keyGenerator: (req: FastifyRequest) => `ip:${req.ip}`,
+});
 
 // Ліміт запитів у Redis (спільний для перезапусків). Якщо Redis недоступний, запити пропускаються (skipOnError),
 // а не блокуються: ліміт це страховка, а не залежність, від якої має падати API.

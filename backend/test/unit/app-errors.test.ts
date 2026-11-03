@@ -121,3 +121,17 @@ describe('ліміти запитів', () => {
     expect((await app.inject('/__ok')).statusCode).toBe(429);
   });
 });
+
+describe('ліміт входу: ключ на IP', () => {
+  it('вхід, refresh і вихід рахуються на IP, навіть з дійсним Bearer-токеном: різні користувачі за одним IP ділять лічильник', async () => {
+    const app = appWith({ rateLimit: { perMinute: 1000, authPerMinute: 2, nameSpace: `rl-test-${randomUUID()}:` } });
+    apps.push(app);
+    const as = (userId: string) => ({ authorization: `Bearer ${signAccessToken(userId)}` });
+    const post = (userId: string) => app.inject({ method: 'POST', url: '/auth/refresh', headers: as(userId), payload: {} });
+
+    expect((await post(randomUUID())).statusCode).toBe(400);
+    expect((await post(randomUUID())).statusCode).toBe(400);
+    // третій запит від ще одного користувача з того самого IP: ліміт IP вичерпано
+    expect((await post(randomUUID())).statusCode).toBe(429);
+  });
+});
