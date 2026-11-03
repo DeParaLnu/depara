@@ -4,7 +4,7 @@ import { allByTestIdPrefix, byTestId, loginAsStudent, openTab } from '../helpers
 // Контракт testID (src/features/schedule/components/LessonDetailsSheet.tsx):
 //   lesson-details            аркуш деталей
 //   lesson-details-time       рядок «11:50 – 13:10 · пн 12 жовтня»
-//   lesson-details-location   рядок «Корпус Т · ауд. 218, вул. Тарнавського» (якщо в пари є аудиторія)
+//   lesson-details-location   рядок «Корпус Т · ауд. 218, вул. Генерала Тарнавського, 107» (якщо в пари є аудиторія)
 //   route-button              «Прокласти маршрут» (є лише коли відомий корпус)
 //   lesson-details-backdrop   затемнення: тап закриває аркуш
 describe('F3: деталі пари', () => {

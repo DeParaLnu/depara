@@ -94,7 +94,7 @@ export function LessonDetailsSheet({ lesson, onClose }: Props) {
                 testID="route-button"
                 accessibilityRole="button"
                 accessibilityLabel="Прокласти маршрут"
-                onPress={() => void openRoute(d.route!.building, d.route!.roomNumber)}
+                onPress={() => void openRoute(d.route!.building)}
                 style={({ pressed }) => [styles.primary, pressed && styles.primaryPressed]}
               >
                 <Text style={styles.primaryText}>Прокласти маршрут</Text>

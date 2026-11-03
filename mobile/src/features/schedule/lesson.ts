@@ -32,12 +32,11 @@ export function lessonDetails(lesson: Lesson) {
   const roomChanged = !!sub?.newRoom;
   const room = roomChanged ? sub!.newRoom : lesson.room;
   const building = roomChanged ? (sub!.newBuilding ?? lesson.building) : lesson.building;
-  const parsed = parseRoom(room);
   const label = roomLabel(room);
   return {
     cancelled,
     teacher: sub?.newTeacher ?? lesson.teacher,
-    // «Корпус Т · ауд. 218, вул. Тарнавського»; без аудиторії лише «Корпус Т, вул. Тарнавського»
+    // «Корпус Т · ауд. 218, вул. Генерала Тарнавського, 107»; без аудиторії лише «Корпус на Тарнавського, вул. …»
     location: label
       ? building?.address
         ? `${label}, ${building.address}`
@@ -45,8 +44,8 @@ export function lessonDetails(lesson: Lesson) {
       : building
         ? `${building.name}, ${building.address}`
         : null,
-    // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус; аудиторія в запиті необовʼязкова
-    route: !cancelled && building ? { building, roomNumber: parsed?.number } : null,
+    // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус (веде на адресу корпусу)
+    route: !cancelled && building ? { building } : null,
   };
 }
 

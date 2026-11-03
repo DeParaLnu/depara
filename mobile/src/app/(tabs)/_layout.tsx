@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import { Platform, useWindowDimensions } from 'react-native';
+import { Platform, useWindowDimensions, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 
@@ -15,6 +15,10 @@ const BAR_PADDING_BOTTOM = 6;
 const ITEM_PADDING = 5;
 // Верхня лінія панелі (hairline, не більше 1 px) теж займає висоту
 const BORDER = 1;
+
+// З RN 0.88 навігатор типізує колір іконки як ColorValue (може бути number чи null), а Ionicons
+// приймає лише рядок. Наші tabBar*TintColor завжди рядки
+const iconColor = (color: ColorValue) => (typeof color === 'string' ? color : undefined);
 
 // Нижня навігація з макетів: Сьогодні, Тиждень, Аудиторії, Профіль
 export default function TabsLayout() {
@@ -62,7 +66,7 @@ export default function TabsLayout() {
           title: 'Сьогодні',
           tabBarButtonTestID: 'tab-today',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={ICON_SIZE} color={color} />
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={ICON_SIZE} color={iconColor(color)} />
           ),
         }}
       />
@@ -75,7 +79,7 @@ export default function TabsLayout() {
             <Ionicons
               name={focused ? 'calendar' : 'calendar-outline'}
               size={ICON_SIZE}
-              color={color}
+              color={iconColor(color)}
             />
           ),
         }}
@@ -85,7 +89,7 @@ export default function TabsLayout() {
         options={{
           title: 'Аудиторії',
           tabBarButtonTestID: 'tab-rooms',
-          tabBarIcon: ({ color }) => <Ionicons name="search" size={ICON_SIZE} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="search" size={ICON_SIZE} color={iconColor(color)} />,
         }}
       />
       <Tabs.Screen
@@ -94,7 +98,7 @@ export default function TabsLayout() {
           title: 'Профіль',
           tabBarButtonTestID: 'tab-profile',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'person' : 'person-outline'} size={ICON_SIZE} color={color} />
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={ICON_SIZE} color={iconColor(color)} />
           ),
         }}
       />
