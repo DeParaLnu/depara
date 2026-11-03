@@ -132,6 +132,26 @@ describe('F7: імпорт розкладу', () => {
     expect(lesson).toBeTruthy();
   });
 
+  it('імпорт лише довідників без пар: виправляє адресу корпусу, яку бачать студенти', async () => {
+    const admin = await adminToken();
+    const student = await setupStudent('f7.reference@lnu.edu.ua');
+    const code = 'ТЕСТ-К';
+    const address = `вул. Довідкова, ${Date.now()}`;
+
+    const res = await send('POST', '/admin/schedule/import', admin, {
+      buildings: [{ code, name: 'Корпус для тестів довідників', address }],
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ imported: 0, groups: 0 });
+
+    const buildings = (await (await fetch(`${API}/buildings`, { headers: authHeaders(student) })).json()) as { code: string; address: string }[];
+    expect(buildings.find((b) => b.code === code)?.address).toBe(address);
+
+    // порожній запит чи порожні lessons без довідників, як і раніше, помилка
+    expect((await send('POST', '/admin/schedule/import', admin, {})).status).toBe(422);
+    expect((await send('POST', '/admin/schedule/import', admin, { lessons: [] })).status).toBe(422);
+  });
+
   it('некоректні дані дають 422 з переліком помилок', async () => {
     const admin = await adminToken();
     const res = await send('POST', '/admin/schedule/import', admin, {

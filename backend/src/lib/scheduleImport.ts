@@ -86,9 +86,12 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload } 
     return { full_name: t.full_name, position: typeof t.position === 'string' ? t.position : null } as ImportPayload['teachers'][number];
   });
 
-  const rawLessons = raw.lessons;
-  if (!Array.isArray(rawLessons) || rawLessons.length === 0) {
-    errors.push('lessons: потрібен непорожній масив');
+  // Імпорт лише довідників (наприклад, виправлені адреси корпусів) дозволений без пар. Порожній запит чи порожні
+  // lessons без жодного довідника це помилка: так випадковий `{}` не виглядає успішним імпортом.
+  const hasReference = pair_times.length + faculties.length + groups.length + buildings.length + teachers.length > 0;
+  const rawLessons = raw.lessons ?? (hasReference ? [] : undefined);
+  if (!Array.isArray(rawLessons) || (rawLessons.length === 0 && !hasReference)) {
+    errors.push('lessons: потрібен непорожній масив (або довідники: pair_times, faculties, groups, buildings, teachers)');
     return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
   }
   if (rawLessons.length > MAX_LESSONS) {

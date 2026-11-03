@@ -29,6 +29,34 @@ describe('validateImport', () => {
     expect(validateImport(payload).ok).toBe(false);
   });
 
+  describe('імпорт лише довідників', () => {
+    const building = { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Генерала Тарнавського, 107' };
+
+    it('приймає довідники без пар', () => {
+      const r = validateImport({ buildings: [building] });
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.data.lessons).toEqual([]);
+        expect(r.data.buildings).toEqual([building]);
+      }
+    });
+
+    it('порожній запит і порожні lessons без довідників відхиляються', () => {
+      expect(validateImport({}).ok).toBe(false);
+      expect(validateImport({ lessons: [] }).ok).toBe(false);
+      expect(validateImport({ buildings: [] }).ok).toBe(false);
+    });
+
+    it('довідники з помилками все одно відхиляються', () => {
+      const r = validateImport({ buildings: [{ code: 'Т', name: '', address: '' }] });
+      expect(r.ok).toBe(false);
+    });
+
+    it('lessons не масив із довідниками теж помилка', () => {
+      expect(validateImport({ buildings: [building], lessons: 'x' }).ok).toBe(false);
+    });
+  });
+
   it('підгрупи одного слота, різні дні й різні групи не є дублями', () => {
     const r = validateImport({
       lessons: [

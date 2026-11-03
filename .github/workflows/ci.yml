@@ -27,6 +27,24 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
 
+  # Мобільний застосунок: типи (разом з e2e) і юніт-тести логіки. Раніше типи мобільного перевірялись лише в
+  # mobile-e2e, який вимкнений для PR, тож помилка типів у мобільному коді не блокувала злиття.
+  mobile-typecheck-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   # E2E backend: справжній Postgres, запущений API, HTTP-запити ззовні
   backend-e2e:
     runs-on: ubuntu-latest

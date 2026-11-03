@@ -139,6 +139,29 @@ curl -i https://<домен>/dev         # має бути 404 (фейковий
 Далі: `ADMIN_EMAILS` у `.env` дає роль адміна при вході; розклад імпортується через `POST /admin/schedule/import`
 (формат у README). Після зміни `.env` виконайте `./deploy/deploy.sh`, щоб контейнери перезапустились з новими значеннями.
 
+### Оновлення довідника корпусів на проді
+
+Адреси корпусів, які бачить мобільний застосунок («Прокласти маршрут» шукає за адресою), лежать у базі. Виправлення в
+`backend/prisma/seed/schedule.seed.json` на прод автоматично не потрапляють: seed на проді не запускається.
+
+Коли вхід через Microsoft працює, довідники можна імпортувати без пар (адмін-токен із відповіді `POST /auth/microsoft`):
+
+```bash
+jq '{buildings}' backend/prisma/seed/schedule.seed.json | curl -sS -X POST https://<домен>/admin/schedule/import \
+  -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' --data @-
+# {"imported":0,"groups":0,"warnings":[]}
+```
+
+Імпорт оновлює назву й адресу наявних корпусів за літерою і додає нові. До появи входу те саме робить SQL на сервері
+(значення беріть із seed-файлу):
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml exec -T postgres psql -U depara -d depara <<'SQL'
+UPDATE building SET address = 'вул. Драгоманова, 50' WHERE code = 'Б';
+UPDATE building SET address = 'вул. Генерала Тарнавського, 107' WHERE code = 'Т';
+SQL
+```
+
 ## 5. Автодеплой із GitHub
 
 Після зеленого CI на `develop` воркфлоу `.github/workflows/deploy.yml` заходить на сервер по SSH і запускає `deploy.sh`.
