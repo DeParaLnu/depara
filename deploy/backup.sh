@@ -2,6 +2,7 @@
 # Дамп бази Postgres у стиснутий файл формату pg_dump -Fc.
 # Використання: deploy/backup.sh [мітка]     (мітка потрапляє в назву файлу, напр. pre-deploy)
 # Змінні: BACKUP_DIR (за замовчуванням ~/backups/depara), KEEP_DAYS (за замовчуванням 14).
+# Якщо є виконуваний deploy/backup-upload.sh, щоденний бекап вивантажується ним назовні (див. backup-upload.example.sh).
 # Копія на тому самому сервері не рятує від втрати сервера: копіюйте файли ще кудись (docs/deploy-vps.md).
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
@@ -41,6 +42,14 @@ main() {
   chmod 600 "$file"
   find "$dir" -name 'depara-*.dump' -type f -mtime +"$keep_days" -delete
   log "бекап збережено: $file ($(du -h "$file" | cut -f1))"
+
+  # Копія назовні: файл на тому самому сервері не вважається бекапом. Гачок (див. backup-upload.example.sh) є
+  # лише на сервері; бекап перед деплоєм (з міткою) не вивантажуємо, щоб не затримувати й не ламати деплой мережею.
+  local hook="$DEPLOY_DIR/backup-upload.sh"
+  if [ -z "$label" ] && [ -x "$hook" ]; then
+    "$hook" "$file" || die "копію назовні не створено ($hook завершився з помилкою)"
+    log "копію назовні створено"
+  fi
 }
 
 main "$@"

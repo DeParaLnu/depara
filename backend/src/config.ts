@@ -32,6 +32,10 @@ export const config = {
   rateLimitPerMinute: positiveInt(process.env.RATE_LIMIT_PER_MINUTE, 600),
   rateLimitAuthPerMinute: positiveInt(process.env.RATE_LIMIT_AUTH_PER_MINUTE, 300),
   rateLimitImportPerMinute: positiveInt(process.env.RATE_LIMIT_IMPORT_PER_MINUTE, 30),
+  // Сторінки /privacy і /delete-account: контактна пошта для запитів про дані (обов'язкова для магазинів застосунків)
+  // і хто обробляє дані. Без пошти сторінка відсилає до адміністраторів застосунку.
+  privacyContactEmail: (process.env.PRIVACY_CONTACT_EMAIL ?? '').trim(),
+  privacyOperator: (process.env.PRIVACY_OPERATOR ?? '').trim() || 'команда проєкту «ДеПара»',
   // Origin веб-адмінки (через кому). Порожньо = CORS вимкнений. Мобільному застосунку CORS не потрібен.
   corsOrigins: (process.env.CORS_ORIGINS ?? '')
     .split(',')

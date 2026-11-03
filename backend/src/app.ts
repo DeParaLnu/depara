@@ -5,9 +5,11 @@ import Fastify, { type FastifyError, type FastifyRequest, type FastifyServerOpti
 import { Prisma } from '@prisma/client';
 import { config } from './config';
 import { registerRateLimit, type RateLimitOptions } from './plugins/rateLimit';
+import { prisma } from './db';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { classroomRoutes } from './routes/classrooms';
+import { legalRoutes } from './routes/legal';
 import { profileRoutes } from './routes/profile';
 import { scheduleRoutes } from './routes/schedule';
 import { substitutionRoutes } from './routes/substitutions';
@@ -57,7 +59,40 @@ const CLIENT_ERROR_CODES: Record<number, string> = {
   429: 'RATE_LIMITED',
 };
 
-export function buildApp(opts: { logger?: FastifyServerOptions['logger']; rateLimit?: RateLimitOptions } = {}) {
+export interface HealthChecks {
+  database: () => Promise<unknown>;
+  redis: () => Promise<unknown>;
+  timeoutMs: number;
+}
+
+const defaultHealthChecks: HealthChecks = {
+  database: () => prisma.$queryRaw`SELECT 1`,
+  redis: () => redis.ping(),
+  timeoutMs: 2000,
+};
+
+// true, якщо перевірка встигла й не впала; зовнішній збій чи завислий виклик це false (текст помилки не віддаємо)
+async function healthy(check: () => Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      check(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+      }),
+    ]);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function buildApp(
+  opts: { logger?: FastifyServerOptions['logger']; rateLimit?: RateLimitOptions; health?: Partial<HealthChecks> } = {},
+) {
+  const health: HealthChecks = { ...defaultHealthChecks, ...opts.health };
   const app = Fastify({
     logger: loggerOptions(opts.logger),
     trustProxy: config.trustProxy,
@@ -115,6 +150,20 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger']; rateLi
   // Перевірку здоров'я Docker і smoke-скрипти не лімітуємо
   app.get('/health', { config: { rateLimit: false } }, async () => ({ status: 'ok' }));
 
+  // Готовність: база і Redis відповідають. /health лишається для перевірки контейнера (процес живий), а цей
+  // ендпоінт для зовнішнього моніторингу: 503, коли залежність лежить, хоча процес сам працює.
+  app.get('/health/ready', { config: { rateLimit: false } }, async (_req, reply) => {
+    const [database, cache] = await Promise.all([
+      healthy(health.database, health.timeoutMs),
+      healthy(health.redis, health.timeoutMs),
+    ]);
+    const ok = database && cache;
+    return reply
+      .code(ok ? 200 : 503)
+      .header('cache-control', 'no-store')
+      .send({ status: ok ? 'ok' : 'degraded', checks: { database: database ? 'ok' : 'fail', redis: cache ? 'ok' : 'fail' } });
+  });
+
   // Демо-консоль для ручного тестування в браузері. Існує лише при AUTH_MODE=fake (тестовий режим).
   if (config.fakeAuth) {
     const consoleHtml = readFileSync(new URL('./dev/console.html', import.meta.url), 'utf8');
@@ -124,6 +173,7 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger']; rateLi
 
   app.register(authRoutes, { authPerMinute: opts.rateLimit?.authPerMinute });
   app.register(profileRoutes);
+  app.register(legalRoutes);
   app.register(scheduleRoutes);
   app.register(classroomRoutes);
   app.register(teacherRoutes);

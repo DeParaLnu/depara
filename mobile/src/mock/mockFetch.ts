@@ -79,6 +79,10 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
   if (method === 'GET' && route === '/groups') return reply(200, MOCK_GROUPS);
 
   if (route === '/me') {
+    if (method === 'DELETE') {
+      state = { groupId: null, subgroup: 0 };
+      return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
+    }
     if (method === 'PATCH') {
       if (!MOCK_GROUPS.some((g) => g.id === body.groupId)) return reply(404, { error: 'GROUP_NOT_FOUND' });
       const subgroup = Number.isInteger(body.subgroup) ? body.subgroup : 0;

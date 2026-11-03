@@ -6,6 +6,7 @@
 #      404 теж гаразд, коли після переходу на Microsoft цей маршрут приберуть)
 #      Якщо тут 200, на проді увімкнено NODE_ENV=test і AUTH_MODE=fake: будь-хто увійде будь-ким.
 #   4. Відповідь містить x-request-id (Caddy і API зіставляють логи)
+#   5. GET  /health/ready    -> 200 (база і Redis відповідають; 404 від старішого образу пропускається)
 # Використання: deploy/smoke.sh https://api.example.com   (код виходу 0 = усе гаразд)
 # Запускається з deploy.yml після кожного деплою; вручну — з будь-якої машини з curl.
 set -euo pipefail
@@ -35,6 +36,15 @@ if [ "$code" = 200 ] && grep -q '"status":"ok"' "$body"; then ok "/health 200"; 
 
 # 4. x-request-id (з тієї ж відповіді /health)
 if grep -qi '^x-request-id:' "$headers"; then ok "x-request-id є"; else bad "немає заголовка x-request-id"; fi
+
+# 5. /health/ready: база і Redis відповідають. 503 означає, що процес живий, а залежність лежить.
+# 404 це відкат на образ старіший за цей ендпоінт: пропускаємо, а не вважаємо збоєм.
+code="$(status "$base/health/ready" || true)"
+case "$code" in
+  200) if grep -q '"status":"ok"' "$body"; then ok "/health/ready 200 (база і Redis)"; else bad "/health/ready 200, але статус не ok: $(head -c 200 "$body")"; fi ;;
+  404) ok "/health/ready відсутній (образ старіший), пропущено" ;;
+  *) bad "/health/ready відповів $code: $(head -c 200 "$body")" ;;
+esac
 
 # 2. /dev
 code="$(status "$base/dev" || true)"

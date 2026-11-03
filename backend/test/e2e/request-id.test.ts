@@ -20,3 +20,30 @@ describe('X-Request-ID', () => {
     }
   });
 });
+
+describe('готовність (/health/ready)', () => {
+  it('на живому сервері з базою і Redis повертає 200', async () => {
+    const res = await fetch(`${API}/health/ready`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: 'ok', checks: { database: 'ok', redis: 'ok' } });
+  });
+});
+
+describe('публічні сторінки для магазинів застосунків', () => {
+  it('/privacy і /delete-account доступні без токена, українською, і посилаються одна на одну', async () => {
+    const privacy = await fetch(`${API}/privacy`);
+    expect(privacy.status).toBe(200);
+    expect(privacy.headers.get('content-type')).toContain('text/html');
+    const privacyText = await privacy.text();
+    expect(privacyText).toContain('lang="uk"');
+    expect(privacyText).toContain('Політика конфіденційності');
+    expect(privacyText).toContain('/delete-account');
+
+    const del = await fetch(`${API}/delete-account`);
+    expect(del.status).toBe(200);
+    const deleteText = await del.text();
+    expect(deleteText).toContain('Видалити акаунт');
+    expect(deleteText).toContain('/privacy');
+  });
+});
+
