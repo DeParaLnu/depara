@@ -1,7 +1,8 @@
 -- Ключ пари: (група, дата, номер пари, підгрупа) замість ключа з предметом.
 -- Раніше виправлення назви предмета в новому імпорті додавало другу пару в той самий слот. Такі дублі, якщо вони
 -- вже є, зводимо до однієї пари перед створенням унікального індексу:
---  * лишається пара із заміною старости (її id тримає заміну), а якщо замін кілька, то найсвіжіша з них;
+--  * лишається пара із заміною старости (її id тримає заміну), а якщо замін кілька, то пара з НАЙСВІЖІШОЮ ЗАМІНОЮ
+--    за substitution.updated_at (порядок оновлення пар тут не важить: стара пара може мати новішу заміну);
 --  * поля (предмет, тип, викладач, аудиторія...) беруться з НАЙСВІЖІШОЇ пари слота: це остання версія розкладу,
 --    тож виправлена назва не губиться, навіть коли заміна висіла на старій версії;
 --  * якщо заміни були на кількох дублях одного слота, зберегти можна лише одну (одна заміна на пару):
@@ -10,6 +11,7 @@ CREATE TEMP TABLE "_lesson_slot_dups" AS
 SELECT
   l."id", l."group_id", l."date", l."pair_number", l."subgroup",
   l."subject", l."type", l."audience", l."teacher_id", l."classroom_id", l."online_url", l."updated_at",
+  (SELECT MAX(s."updated_at") FROM "substitution" s WHERE s."lesson_id" = l."id") AS sub_updated_at,
   EXISTS (SELECT 1 FROM "substitution" s WHERE s."lesson_id" = l."id") AS has_sub,
   ROW_NUMBER() OVER (
     PARTITION BY l."group_id", l."date", l."pair_number", l."subgroup" ORDER BY l."updated_at" DESC, l."id"
@@ -19,11 +21,11 @@ FROM "lesson" l;
 
 DELETE FROM "_lesson_slot_dups" WHERE slot_size = 1;
 
--- Яка пара слота лишається: із заміною (найсвіжіша серед таких), інакше найсвіжіша
+-- Яка пара слота лишається: із заміною (з найсвіжішою за updated_at заміною), інакше найсвіжіша пара
 CREATE TEMP TABLE "_lesson_slot_keep" AS
 SELECT DISTINCT ON ("group_id", "date", "pair_number", "subgroup") "id" AS keep_id, "group_id", "date", "pair_number", "subgroup"
 FROM "_lesson_slot_dups"
-ORDER BY "group_id", "date", "pair_number", "subgroup", has_sub DESC, recency, "id";
+ORDER BY "group_id", "date", "pair_number", "subgroup", has_sub DESC, sub_updated_at DESC NULLS LAST, recency, "id";
 
 DO $$
 DECLARE slot RECORD;
