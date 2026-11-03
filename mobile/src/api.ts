@@ -87,27 +87,44 @@ export function setSessionBridge(bridge: SessionBridge) {
   sessionBridge = bridge;
 }
 
-let refreshPromise: Promise<string | null> | null = null;
+// Результат оновлення токена. Сесію скидаємо лише при `rejected` (сервер визнав refresh недійсним).
+// `transient` (немає мережі, 5xx, ліміт запитів) сесію зберігає: токен ще може бути дійсним, і розлогін через
+// слабкий зв'язок змусив би студента проходити вхід заново.
+type RefreshResult =
+  | { kind: 'ok'; accessToken: string }
+  | { kind: 'transient'; error: ApiError }
+  | { kind: 'rejected' };
 
-async function handleTokenRefresh(): Promise<string | null> {
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+// 400/401 від /auth/refresh: refresh недійсний чи відхилений. Усе інше вважаємо тимчасовим.
+const isRefreshRejected = (e: unknown): boolean => e instanceof ApiError && (e.status === 401 || e.status === 400);
+
+async function handleTokenRefresh(): Promise<RefreshResult> {
   if (refreshPromise) return refreshPromise;
-  if (!sessionBridge) return null;
+  const bridge = sessionBridge;
+  if (!bridge) return { kind: 'rejected' };
 
-  refreshPromise = (async () => {
+  refreshPromise = (async (): Promise<RefreshResult> => {
     try {
-      const current = sessionBridge.getSession();
+      const current = bridge.getSession();
       if (!current?.refreshToken) {
-        await sessionBridge.onRefreshFailed();
-        return null;
+        await bridge.onRefreshFailed();
+        return { kind: 'rejected' };
       }
-      const deviceId = await sessionBridge.getDeviceId();
+      const deviceId = await bridge.getDeviceId();
       const res = await api.refresh(current.refreshToken, deviceId);
-      await sessionBridge.onRefreshed(res);
-      return res.accessToken;
+      await bridge.onRefreshed(res);
+      return { kind: 'ok', accessToken: res.accessToken };
     } catch (e) {
-      log.warn('auth', 'помилка оновлення токена, скидаємо сесію', { error: e });
-      await sessionBridge.onRefreshFailed();
-      return null;
+      if (isRefreshRejected(e)) {
+        log.warn('auth', 'сервер відхилив refresh-токен, скидаємо сесію', { error: e });
+        await bridge.onRefreshFailed();
+        return { kind: 'rejected' };
+      }
+      log.warn('auth', 'не вдалось оновити токен (тимчасово), сесію зберігаємо', { error: e });
+      const error = e instanceof ApiError ? e : new ApiError('NETWORK_ERROR');
+      return { kind: 'transient', error };
     } finally {
       refreshPromise = null;
     }
@@ -152,10 +169,11 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
       sessionBridge
     ) {
       log.info('auth', 'access токен прострочено, виконуємо авто-refresh');
-      const newToken = await handleTokenRefresh();
-      if (newToken) {
-        return request<T>(path, init, newToken, true);
-      }
+      const refreshed = await handleTokenRefresh();
+      if (refreshed.kind === 'ok') return request<T>(path, init, refreshed.accessToken, true);
+      // Тимчасова помилка refresh: віддаємо її (наприклад NETWORK_ERROR) замість 401, щоб екран показав
+      // «Офлайн» і збережений розклад, а загальний обробник не скинув сесію
+      if (refreshed.kind === 'transient') throw refreshed.error;
     }
     log.warn('api', `${method} ${route} → ${res.status} ${code}`, { ms, requestId });
     throw new ApiError(code, res.status, requestId);
