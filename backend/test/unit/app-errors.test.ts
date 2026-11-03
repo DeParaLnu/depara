@@ -73,6 +73,7 @@ describe('обробник помилок', () => {
   it('isDependencyUnavailable розпізнає мережеві помилки й не реагує на звичайні', () => {
     expect(isDependencyUnavailable(Object.assign(new Error('x'), { code: 'ECONNREFUSED' }))).toBe(true);
     expect(isDependencyUnavailable(new Error('Connection is closed.'))).toBe(true);
+    expect(isDependencyUnavailable(new Error('Command timed out'))).toBe(true);
     expect(isDependencyUnavailable(new Error('boom'))).toBe(false);
     expect(isDependencyUnavailable(null)).toBe(false);
   });

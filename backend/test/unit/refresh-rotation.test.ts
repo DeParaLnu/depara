@@ -46,6 +46,33 @@ describe('rotateRefreshToken', () => {
     expect(await rotateRefreshToken(c, DEVICE)).toBeNull();
   });
 
+  // Подвійний тап чи повтор клієнта: два запити з одним токеном одночасно. Обмін атомарний, тож перший обмінює,
+  // а решта отримують ту саму пару повтором (а не 401, як було б, якби запис повтору з'являвся пізніше).
+  it('паралельні запити з одним токеном дають одну й ту саму нову пару', async () => {
+    const userId = randomUUID();
+    const first = await issueRefreshToken(userId, DEVICE);
+
+    const results = await Promise.all(Array.from({ length: 5 }, () => rotateRefreshToken(first, DEVICE)));
+
+    expect(results.every((r) => r !== null)).toBe(true);
+    expect(new Set(results.map((r) => r!.refreshToken)).size).toBe(1);
+    // і ця єдина пара справді дійсна: її можна обміняти далі
+    expect(await rotateRefreshToken(results[0]!.refreshToken, DEVICE)).not.toBeNull();
+  });
+
+  it('паралельні запити з одним токеном з різних пристроїв: обмінюється не більше одного', async () => {
+    const userId = randomUUID();
+    const first = await issueRefreshToken(userId, DEVICE);
+
+    const results = await Promise.all([
+      rotateRefreshToken(first, DEVICE),
+      rotateRefreshToken(first, 'other-device'),
+      rotateRefreshToken(first, 'third-device'),
+    ]);
+
+    expect(results.filter((r) => r !== null).length).toBeLessThanOrEqual(1);
+  });
+
   it('відкликана нова пара не віддається повтором', async () => {
     const userId = randomUUID();
     const first = await issueRefreshToken(userId, DEVICE);

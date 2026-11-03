@@ -67,11 +67,21 @@ export default function RootLayout() {
   const signedIn = !!session;
   const onboarding = signedIn && session.needsOnboarding;
 
+  // Вихід під час відновлення кешу з диска міг би скинути кеш, а відновлення, що ще триває, потім повернуло б
+  // у нього дані попереднього користувача. Тому екрани з'являються лише після відновлення (зазвичай десятки мс).
+  // Таймер страхує від порожнього екрана, якщо жоден із зворотних викликів не спрацював.
+  const [restored, setRestored] = useState(!persistCache);
+  useEffect(() => {
+    if (restored) return;
+    const timer = setTimeout(() => setRestored(true), 3000);
+    return () => clearTimeout(timer);
+  }, [restored]);
+
   if (!isHydrated) {
     return null;
   }
 
-  const content = (
+  const content = restored ? (
     <>
       <StatusBar style="auto" />
       <AppErrorBoundary>
@@ -88,7 +98,7 @@ export default function RootLayout() {
         </Stack>
       </AppErrorBoundary>
     </>
-  );
+  ) : null;
 
   return (
     <SafeAreaProvider>
@@ -99,8 +109,10 @@ export default function RootLayout() {
             persister: queryPersister,
             maxAge: PERSIST_MAX_AGE_MS,
             buster: PERSIST_CACHE_VERSION,
-            dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+            dehydrateOptions: { shouldDehydrateQuery: (query) => shouldPersistQuery(query) },
           }}
+          onSuccess={() => setRestored(true)}
+          onError={() => setRestored(true)}
         >
           {content}
         </PersistQueryClientProvider>

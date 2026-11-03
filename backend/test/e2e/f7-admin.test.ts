@@ -100,6 +100,22 @@ describe('F7: імпорт розкладу', () => {
     expect(((await res.json()) as { details: string[] }).details[0]).toContain('уже є запис у файлі');
   });
 
+  it('той самий слот групи з faculty і без нього виявляється як дубль (група визначається одна)', async () => {
+    const admin = await adminToken();
+    const student = await setupStudent('f7.dupfaculty@lnu.edu.ua');
+    const slot = uniqueSlot();
+    const res = await send('POST', '/admin/schedule/import', admin, {
+      lessons: [
+        { group: 'ТЕСТ-31', ...slot, subject: 'Без факультету' },
+        { group: 'ТЕСТ-31', faculty: 'ТФ', ...slot, subject: 'З факультетом' },
+      ],
+    });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { details: string[] }).details.join(' ')).toContain('уже є запис у файлі');
+    // імпорт атомарний: жодної з двох пар не збережено
+    expect((await weekLessons(student, slot.date)).some((l) => l.date === slot.date && l.pairNumber === slot.pair)).toBe(false);
+  });
+
   it('підгрупи одного слота не конфліктують', async () => {
     const admin = await adminToken();
     const student = await setupStudent('f7.subgroups@lnu.edu.ua');

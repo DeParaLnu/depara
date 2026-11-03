@@ -33,18 +33,16 @@ export function verifyAccessToken(token: string): AccessCheck {
   }
 }
 
-// Підписує refresh-токен і записує сесію в Redis: refresh:{jti} = hash(userId, deviceId), TTL 30 днів.
-async function createRefreshToken(userId: string, deviceId: string): Promise<{ token: string; jti: string }> {
-  const jti = randomUUID();
-  await redis.set(sessionKey(jti), fingerprint(userId, deviceId), 'EX', config.refreshTokenTtlSeconds);
-  const token = jwt.sign({ sub: userId, typ: 'refresh', jti } satisfies TokenPayload, config.jwtSecret, {
+const signRefresh = (userId: string, jti: string): string =>
+  jwt.sign({ sub: userId, typ: 'refresh', jti } satisfies TokenPayload, config.jwtSecret, {
     expiresIn: config.refreshTokenTtlSeconds,
   });
-  return { token, jti };
-}
 
+// Видає refresh-токен і записує сесію в Redis: refresh:{jti} = hash(userId, deviceId), TTL 30 днів.
 export async function issueRefreshToken(userId: string, deviceId: string): Promise<string> {
-  return (await createRefreshToken(userId, deviceId)).token;
+  const jti = randomUUID();
+  await redis.set(sessionKey(jti), fingerprint(userId, deviceId), 'EX', config.refreshTokenTtlSeconds);
+  return signRefresh(userId, jti);
 }
 
 const rotatedKey = (jti: string) => `refresh-rotated:${jti}`;
@@ -54,8 +52,22 @@ export interface RotatedSession {
   refreshToken: string;
 }
 
-// Ротація: стару сесію видаляємо (одноразово, GETDEL), вона має збігатися з userId і deviceId, і видаємо нову.
-// Для повтору запиту після втраченої відповіді нову пару запам'ятовуємо на refreshReuseGraceSeconds.
+// Ротація одним атомарним кроком Redis: видаляємо стару сесію (GETDEL), якщо вона належить цьому пристрою,
+// записуємо нову і запис для повтору. Окремі команди лишали б вікно, у якому збій Redis (командний таймаут)
+// між ними залишив би клієнта без жодної сесії, а паралельний повтор побачив би стару сесію вже видаленою,
+// а запис повтору ще не створеним.
+// Повертає 1 (обміняно), -1 (стара сесія була, але іншого пристрою: вона вже видалена), 0 (старої сесії немає).
+const ROTATE_SCRIPT = `
+local old = redis.call('GETDEL', KEYS[1])
+if not old then return 0 end
+if old ~= ARGV[1] then return -1 end
+redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[2])
+if tonumber(ARGV[4]) > 0 then redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4]) end
+return 1
+`;
+
+// Ротація: стара сесія одноразова, вона має збігатися з userId і deviceId. Для повтору запиту після втраченої
+// відповіді нову пару запам'ятовуємо на refreshReuseGraceSeconds.
 export async function rotateRefreshToken(token: string, deviceId: string): Promise<RotatedSession | null> {
   let p: TokenPayload;
   try {
@@ -66,25 +78,32 @@ export async function rotateRefreshToken(token: string, deviceId: string): Promi
   if (p.typ !== 'refresh' || !p.jti) return null;
 
   const fp = fingerprint(p.sub, deviceId);
-  const stored = await redis.getdel(sessionKey(p.jti));
-  if (stored === fp) {
-    const next = await createRefreshToken(p.sub, deviceId);
-    if (config.refreshReuseGraceSeconds > 0) {
-      const replay = JSON.stringify({ fp, token: next.token, jti: next.jti });
-      await redis.set(rotatedKey(p.jti), replay, 'EX', config.refreshReuseGraceSeconds);
-    }
-    return { userId: p.sub, refreshToken: next.token };
-  }
-  // Сесія була, але належала іншому пристрою: вона вже видалена вище, повтор не допускаємо
-  if (stored || config.refreshReuseGraceSeconds === 0) return null;
+  const nextJti = randomUUID();
+  const nextToken = signRefresh(p.sub, nextJti);
+  const grace = config.refreshReuseGraceSeconds;
+  const replay = JSON.stringify({ fp, token: nextToken, jti: nextJti });
+
+  const outcome = (await redis.eval(
+    ROTATE_SCRIPT,
+    3,
+    sessionKey(p.jti),
+    sessionKey(nextJti),
+    rotatedKey(p.jti),
+    fp,
+    config.refreshTokenTtlSeconds,
+    replay,
+    grace,
+  )) as number;
+  if (outcome === 1) return { userId: p.sub, refreshToken: nextToken };
+  if (outcome === -1 || grace === 0) return null;
 
   // Токен уже обміняли: це повтор лише якщо той самий пристрій і нова пара ще не використана.
   // Після першого ж використання нової пари старий токен знову відхиляється (як і раніше).
   const raw = await redis.get(rotatedKey(p.jti));
   if (!raw) return null;
-  const replay = JSON.parse(raw) as { fp: string; token: string; jti: string };
-  if (replay.fp !== fp || !(await redis.exists(sessionKey(replay.jti)))) return null;
-  return { userId: p.sub, refreshToken: replay.token };
+  const prev = JSON.parse(raw) as { fp: string; token: string; jti: string };
+  if (prev.fp !== fp || !(await redis.exists(sessionKey(prev.jti)))) return null;
+  return { userId: p.sub, refreshToken: prev.token };
 }
 
 // Вихід: видаляє сесію. Недійсний токен ігноруємо (операція ідемпотентна).

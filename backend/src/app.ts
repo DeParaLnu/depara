@@ -43,7 +43,8 @@ export function isDependencyUnavailable(err: unknown): boolean {
   return (
     e.name === 'MaxRetriesPerRequestError' ||
     (typeof e.code === 'string' && NETWORK_CODES.has(e.code)) ||
-    e.message === 'Connection is closed.'
+    e.message === 'Connection is closed.' ||
+    e.message === 'Command timed out' // commandTimeout ioredis (redis.ts)
   );
 }
 

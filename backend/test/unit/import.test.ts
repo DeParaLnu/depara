@@ -52,8 +52,9 @@ describe('validateImport', () => {
       expect(r.ok).toBe(false);
     });
 
-    it('lessons не масив із довідниками теж помилка', () => {
+    it('lessons не масив із довідниками теж помилка, зокрема явний null', () => {
       expect(validateImport({ buildings: [building], lessons: 'x' }).ok).toBe(false);
+      expect(validateImport({ buildings: [building], lessons: null }).ok).toBe(false);
     });
   });
 

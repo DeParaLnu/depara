@@ -89,7 +89,8 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload } 
   // Імпорт лише довідників (наприклад, виправлені адреси корпусів) дозволений без пар. Порожній запит чи порожні
   // lessons без жодного довідника це помилка: так випадковий `{}` не виглядає успішним імпортом.
   const hasReference = pair_times.length + faculties.length + groups.length + buildings.length + teachers.length > 0;
-  const rawLessons = raw.lessons ?? (hasReference ? [] : undefined);
+  // За замовчуванням [] лише коли поля немає зовсім: явний null чи не масив це помилка, а не «без пар»
+  const rawLessons = raw.lessons === undefined && hasReference ? [] : raw.lessons;
   if (!Array.isArray(rawLessons) || (rawLessons.length === 0 && !hasReference)) {
     errors.push('lessons: потрібен непорожній масив (або довідники: pair_times, faculties, groups, buildings, teachers)');
     return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
@@ -235,6 +236,10 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
         return rows[0].id;
       };
 
+      // Слот за ВИЗНАЧЕНОЮ групою: пара з faculty і та сама без нього можуть вказувати на одну групу, а у файлі
+      // (де ключ слота будується з того, що написано) вони виглядають різними
+      const seenSlots = new Set<string>();
+
       let imported = 0;
       for (const [i, l] of data.lessons.entries()) {
         if (!knownPairs.has(l.pair)) {
@@ -243,6 +248,13 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
         }
         const groupId = await resolveGroup(l.group, l.faculty);
         if (!groupId) continue;
+
+        const slot = [groupId, l.date, l.pair, l.subgroup].join('|');
+        if (seenSlots.has(slot)) {
+          problems.push(`lessons[${i}]: у групи ${l.group} ${l.date} на парі ${l.pair} (підгрупа ${l.subgroup}) уже є запис у файлі. Одна пара на слот`);
+          continue;
+        }
+        seenSlots.add(slot);
 
         let teacherId: string | null = null;
         if (l.teacher) {

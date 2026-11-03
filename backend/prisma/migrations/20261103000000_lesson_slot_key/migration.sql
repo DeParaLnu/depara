@@ -1,18 +1,58 @@
 -- Ключ пари: (група, дата, номер пари, підгрупа) замість ключа з предметом.
 -- Раніше виправлення назви предмета в новому імпорті додавало другу пару в той самий слот. Такі дублі, якщо вони
--- вже є, прибираємо перед створенням унікального індексу: лишаємо пару із заміною (щоб не втратити заміну
--- старости), а серед решти найсвіжішу за updated_at.
-DELETE FROM "lesson" AS l
-USING (
-  SELECT
-    x."id",
-    ROW_NUMBER() OVER (
-      PARTITION BY x."group_id", x."date", x."pair_number", x."subgroup"
-      ORDER BY EXISTS (SELECT 1 FROM "substitution" s WHERE s."lesson_id" = x."id") DESC, x."updated_at" DESC, x."id"
-    ) AS rn
-  FROM "lesson" x
-) d
-WHERE l."id" = d."id" AND d.rn > 1;
+-- вже є, зводимо до однієї пари перед створенням унікального індексу:
+--  * лишається пара із заміною старости (її id тримає заміну), а якщо замін кілька, то найсвіжіша з них;
+--  * поля (предмет, тип, викладач, аудиторія...) беруться з НАЙСВІЖІШОЇ пари слота: це остання версія розкладу,
+--    тож виправлена назва не губиться, навіть коли заміна висіла на старій версії;
+--  * якщо заміни були на кількох дублях одного слота, зберегти можна лише одну (одна заміна на пару):
+--    решта каскадно видаляється, про кожен такий слот міграція пише NOTICE.
+CREATE TEMP TABLE "_lesson_slot_dups" AS
+SELECT
+  l."id", l."group_id", l."date", l."pair_number", l."subgroup",
+  l."subject", l."type", l."audience", l."teacher_id", l."classroom_id", l."online_url", l."updated_at",
+  EXISTS (SELECT 1 FROM "substitution" s WHERE s."lesson_id" = l."id") AS has_sub,
+  ROW_NUMBER() OVER (
+    PARTITION BY l."group_id", l."date", l."pair_number", l."subgroup" ORDER BY l."updated_at" DESC, l."id"
+  ) AS recency,
+  COUNT(*) OVER (PARTITION BY l."group_id", l."date", l."pair_number", l."subgroup") AS slot_size
+FROM "lesson" l;
+
+DELETE FROM "_lesson_slot_dups" WHERE slot_size = 1;
+
+-- Яка пара слота лишається: із заміною (найсвіжіша серед таких), інакше найсвіжіша
+CREATE TEMP TABLE "_lesson_slot_keep" AS
+SELECT DISTINCT ON ("group_id", "date", "pair_number", "subgroup") "id" AS keep_id, "group_id", "date", "pair_number", "subgroup"
+FROM "_lesson_slot_dups"
+ORDER BY "group_id", "date", "pair_number", "subgroup", has_sub DESC, recency, "id";
+
+DO $$
+DECLARE slot RECORD;
+BEGIN
+  FOR slot IN
+    SELECT "group_id", "date", "pair_number", "subgroup", COUNT(*) FILTER (WHERE has_sub) AS subs
+    FROM "_lesson_slot_dups" GROUP BY "group_id", "date", "pair_number", "subgroup" HAVING COUNT(*) FILTER (WHERE has_sub) > 1
+  LOOP
+    RAISE NOTICE 'слот group=% date=% pair=% subgroup=%: замін було %, збережено одну (найсвіжішу)',
+      slot."group_id", slot."date", slot."pair_number", slot."subgroup", slot.subs;
+  END LOOP;
+END $$;
+
+-- Спершу видаляємо зайві дублі (поки старий унікальний індекс ще з предметом, перенесена назва збіглася б із дублем),
+-- потім переносимо поля найсвіжішої версії з тимчасової таблиці на пару, що лишилась
+DELETE FROM "lesson" WHERE "id" IN (SELECT "id" FROM "_lesson_slot_dups") AND "id" NOT IN (SELECT keep_id FROM "_lesson_slot_keep");
+
+UPDATE "lesson" AS k
+SET "subject" = n."subject", "type" = n."type", "audience" = n."audience", "teacher_id" = n."teacher_id",
+    "classroom_id" = n."classroom_id", "online_url" = n."online_url", "updated_at" = n."updated_at"
+FROM "_lesson_slot_keep" keep
+JOIN "_lesson_slot_dups" n
+  ON n."group_id" = keep."group_id" AND n."date" = keep."date" AND n."pair_number" = keep."pair_number"
+ AND n."subgroup" = keep."subgroup" AND n.recency = 1
+WHERE k."id" = keep.keep_id AND n."id" <> keep.keep_id;
+
+
+DROP TABLE "_lesson_slot_dups";
+DROP TABLE "_lesson_slot_keep";
 
 DROP INDEX "lesson_group_id_date_pair_number_subgroup_subject_key";
 CREATE UNIQUE INDEX "lesson_group_id_date_pair_number_subgroup_key" ON "lesson"("group_id", "date", "pair_number", "subgroup");

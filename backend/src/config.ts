@@ -21,7 +21,8 @@ export const config = {
   // Refresh одноразовий. Якщо відповідь на refresh загубилась по дорозі (слабка мережа), клієнт повторює запит зі
   // старим токеном: протягом цього вікна сервер віддає ту саму нову пару, але лише того самого пристрою і поки
   // нова пара не використана. 0 вимикає вікно (повторний refresh завжди відхиляється).
-  refreshReuseGraceSeconds: Math.max(0, Number(process.env.REFRESH_REUSE_GRACE_SECONDS ?? 30) || 0),
+  // Ціле число секунд: Redis відхиляє дробове EX
+  refreshReuseGraceSeconds: Math.max(0, Math.floor(Number(process.env.REFRESH_REUSE_GRACE_SECONDS ?? 30)) || 0),
   // Вхід через Microsoft Entra. Поки тенант не зареєстровано, обидві змінні порожні і /auth/microsoft відповідає 503.
   microsoftClientId: process.env.MICROSOFT_CLIENT_ID ?? '', // aud ID-токена (Application/Client ID)
   microsoftTenantId: process.env.MICROSOFT_TENANT_ID ?? '', // tid організації, з якої пускаємо
