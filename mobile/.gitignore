@@ -36,6 +36,7 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
+# generated native folders (Continuous Native Generation: npx expo prebuild створює їх з app.json)
 /ios
+/android
 e2e/artifacts/

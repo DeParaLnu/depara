@@ -1,4 +1,4 @@
-import { allByTestIdPrefix, byTestId, byTestIdPrefix, loginAsStudent, openTab, weekDay } from '../helpers';
+import { allByTestIdPrefix, byTestId, loginAsStudent, openTab, weekDay } from '../helpers';
 
 // F3, сценарій «відкрити тиждень» (specs/f3-schedule.md, критерії приймання).
 // Дані: seed з --shift-to-current-week, група ТЕСТ-31, студент з підгрупою 0 (бачить усі підгрупи).
@@ -27,10 +27,11 @@ describe('F3: розклад на тиждень', () => {
     const tue = await byTestId(`week-day-${weekDay(1)}`).getLocation('y');
     expect(mon).toBeLessThan(tue);
 
-    // У понеділок у seed пари 2, 3, 4, 5: друга вище за четверту
-    const pair2 = await byTestIdPrefix(`lesson-card-${weekDay(0)}-2-`).getLocation('y');
-    const pair4 = await byTestIdPrefix(`lesson-card-${weekDay(0)}-4-`).getLocation('y');
-    expect(pair2).toBeLessThan(pair4);
+    // У понеділок у seed пари 2, 3, 4, 5: друга вище за четверту.
+    // Другою парою йдуть дві (різні підгрупи), тож беремо першу картку кожного номера
+    const [pair2] = await allByTestIdPrefix(`lesson-card-${weekDay(0)}-2-`);
+    const [pair4] = await allByTestIdPrefix(`lesson-card-${weekDay(0)}-4-`);
+    expect(await pair2.getLocation('y')).toBeLessThan(await pair4.getLocation('y'));
   });
 
   it('пʼятниця доступна прокручуванням', async () => {

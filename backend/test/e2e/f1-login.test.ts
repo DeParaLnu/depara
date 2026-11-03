@@ -109,6 +109,9 @@ describe('F1: refresh і вихід', () => {
 
     const groups = await fetch(`${API}/groups`, { headers: authHeaders(next.accessToken) });
     expect(groups.status).toBe(200);
+    // Мобільний онбординг і його E2E шукають факультет за повною назвою з seed
+    const list = (await groups.json()) as { code: string; faculty: string }[];
+    expect(list.find((g) => g.code === 'ТЕСТ-31')?.faculty).toBe('Тестовий факультет');
 
     const reuse = await postJson('/auth/refresh', {
       refreshToken: first.refreshToken,

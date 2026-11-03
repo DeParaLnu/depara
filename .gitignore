@@ -5,11 +5,7 @@ dist/
 !.env.example
 *.log
 
-# React Native / Android
-mobile/android/build/
-mobile/android/app/build/
-mobile/android/.gradle/
-mobile/ios/Pods/
+# React Native: mobile/android і mobile/ios генеруються (див. mobile/.gitignore)
 *.apk
 *.aab
 
