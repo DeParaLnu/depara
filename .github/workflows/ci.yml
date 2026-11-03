@@ -27,6 +27,24 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
 
+  # Мобільний застосунок: типи (разом з e2e) і юніт-тести логіки. Раніше типи мобільного перевірялись лише в
+  # mobile-e2e, який вимкнений для PR, тож помилка типів у мобільному коді не блокувала злиття.
+  mobile-typecheck-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   # E2E backend: справжній Postgres, запущений API, HTTP-запити ззовні
   backend-e2e:
     runs-on: ubuntu-latest
@@ -63,6 +81,9 @@ jobs:
       AUTH_MODE: fake
       ADMIN_EMAILS: e2e.admin@lnu.edu.ua
       CORS_ORIGINS: http://localhost:5173
+      # E2E робить багато імпортів і входів за хвилину з одного IP: ліміти для них піднімаємо
+      RATE_LIMIT_IMPORT_PER_MINUTE: 1000
+      RATE_LIMIT_AUTH_PER_MINUTE: 5000
       JWT_SECRET: ci-only-secret
     steps:
       - uses: actions/checkout@v4

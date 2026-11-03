@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  adminToken, API, authHeaders, CORS_ORIGIN, currentMonday, emptyGroup, importLesson, loginToken, send, setupStudent, userId, weekLessons,
+  adminToken, API, authHeaders, CORS_ORIGIN, emptyGroup, importLesson, loginToken, send, setupStudent, uniqueSlot, userId, weekLessons,
 } from './helpers';
 
 const errorOf = async (res: Response) => ((await res.json()) as { error: string }).error;
@@ -57,20 +57,86 @@ describe('F7: імпорт розкладу', () => {
     const student = await setupStudent('f7.student@lnu.edu.ua');
     const subject = `E2E імпорт ${Date.now()}`;
 
+    const slot = uniqueSlot();
     for (let i = 0; i < 2; i++) {
-      const res = await importLesson(admin, subject);
+      const { res } = await importLesson(admin, subject, 'ТЕСТ-31', slot);
       expect(res.status).toBe(200);
       expect(((await res.json()) as { imported: number }).imported).toBe(1);
     }
-    const found = (await weekLessons(student)).filter((l) => l.subject === subject);
+    const found = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
     expect(found).toHaveLength(1);
+    expect(found[0].subject).toBe(subject);
+  });
+
+  it('виправлена назва предмета в тій самій парі оновлює її, а не додає другу; заміна старости лишається', async () => {
+    const admin = await adminToken();
+    const student = await setupStudent('f7.rename@lnu.edu.ua');
+    const slot = uniqueSlot();
+    const before = `E2E стара назва ${Date.now()}`;
+    const after = `E2E виправлена назва ${Date.now()}`;
+
+    expect((await importLesson(admin, before, 'ТЕСТ-31', slot)).res.status).toBe(200);
+    const original = (await weekLessons(student, slot.date)).find((l) => l.date === slot.date && l.pairNumber === slot.pair)!;
+    const sub = await send('POST', '/substitutions', admin, { lessonId: original.id, kind: 'CANCELLED' });
+    expect(sub.status).toBe(201);
+
+    expect((await importLesson(admin, after, 'ТЕСТ-31', slot)).res.status).toBe(200);
+    const inSlot = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
+    expect(inSlot).toHaveLength(1);
+    expect(inSlot[0]).toMatchObject({ id: original.id, subject: after });
+    expect(inSlot[0].substitution?.kind).toBe('CANCELLED');
+  });
+
+  it('два різних записи в одному слоті одного файлу дають 422', async () => {
+    const admin = await adminToken();
+    const slot = uniqueSlot();
+    const res = await send('POST', '/admin/schedule/import', admin, {
+      lessons: [
+        { group: 'ТЕСТ-31', ...slot, subject: 'Перший' },
+        { group: 'ТЕСТ-31', ...slot, subject: 'Другий' },
+      ],
+    });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { details: string[] }).details[0]).toContain('уже є запис у файлі');
+  });
+
+  it('той самий слот групи з faculty і без нього виявляється як дубль (група визначається одна)', async () => {
+    const admin = await adminToken();
+    const student = await setupStudent('f7.dupfaculty@lnu.edu.ua');
+    const slot = uniqueSlot();
+    const res = await send('POST', '/admin/schedule/import', admin, {
+      lessons: [
+        { group: 'ТЕСТ-31', ...slot, subject: 'Без факультету' },
+        { group: 'ТЕСТ-31', faculty: 'ТФ', ...slot, subject: 'З факультетом' },
+      ],
+    });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { details: string[] }).details.join(' ')).toContain('уже є запис у файлі');
+    // імпорт атомарний: жодної з двох пар не збережено
+    expect((await weekLessons(student, slot.date)).some((l) => l.date === slot.date && l.pairNumber === slot.pair)).toBe(false);
+  });
+
+  it('підгрупи одного слота не конфліктують', async () => {
+    const admin = await adminToken();
+    const student = await setupStudent('f7.subgroups@lnu.edu.ua');
+    const slot = uniqueSlot(2);
+    const res = await send('POST', '/admin/schedule/import', admin, {
+      lessons: [
+        { group: 'ТЕСТ-31', ...slot, subject: 'Лаб А', subgroup: 1 },
+        { group: 'ТЕСТ-31', ...slot, subject: 'Лаб Б', subgroup: 2 },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const found = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
+    expect(found.map((l) => l.subject).sort()).toEqual(['Лаб А', 'Лаб Б']);
   });
 
   it('CSV-імпорт (роздільник ; і лапки)', async () => {
     const admin = await adminToken();
     const student = await setupStudent('f7.csv@lnu.edu.ua');
     const subject = `E2E csv; "лапки" ${Date.now()}`;
-    const csv = `group;date;pair;subject;type;room\nТЕСТ-31;${currentMonday()};4;"${subject.replace(/"/g, '""')}";LAB;1/Б\n`;
+    const slot = uniqueSlot(4);
+    const csv = `group;date;pair;subject;type;room\nТЕСТ-31;${slot.date};4;"${subject.replace(/"/g, '""')}";LAB;1/Б\n`;
 
     const res = await fetch(`${API}/admin/schedule/import`, {
       method: 'POST',
@@ -78,8 +144,28 @@ describe('F7: імпорт розкладу', () => {
       body: csv,
     });
     expect(res.status).toBe(200);
-    const lesson = (await weekLessons(student)).find((l) => l.subject === subject);
+    const lesson = (await weekLessons(student, slot.date)).find((l) => l.subject === subject);
     expect(lesson).toBeTruthy();
+  });
+
+  it('імпорт лише довідників без пар: виправляє адресу корпусу, яку бачать студенти', async () => {
+    const admin = await adminToken();
+    const student = await setupStudent('f7.reference@lnu.edu.ua');
+    const code = 'ТЕСТ-К';
+    const address = `вул. Довідкова, ${Date.now()}`;
+
+    const res = await send('POST', '/admin/schedule/import', admin, {
+      buildings: [{ code, name: 'Корпус для тестів довідників', address }],
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ imported: 0, groups: 0 });
+
+    const buildings = (await (await fetch(`${API}/buildings`, { headers: authHeaders(student) })).json()) as { code: string; address: string }[];
+    expect(buildings.find((b) => b.code === code)?.address).toBe(address);
+
+    // порожній запит чи порожні lessons без довідників, як і раніше, помилка
+    expect((await send('POST', '/admin/schedule/import', admin, {})).status).toBe(422);
+    expect((await send('POST', '/admin/schedule/import', admin, { lessons: [] })).status).toBe(422);
   });
 
   it('некоректні дані дають 422 з переліком помилок', async () => {
@@ -97,14 +183,15 @@ describe('F7: імпорт розкладу', () => {
     const admin = await adminToken();
     const student = await setupStudent('f7.atomic@lnu.edu.ua');
     const subject = `E2E rollback ${Date.now()}`;
+    const slot = uniqueSlot(3);
     const res = await send('POST', '/admin/schedule/import', admin, {
       lessons: [
-        { group: 'ТЕСТ-31', date: currentMonday(), pair: 3, subject },
-        { group: 'НЕМАЄ-99', date: currentMonday(), pair: 3, subject },
+        { group: 'ТЕСТ-31', ...slot, subject },
+        { group: 'НЕМАЄ-99', ...slot, subject },
       ],
     });
     expect(res.status).toBe(422);
-    expect((await weekLessons(student)).some((l) => l.subject === subject)).toBe(false);
+    expect((await weekLessons(student, slot.date)).some((l) => l.subject === subject)).toBe(false);
   });
 });
 

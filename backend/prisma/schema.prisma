@@ -164,8 +164,9 @@ model Lesson {
   classroom    Classroom?    @relation(fields: [classroomId], references: [id])
   substitution Substitution?
 
-  // Ключ для ідемпотентного імпорту (повторний імпорт оновлює, а не дублює).
-  @@unique([groupId, date, pairNumber, subgroup, subject])
+  // Ключ для ідемпотентного імпорту: одна пара на групу, дату, номер і підгрупу. Предмет в ключ не входить,
+  // щоб виправлення назви в новому імпорті оновлювало пару, а не додавало другу в той самий слот.
+  @@unique([groupId, date, pairNumber, subgroup])
   @@index([groupId, date])
   @@map("lesson")
 }

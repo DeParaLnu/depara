@@ -1,12 +1,13 @@
 import { Prisma } from '@prisma/client';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../config';
+import { authRateLimit } from '../plugins/rateLimit';
 import { prisma } from '../db';
 import { checkIdentity, verifyIdToken } from '../lib/microsoft';
 import {
-  consumeRefreshToken,
   issueRefreshToken,
   revokeRefreshToken,
+  rotateRefreshToken,
   signAccessToken,
 } from '../lib/tokens';
 
@@ -26,8 +27,10 @@ function publicUser(u: { id: string; email: string; role: string; groupId: strin
 }
 
 // F1: вхід через Microsoft Entra, оновлення і вихід
-export async function authRoutes(app: FastifyInstance) {
-  app.post('/auth/microsoft', async (req, reply: FastifyReply) => {
+export async function authRoutes(app: FastifyInstance, opts: { authPerMinute?: number } = {}) {
+  const limited = { config: { rateLimit: authRateLimit(opts.authPerMinute ?? config.rateLimitAuthPerMinute) } };
+
+  app.post('/auth/microsoft', limited, async (req, reply: FastifyReply) => {
     const { idToken, deviceId } = (req.body ?? {}) as { idToken?: unknown; deviceId?: unknown };
     if (!isNonEmptyString(idToken)) return reply.code(400).send({ error: 'ID_TOKEN_REQUIRED' });
     if (!isNonEmptyString(deviceId)) return reply.code(400).send({ error: 'DEVICE_ID_REQUIRED' });
@@ -107,7 +110,7 @@ export async function authRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/auth/refresh', async (req, reply) => {
+  app.post('/auth/refresh', limited, async (req, reply) => {
     const { refreshToken, deviceId } = (req.body ?? {}) as {
       refreshToken?: unknown;
       deviceId?: unknown;
@@ -115,16 +118,19 @@ export async function authRoutes(app: FastifyInstance) {
     if (!isNonEmptyString(refreshToken) || !isNonEmptyString(deviceId)) {
       return reply.code(400).send({ error: 'REFRESH_TOKEN_AND_DEVICE_REQUIRED' });
     }
-    const session = await consumeRefreshToken(refreshToken, deviceId);
+    const session = await rotateRefreshToken(refreshToken, deviceId);
     if (!session) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
 
     const user = await prisma.user.findUnique({ where: { id: session.userId } });
-    if (!user) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+    if (!user) {
+      await revokeRefreshToken(session.refreshToken);
+      return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+    }
 
-    return startSession(user.id, deviceId);
+    return { accessToken: signAccessToken(user.id), refreshToken: session.refreshToken };
   });
 
-  app.post('/auth/logout', async (req, reply) => {
+  app.post('/auth/logout', limited, async (req, reply) => {
     const { refreshToken } = (req.body ?? {}) as { refreshToken?: unknown };
     if (isNonEmptyString(refreshToken)) await revokeRefreshToken(refreshToken);
     return reply.code(204).send();

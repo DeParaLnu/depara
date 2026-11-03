@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { api, setSessionBridge, type Session } from '../../api';
+import { resetCaches } from '../../lib/cacheReset';
+import { clearPersistedQueries } from '../../lib/queryPersist';
 import { getOrCreateDeviceId, loadStoredSession, saveStoredSession } from './storage';
 
 // A1: стан сесії зі збереженням токенів у expo-secure-store та авто-рефрешем
@@ -21,6 +23,9 @@ export const useSession = create<SessionState>((set, get) => ({
   initSession: async () => {
     try {
       const [deviceId, session] = await Promise.all([getOrCreateDeviceId(), loadStoredSession()]);
+      // Без сесії кешу даних на диску бути не може (лишився б після збою при виході): прибираємо його до того,
+      // як дерево застосунку стане відновлювати кеш, інакше новий користувач побачив би чужий розклад
+      if (!session) await clearPersistedQueries().catch(() => {});
       set({ deviceId, session, isHydrated: true });
     } catch {
       set({ isHydrated: true });
@@ -48,6 +53,7 @@ export const useSession = create<SessionState>((set, get) => ({
     }
     set({ session: null });
     void saveStoredSession(null);
+    void resetCaches().catch(() => {});
   },
 }));
 

@@ -86,9 +86,13 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload } 
     return { full_name: t.full_name, position: typeof t.position === 'string' ? t.position : null } as ImportPayload['teachers'][number];
   });
 
-  const rawLessons = raw.lessons;
-  if (!Array.isArray(rawLessons) || rawLessons.length === 0) {
-    errors.push('lessons: потрібен непорожній масив');
+  // Імпорт лише довідників (наприклад, виправлені адреси корпусів) дозволений без пар. Порожній запит чи порожні
+  // lessons без жодного довідника це помилка: так випадковий `{}` не виглядає успішним імпортом.
+  const hasReference = pair_times.length + faculties.length + groups.length + buildings.length + teachers.length > 0;
+  // За замовчуванням [] лише коли поля немає зовсім: явний null чи не масив це помилка, а не «без пар»
+  const rawLessons = raw.lessons === undefined && hasReference ? [] : raw.lessons;
+  if (!Array.isArray(rawLessons) || (rawLessons.length === 0 && !hasReference)) {
+    errors.push('lessons: потрібен непорожній масив (або довідники: pair_times, faculties, groups, buildings, teachers)');
     return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
   }
   if (rawLessons.length > MAX_LESSONS) {
@@ -130,9 +134,12 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload } 
       subgroup: typeof l.subgroup === 'number' ? l.subgroup : 0,
       room: typeof l.room === 'string' && l.room.trim() ? l.room.trim() : null,
     };
-    // Той самий ключ, що й унікальний індекс у БД: інакше повторний імпорт мовчки злив би пари
-    const key = [lesson.faculty ?? '', lesson.group, lesson.date, lesson.pair, lesson.subgroup, lesson.subject].join('|');
-    if (seen.has(key)) errors.push(`${at}: дубль пари (${lesson.group}, ${lesson.date}, пара ${lesson.pair}, "${lesson.subject}"). Розрізніть через subgroup`);
+    // Той самий ключ, що й унікальний індекс у БД: група, дата, номер пари й підгрупа. Дві різні пари в одному
+    // слоті в одному файлі були б взаємним перезаписом, тож це помилка, а не мовчазне «остання перемагає»
+    const key = [lesson.faculty ?? '', lesson.group, lesson.date, lesson.pair, lesson.subgroup].join('|');
+    if (seen.has(key)) {
+      errors.push(`${at}: у групи ${lesson.group} ${lesson.date} на парі ${lesson.pair} (підгрупа ${lesson.subgroup}) уже є запис у файлі. Одна пара на слот, для підгруп вкажіть subgroup`);
+    }
     seen.add(key);
     lessons.push(lesson);
   });
@@ -229,6 +236,10 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
         return rows[0].id;
       };
 
+      // Слот за ВИЗНАЧЕНОЮ групою: пара з faculty і та сама без нього можуть вказувати на одну групу, а у файлі
+      // (де ключ слота будується з того, що написано) вони виглядають різними
+      const seenSlots = new Set<string>();
+
       let imported = 0;
       for (const [i, l] of data.lessons.entries()) {
         if (!knownPairs.has(l.pair)) {
@@ -237,6 +248,13 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
         }
         const groupId = await resolveGroup(l.group, l.faculty);
         if (!groupId) continue;
+
+        const slot = [groupId, l.date, l.pair, l.subgroup].join('|');
+        if (seenSlots.has(slot)) {
+          problems.push(`lessons[${i}]: у групи ${l.group} ${l.date} на парі ${l.pair} (підгрупа ${l.subgroup}) уже є запис у файлі. Одна пара на слот`);
+          continue;
+        }
+        seenSlots.add(slot);
 
         let teacherId: string | null = null;
         if (l.teacher) {
@@ -275,15 +293,10 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
         const common = { type: l.type, audience: l.audience, teacherId, classroomId };
         await tx.lesson.upsert({
           where: {
-            groupId_date_pairNumber_subgroup_subject: {
-              groupId,
-              date: toDate(l.date),
-              pairNumber: l.pair,
-              subgroup: l.subgroup,
-              subject: l.subject,
-            },
+            groupId_date_pairNumber_subgroup: { groupId, date: toDate(l.date), pairNumber: l.pair, subgroup: l.subgroup },
           },
-          update: common,
+          // Предмет теж оновлюється: пара в слоті та сама, змінилась лише назва. id пари, а з ним і заміна, лишаються
+          update: { subject: l.subject, ...common },
           create: { groupId, date: toDate(l.date), pairNumber: l.pair, subgroup: l.subgroup, subject: l.subject, ...common },
         });
         touchedGroups.add(groupId);

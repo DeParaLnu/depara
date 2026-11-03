@@ -23,9 +23,51 @@ describe('validateImport', () => {
     ['підгрупа 5', { lessons: [{ ...lesson, subgroup: 5 }] }],
     ['аудиторія без корпусу', { lessons: [{ ...lesson, room: '218' }] }],
     ['дубль пари', { lessons: [lesson, lesson] }],
+    ['інший предмет у тому самому слоті', { lessons: [lesson, { ...lesson, subject: 'Інший предмет' }] }],
     ['групи не масив', { groups: 'x', lessons: [lesson] }],
   ])('відхиляє: %s', (_n, payload) => {
     expect(validateImport(payload).ok).toBe(false);
+  });
+
+  describe('імпорт лише довідників', () => {
+    const building = { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Генерала Тарнавського, 107' };
+
+    it('приймає довідники без пар', () => {
+      const r = validateImport({ buildings: [building] });
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.data.lessons).toEqual([]);
+        expect(r.data.buildings).toEqual([building]);
+      }
+    });
+
+    it('порожній запит і порожні lessons без довідників відхиляються', () => {
+      expect(validateImport({}).ok).toBe(false);
+      expect(validateImport({ lessons: [] }).ok).toBe(false);
+      expect(validateImport({ buildings: [] }).ok).toBe(false);
+    });
+
+    it('довідники з помилками все одно відхиляються', () => {
+      const r = validateImport({ buildings: [{ code: 'Т', name: '', address: '' }] });
+      expect(r.ok).toBe(false);
+    });
+
+    it('lessons не масив із довідниками теж помилка, зокрема явний null', () => {
+      expect(validateImport({ buildings: [building], lessons: 'x' }).ok).toBe(false);
+      expect(validateImport({ buildings: [building], lessons: null }).ok).toBe(false);
+    });
+  });
+
+  it('підгрупи одного слота, різні дні й різні групи не є дублями', () => {
+    const r = validateImport({
+      lessons: [
+        { ...lesson, subgroup: 1 },
+        { ...lesson, subgroup: 2, subject: 'Лаб 2' },
+        { ...lesson, date: '2026-10-13' },
+        { ...lesson, group: 'ПМІ-32' },
+      ],
+    });
+    expect(r.ok).toBe(true);
   });
 
   it('зібрані помилки містять номер рядка', () => {

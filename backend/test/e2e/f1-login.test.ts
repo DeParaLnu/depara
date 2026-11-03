@@ -113,12 +113,39 @@ describe('F1: refresh і вихід', () => {
     const list = (await groups.json()) as { code: string; faculty: string }[];
     expect(list.find((g) => g.code === 'ТЕСТ-31')?.faculty).toBe('Тестовий факультет');
 
+    // наступний обмін споживає next, і вже перший токен (на два покоління назад) відхиляється
+    const third = await postJson('/auth/refresh', { refreshToken: next.refreshToken, deviceId: DEVICE });
+    expect(third.status).toBe(200);
     const reuse = await postJson('/auth/refresh', {
       refreshToken: first.refreshToken,
       deviceId: DEVICE,
     });
     expect(reuse.status).toBe(401);
     expect(await errorOf(reuse)).toBe('INVALID_REFRESH_TOKEN');
+  });
+
+  // Втрачена відповідь на refresh: клієнт повторює запит зі старим токеном. Вікно (REFRESH_REUSE_GRACE_SECONDS,
+  // 30 с за замовчуванням) віддає ту саму нову пару, але лише тому самому пристрою й поки пара не використана.
+  it('повтор refresh після втраченої відповіді віддає ту саму пару, чужому пристрою відмова', async () => {
+    const first = await login('f1.replay@lnu.edu.ua');
+
+    const a = await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: DEVICE });
+    expect(a.status).toBe(200);
+    const rotated = (await a.json()) as { accessToken: string; refreshToken: string };
+
+    const again = await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: DEVICE });
+    expect(again.status).toBe(200);
+    const replayed = (await again.json()) as { accessToken: string; refreshToken: string };
+    expect(replayed.refreshToken).toBe(rotated.refreshToken);
+    expect((await fetch(`${API}/groups`, { headers: authHeaders(replayed.accessToken) })).status).toBe(200);
+
+    const stranger = await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: 'another-device' });
+    expect(stranger.status).toBe(401);
+
+    // нова пара після цього працює, а після її використання перший токен знову мертвий
+    const next = await postJson('/auth/refresh', { refreshToken: rotated.refreshToken, deviceId: DEVICE });
+    expect(next.status).toBe(200);
+    expect((await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: DEVICE })).status).toBe(401);
   });
 
   it('refresh з іншого deviceId відхиляється', async () => {

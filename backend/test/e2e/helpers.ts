@@ -73,23 +73,44 @@ export function currentMonday(): string {
 
 export interface WeekLesson {
   id: string;
+  date: string;
   subject: string;
   pairNumber: number;
   substitution: { id: string; kind: string; newTeacher: string | null; newRoom: string | null } | null;
 }
 
-export async function weekLessons(token: string): Promise<WeekLesson[]> {
-  const res = await fetch(`${API}/schedule/week`, { headers: authHeaders(token) });
+// Розклад тижня, до якого належить date (за замовчуванням поточний)
+export async function weekLessons(token: string, date?: string): Promise<WeekLesson[]> {
+  const res = await fetch(`${API}/schedule/week${date ? `?date=${date}` : ''}`, { headers: authHeaders(token) });
   return ((await res.json()) as { lessons: WeekLesson[] }).lessons;
 }
 
+export interface Slot {
+  date: string;
+  pair: number;
+}
+
+// Пара ідентифікується слотом (група, дата, номер пари, підгрупа), тож тести, які створюють «свіжі» пари,
+// беруть унікальну дату далеко в майбутньому: інакше вони перезаписували б одна одну й пари з попередніх запусків
+// (разом із їхніми замінами). Перегляд такої пари: weekLessons(token, slot.date).
+export function uniqueSlot(pair = 5): Slot {
+  const day = Math.floor(Math.random() * 36500);
+  return { date: new Date(Date.UTC(2100, 0, 1) + day * 86_400_000).toISOString().slice(0, 10), pair };
+}
+
 // Створює через імпорт нову унікальну пару (щоб тести не залежали від попередніх запусків)
-export async function importLesson(admin: string, subject: string, group = 'ТЕСТ-31'): Promise<Response> {
-  return send('POST', '/admin/schedule/import', admin, {
+export async function importLesson(
+  admin: string,
+  subject: string,
+  group = 'ТЕСТ-31',
+  slot: Slot = uniqueSlot(),
+): Promise<{ res: Response; slot: Slot }> {
+  const res = await send('POST', '/admin/schedule/import', admin, {
     faculties: [{ name: 'Тестовий факультет', short_name: 'ТФ' }],
     groups: [{ code: group, course: 3, faculty: 'ТФ' }],
-    lessons: [{ group, date: currentMonday(), pair: 5, subject, type: 'PRACTICE', subgroup: 0 }],
+    lessons: [{ group, date: slot.date, pair: slot.pair, subject, type: 'PRACTICE', subgroup: 0 }],
   });
+  return { res, slot };
 }
 
 // Origin веб-адмінки, дозволений у CORS_ORIGINS сервера E2E (див. README і ci.yml)
@@ -100,7 +121,7 @@ export async function emptyGroup(admin: string, code: string): Promise<string> {
   const res = await send('POST', '/admin/schedule/import', admin, {
     faculties: [{ name: 'Тестовий факультет', short_name: 'ТФ' }],
     groups: [{ code, course: 1, faculty: 'ТФ' }],
-    lessons: [{ group: 'ТЕСТ-31', date: currentMonday(), pair: 5, subject: `Службова пара ${code}`, type: 'OTHER' }],
+    lessons: [{ group: 'ТЕСТ-31', ...uniqueSlot(), subject: `Службова пара ${code}`, type: 'OTHER' }],
   });
   if (res.status !== 200) throw new Error(`Не вдалося створити групу ${code}: ${res.status}`);
   const groups = (await (await fetch(`${API}/groups`, { headers: authHeaders(admin) })).json()) as { id: string; code: string }[];

@@ -27,6 +27,7 @@ npm run dev                          # http://localhost:3000/health
 ```bash
 cd backend
 export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=e2e.admin@lnu.edu.ua CORS_ORIGINS=http://localhost:5173
+export RATE_LIMIT_IMPORT_PER_MINUTE=1000 RATE_LIMIT_AUTH_PER_MINUTE=5000   # E2E робить багато імпортів і входів з одного IP
 npm run seed -- --shift-to-current-week
 npm run test:e2e
 ```
@@ -84,6 +85,19 @@ routes/           ендпоінти за фічами (auth, profile, schedule,
 - Імпорт розкладу: `POST /admin/schedule/import` (ADMIN). JSON у форматі `prisma/seed/schedule.seed.json` (довідники необов'язкові)
   або CSV (`Content-Type: text/csv`, колонки `group,date,pair,subject[,type,teacher,audience,subgroup,room,faculty]`).
   Імпорт атомарний: при помилці в базу не потрапляє нічого. Повторний імпорт оновлює пари, а не дублює.
+
+## Помилки API і ліміти запитів
+
+Усі помилки мають вигляд `{ "error": "КОД" }`. Окремо від кодів конкретних фіч (див. `specs/`): `INTERNAL_ERROR` (500) і
+`TEMPORARILY_UNAVAILABLE` (503: недоступний Redis чи база; клієнту варто повторити пізніше) містять `requestId`, за яким
+запис знаходиться в логах, а текст внутрішнього винятку клієнту не віддається; `BAD_REQUEST` (400), `NOT_FOUND` (404),
+`PAYLOAD_TOO_LARGE` (413), `UNSUPPORTED_MEDIA_TYPE` (415) і `RATE_LIMITED` (429, з `retryAfterSeconds` і заголовком
+`Retry-After`).
+
+Ліміти (змінні `RATE_LIMIT_*`, див. [docs/deploy.md](docs/deploy.md)): звичайні запити рахуються на користувача за
+токеном, без токена на IP; вхід, refresh і вихід мають окремий щедріший ліміт на IP (студенти часто за спільним IP
+кампусу); імпорт розкладу лімітується на адміна. Лічильники в Redis, а поки він недоступний, ліміт не діє, і запити
+не затримуються.
 
 ## Демо-консоль
 
