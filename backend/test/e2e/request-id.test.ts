@@ -20,3 +20,12 @@ describe('X-Request-ID', () => {
     }
   });
 });
+
+describe('готовність (/health/ready)', () => {
+  it('на живому сервері з базою і Redis повертає 200', async () => {
+    const res = await fetch(`${API}/health/ready`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: 'ok', checks: { database: 'ok', redis: 'ok' } });
+  });
+});
+

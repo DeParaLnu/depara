@@ -135,3 +135,45 @@ describe('ліміт входу: ключ на IP', () => {
     expect((await post(randomUUID())).statusCode).toBe(429);
   });
 });
+
+describe('GET /health/ready', () => {
+  const ok = async () => 1;
+  const boom = async () => {
+    throw new Error('connect ECONNREFUSED 10.0.0.5:5432 password=hunter2');
+  };
+  const hang = () => new Promise<never>(() => {});
+
+  it('усе справне: 200, без кешування', async () => {
+    const app = make({ health: { database: ok, redis: ok } });
+    const res = await app.inject('/health/ready');
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: 'ok', checks: { database: 'ok', redis: 'ok' } });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it.each([
+    ['база', { database: boom, redis: ok }, { database: 'fail', redis: 'ok' }],
+    ['Redis', { database: ok, redis: boom }, { database: 'ok', redis: 'fail' }],
+    ['обидві', { database: boom, redis: boom }, { database: 'fail', redis: 'fail' }],
+  ])('падіння: %s дає 503 degraded без тексту помилки', async (_name, health, checks) => {
+    const res = await make({ health }).inject('/health/ready');
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toEqual({ status: 'degraded', checks });
+    expect(res.body).not.toContain('hunter2');
+    expect(res.body).not.toContain('5432');
+  });
+
+  it('завислий виклик не підвішує перевірку: 503 за таймаутом', async () => {
+    const started = Date.now();
+    const res = await make({ health: { database: ok, redis: hang, timeoutMs: 100 } }).inject('/health/ready');
+    expect(res.statusCode).toBe(503);
+    expect(res.json().checks).toEqual({ database: 'ok', redis: 'fail' });
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it('/health лишається простим і не залежить від залежностей', async () => {
+    const res = await make({ health: { database: boom, redis: boom } }).inject('/health');
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: 'ok' });
+  });
+});
