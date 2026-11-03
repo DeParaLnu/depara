@@ -63,6 +63,9 @@ jobs:
       AUTH_MODE: fake
       ADMIN_EMAILS: e2e.admin@lnu.edu.ua
       CORS_ORIGINS: http://localhost:5173
+      # E2E робить багато імпортів і входів за хвилину з одного IP: ліміти для них піднімаємо
+      RATE_LIMIT_IMPORT_PER_MINUTE: 1000
+      RATE_LIMIT_AUTH_PER_MINUTE: 5000
       JWT_SECRET: ci-only-secret
     steps:
       - uses: actions/checkout@v4

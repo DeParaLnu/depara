@@ -1,7 +1,7 @@
 import { Role } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
+import { config } from '../config';
 import { prisma } from '../db';
-import { invalidateGroupSchedule } from '../lib/cache';
 import { csvToLessons } from '../lib/csv';
 import { ImportError, importSchedule, validateImport } from '../lib/scheduleImport';
 import { isSubgroup, isUuid } from '../lib/validation';
@@ -70,7 +70,12 @@ export async function adminRoutes(app: FastifyInstance) {
   // Імпорт розкладу: JSON (Content-Type: application/json) або CSV (text/csv)
   app.post(
     '/admin/schedule/import',
-    { preHandler: requireRole('ADMIN'), bodyLimit: MAX_IMPORT_BYTES },
+    {
+      preHandler: requireRole('ADMIN'),
+      bodyLimit: MAX_IMPORT_BYTES,
+      // Імпорт важкий (одна довга транзакція), тож окремий, нижчий ліміт на адміна
+      config: { rateLimit: { max: config.rateLimitImportPerMinute, timeWindow: '1 minute', groupId: 'import' } },
+    },
     async (req, reply) => {
       let payload: unknown = req.body;
       if (req.headers['content-type']?.startsWith('text/csv')) {
@@ -84,7 +89,6 @@ export async function adminRoutes(app: FastifyInstance) {
 
       try {
         const result = await importSchedule(prisma, checked.data);
-        await Promise.all(result.groupIds.map(invalidateGroupSchedule));
         return { imported: result.imported, groups: result.groupIds.length, warnings: result.warnings };
       } catch (e) {
         if (e instanceof ImportError) return reply.code(422).send({ error: 'INVALID_IMPORT', details: e.errors });

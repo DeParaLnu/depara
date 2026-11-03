@@ -35,6 +35,9 @@ export const errorMessages: Record<string, string> = {
   INVALID_TOKEN: 'Не вдалося підтвердити вхід через Microsoft.',
   AUTH_NOT_CONFIGURED: 'Вхід тимчасово недоступний.',
   GROUP_NOT_SET: 'Спершу оберіть свою групу.',
+  TEMPORARILY_UNAVAILABLE: 'Сервер тимчасово недоступний. Спробуйте за хвилину.',
+  RATE_LIMITED: 'Забагато запитів. Зачекайте хвилину і спробуйте ще раз.',
+  ACCOUNT_CONFLICT: 'Цей акаунт уже пов’язано з іншим входом. Зверніться до підтримки.',
 };
 
 export const errorText = (code: string) => errorMessages[code] ?? 'Щось пішло не так. Спробуйте ще раз.';

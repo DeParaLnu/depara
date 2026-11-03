@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import cors from '@fastify/cors';
-import Fastify, { type FastifyRequest, type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyError, type FastifyRequest, type FastifyServerOptions } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { config } from './config';
+import { registerRateLimit, type RateLimitOptions } from './plugins/rateLimit';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { classroomRoutes } from './routes/classrooms';
@@ -29,7 +31,32 @@ function loggerOptions(custom?: FastifyServerOptions['logger']): FastifyServerOp
   return { ...custom, serializers: { ...custom.serializers, ...requestSerializers } };
 }
 
-export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {}) {
+// Збої залежностей (Redis, база), після яких клієнту варто повторити запит пізніше: 503, а не 500
+const PRISMA_UNAVAILABLE = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024']);
+const NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE']);
+
+export function isDependencyUnavailable(err: unknown): boolean {
+  if (err instanceof Prisma.PrismaClientInitializationError) return true;
+  if (err instanceof Prisma.PrismaClientKnownRequestError) return PRISMA_UNAVAILABLE.has(err.code);
+  if (typeof err !== 'object' || err === null) return false;
+  const e = err as { name?: string; code?: string; message?: string };
+  return (
+    e.name === 'MaxRetriesPerRequestError' ||
+    (typeof e.code === 'string' && NETWORK_CODES.has(e.code)) ||
+    e.message === 'Connection is closed.'
+  );
+}
+
+// Коди помилок клієнтських статусів, які породжує сам Fastify (клієнти читають поле error)
+const CLIENT_ERROR_CODES: Record<number, string> = {
+  400: 'BAD_REQUEST',
+  404: 'NOT_FOUND',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE',
+  429: 'RATE_LIMITED',
+};
+
+export function buildApp(opts: { logger?: FastifyServerOptions['logger']; rateLimit?: RateLimitOptions } = {}) {
   const app = Fastify({
     logger: loggerOptions(opts.logger),
     trustProxy: config.trustProxy,
@@ -40,6 +67,21 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
       return typeof incoming === 'string' && /^[\w-]{8,64}$/.test(incoming) ? incoming : randomUUID();
     },
   });
+
+  // Єдиний формат помилок { error: КОД }. Деталі внутрішніх збоїв (текст винятків Prisma, Redis) клієнту не
+  // віддаємо: вони лише в логах, а клієнт отримує requestId, за яким запис знаходиться.
+  app.setErrorHandler((err: FastifyError, req, reply) => {
+    const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+    if (status < 500) {
+      const body: Record<string, unknown> = { error: CLIENT_ERROR_CODES[status] ?? 'BAD_REQUEST' };
+      if (status === 429) body.retryAfterSeconds = (err as FastifyError & { retryAfterSeconds?: number }).retryAfterSeconds;
+      return reply.code(status).send(body);
+    }
+    req.log.error({ err }, 'необроблена помилка');
+    if (isDependencyUnavailable(err)) return reply.code(503).send({ error: 'TEMPORARILY_UNAVAILABLE', requestId: req.id });
+    return reply.code(500).send({ error: 'INTERNAL_ERROR', requestId: req.id });
+  });
+  app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'NOT_FOUND' }));
 
   // Клієнт бачить id запиту й може назвати його при звернені: за ним знаходимо запис у логах
   app.addHook('onSend', async (req, reply) => {
@@ -62,12 +104,15 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
       origin: config.corsOrigins,
       methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['authorization', 'content-type', 'if-none-match', 'x-request-id'],
-      exposedHeaders: ['etag', 'x-request-id'],
+      exposedHeaders: ['etag', 'x-request-id', 'retry-after'],
       maxAge: 600,
     });
   }
 
-  app.get('/health', async () => ({ status: 'ok' }));
+  registerRateLimit(app, opts.rateLimit);
+
+  // Перевірку здоров'я Docker і smoke-скрипти не лімітуємо
+  app.get('/health', { config: { rateLimit: false } }, async () => ({ status: 'ok' }));
 
   // Демо-консоль для ручного тестування в браузері. Існує лише при AUTH_MODE=fake (тестовий режим).
   if (config.fakeAuth) {
@@ -76,7 +121,7 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
     app.get('/', async (_req, reply) => reply.redirect('/dev'));
   }
 
-  app.register(authRoutes);
+  app.register(authRoutes, { authPerMinute: opts.rateLimit?.authPerMinute });
   app.register(profileRoutes);
   app.register(scheduleRoutes);
   app.register(classroomRoutes);
