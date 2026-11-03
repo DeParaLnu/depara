@@ -1,8 +1,12 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { api } from '../../api';
+import { config } from '../../config';
 import { useSession } from '../../features/auth/session';
 import { useGroups, useMe } from '../../features/schedule/hooks';
-import { colors } from '../../theme';
+import { reportError } from '../../lib/errors';
+import { colors, errorText } from '../../theme';
 
 const initials = (name: string) =>
   name
@@ -12,15 +16,37 @@ const initials = (name: string) =>
     .map((p) => p[0].toUpperCase())
     .join('');
 
-// F9 (початок): дані користувача, група і вихід. Налаштування сповіщень і теми зʼявляться пізніше
+// F9 (початок): дані користувача, група, вихід і видалення акаунта. Налаштування сповіщень і теми зʼявляться пізніше
 export default function ProfileRoute() {
   const insets = useSafeAreaInsets();
   const signOut = useSession((s) => s.signOut);
+  const token = useSession((s) => s.session?.accessToken);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const me = useMe();
   const groups = useGroups();
   const group = groups.data?.find((g) => g.id === me.data?.groupId);
   const displayName = me.data?.fullName ?? me.data?.email ?? '';
   const subgroup = me.data ? (me.data.subgroup === 0 ? 'Усі' : String(me.data.subgroup)) : '';
+
+  // Видалення акаунта (вимога Google Play і App Store): підтвердження, виклик API, потім звичайний вихід
+  const deleteAccount = async () => {
+    if (!token) return;
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await api.deleteAccount(token);
+      signOut();
+    } catch (e) {
+      setDeleteError(errorText(reportError('account', e)));
+      setDeleting(false);
+    }
+  };
+  const confirmDelete = () =>
+    Alert.alert('Видалити акаунт?', 'Акаунт і ваші налаштування буде видалено без можливості відновлення. Розклад групи не зміниться.', [
+      { text: 'Скасувати', style: 'cancel' },
+      { text: 'Видалити', style: 'destructive', onPress: () => void deleteAccount() },
+    ]);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 24 }]}>
@@ -43,6 +69,32 @@ export default function ProfileRoute() {
           <Text style={styles.rowLabel}>Підгрупа</Text>
           <Text style={styles.rowValue}>{subgroup || '—'}</Text>
         </View>
+      </View>
+
+      <View style={styles.footer}>
+        {deleteError ? <Text style={styles.error}>{deleteError}</Text> : null}
+        {config.privacyUrl ? (
+          <Pressable
+            testID="privacy-link"
+            accessibilityRole="link"
+            accessibilityLabel="Політика конфіденційності"
+            onPress={() => void Linking.openURL(config.privacyUrl as string)}
+            hitSlop={8}
+          >
+            <Text style={styles.link}>Політика конфіденційності</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          testID="delete-account-button"
+          accessibilityRole="button"
+          accessibilityLabel="Видалити акаунт"
+          onPress={confirmDelete}
+          disabled={deleting}
+          hitSlop={8}
+          style={styles.deleteButton}
+        >
+          {deleting ? <ActivityIndicator color={colors.danger} /> : <Text style={styles.deleteText}>Видалити акаунт</Text>}
+        </Pressable>
       </View>
 
       <Pressable
@@ -83,8 +135,12 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: 17, color: colors.text },
   rowValue: { fontSize: 17, fontWeight: '700', color: colors.text },
+  footer: { marginTop: 'auto', alignItems: 'center', gap: 6, paddingBottom: 12 },
+  error: { color: colors.error, fontSize: 15, textAlign: 'center' },
+  link: { color: colors.textMuted, fontSize: 15, textDecorationLine: 'underline', paddingVertical: 8 },
+  deleteButton: { minHeight: 44, minWidth: 160, alignItems: 'center', justifyContent: 'center' },
+  deleteText: { color: colors.danger, fontSize: 16, fontWeight: '600' },
   signOut: {
-    marginTop: 'auto',
     marginBottom: 24,
     minHeight: 58,
     borderRadius: 14,

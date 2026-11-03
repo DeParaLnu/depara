@@ -34,6 +34,35 @@ beforeEach(() => {
 const routeOf = (call: unknown[]) => String(call[0]).replace('http://api.test', '');
 const callsTo = (route: string) => fetchMock.mock.calls.filter((c) => routeOf(c) === route);
 
+describe('deleteAccount', () => {
+  it('шле DELETE /me з токеном і приймає 204 без тіла', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(api.deleteAccount('tok')).resolves.toEqual({});
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/me');
+    expect(init.method).toBe('DELETE');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+  });
+
+  it('помилку сервера (останній адмін) віддає кодом', async () => {
+    fetchMock.mockResolvedValueOnce(json(409, { error: 'LAST_ADMIN' }));
+    await expect(api.deleteAccount('tok')).rejects.toMatchObject({ code: 'LAST_ADMIN', status: 409 });
+  });
+
+  it('прострочений access оновлюється й видалення повторюється з новим токеном', async () => {
+    fetchMock
+      .mockResolvedValueOnce(expired())
+      .mockResolvedValueOnce(json(200, { accessToken: 'new-access', refreshToken: 'new-refresh' }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(api.deleteAccount('old-access')).resolves.toEqual({});
+    const retry = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect((retry[1].headers as Record<string, string>).Authorization).toBe('Bearer new-access');
+  });
+});
+
 describe('авто-refresh при TOKEN_EXPIRED', () => {
   it('оновлює токен і повторює запит з новим access', async () => {
     fetchMock

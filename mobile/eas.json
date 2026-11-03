@@ -4,7 +4,7 @@
     "preview": {
       "distribution": "internal",
       "android": { "buildType": "apk" },
-      "env": { "API_URL": "https://api.depara.me" }
+      "env": { "API_URL": "https://api.depara.me", "PRIVACY_URL": "https://api.depara.me/privacy" }
     },
     "preview-mock": {
       "extends": "preview",

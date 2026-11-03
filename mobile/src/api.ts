@@ -192,6 +192,8 @@ export const api = {
     }),
   logout: (refreshToken: string) =>
     request<void>('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken }) }),
+  // Видалення власного акаунта: 204 без тіла
+  deleteAccount: (token: string) => request<void>('/me', { method: 'DELETE' }, token),
   groups: (token: string) => request<Group[]>('/groups', {}, token),
   me: (token: string) => request<Me>('/me', {}, token),
   setGroup: (token: string, groupId: string, subgroup: number) =>
