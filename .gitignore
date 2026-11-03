@@ -16,6 +16,8 @@ dist/
 
 # Стан деплою на сервері
 deploy/.state/
+# Локальний гачок копіювання бекапів назовні (шаблон: deploy/backup-upload.example.sh)
+deploy/backup-upload.sh
 
 # Python
 __pycache__/
