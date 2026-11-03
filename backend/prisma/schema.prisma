@@ -181,7 +181,7 @@ model Substitution {
   newDate        DateTime?        @map("new_date") @db.Date // для MOVED
   newPairNumber  Int?             @map("new_pair_number") // для MOVED
   comment        String?
-  createdById    String           @map("created_by") @db.Uuid
+  createdById    String?          @map("created_by") @db.Uuid // NULL, коли автора (старосту) видалено разом з акаунтом
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
@@ -189,7 +189,7 @@ model Substitution {
   newTeacher   Teacher?   @relation(fields: [newTeacherId], references: [id])
   newClassroom Classroom? @relation(fields: [newClassroomId], references: [id])
   newPair      PairTime?  @relation(fields: [newPairNumber], references: [pairNumber])
-  createdBy    User       @relation(fields: [createdById], references: [id])
+  createdBy    User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@map("substitution")
 }
