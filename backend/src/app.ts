@@ -9,6 +9,7 @@ import { prisma } from './db';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { classroomRoutes } from './routes/classrooms';
+import { legalRoutes } from './routes/legal';
 import { profileRoutes } from './routes/profile';
 import { scheduleRoutes } from './routes/schedule';
 import { substitutionRoutes } from './routes/substitutions';
@@ -172,6 +173,7 @@ export function buildApp(
 
   app.register(authRoutes, { authPerMinute: opts.rateLimit?.authPerMinute });
   app.register(profileRoutes);
+  app.register(legalRoutes);
   app.register(scheduleRoutes);
   app.register(classroomRoutes);
   app.register(teacherRoutes);

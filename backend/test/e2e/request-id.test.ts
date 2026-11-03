@@ -29,3 +29,21 @@ describe('готовність (/health/ready)', () => {
   });
 });
 
+describe('публічні сторінки для магазинів застосунків', () => {
+  it('/privacy і /delete-account доступні без токена, українською, і посилаються одна на одну', async () => {
+    const privacy = await fetch(`${API}/privacy`);
+    expect(privacy.status).toBe(200);
+    expect(privacy.headers.get('content-type')).toContain('text/html');
+    const privacyText = await privacy.text();
+    expect(privacyText).toContain('lang="uk"');
+    expect(privacyText).toContain('Політика конфіденційності');
+    expect(privacyText).toContain('/delete-account');
+
+    const del = await fetch(`${API}/delete-account`);
+    expect(del.status).toBe(200);
+    const deleteText = await del.text();
+    expect(deleteText).toContain('Видалити акаунт');
+    expect(deleteText).toContain('/privacy');
+  });
+});
+
