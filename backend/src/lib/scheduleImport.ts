@@ -130,9 +130,12 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload } 
       subgroup: typeof l.subgroup === 'number' ? l.subgroup : 0,
       room: typeof l.room === 'string' && l.room.trim() ? l.room.trim() : null,
     };
-    // Той самий ключ, що й унікальний індекс у БД: інакше повторний імпорт мовчки злив би пари
-    const key = [lesson.faculty ?? '', lesson.group, lesson.date, lesson.pair, lesson.subgroup, lesson.subject].join('|');
-    if (seen.has(key)) errors.push(`${at}: дубль пари (${lesson.group}, ${lesson.date}, пара ${lesson.pair}, "${lesson.subject}"). Розрізніть через subgroup`);
+    // Той самий ключ, що й унікальний індекс у БД: група, дата, номер пари й підгрупа. Дві різні пари в одному
+    // слоті в одному файлі були б взаємним перезаписом, тож це помилка, а не мовчазне «остання перемагає»
+    const key = [lesson.faculty ?? '', lesson.group, lesson.date, lesson.pair, lesson.subgroup].join('|');
+    if (seen.has(key)) {
+      errors.push(`${at}: у групи ${lesson.group} ${lesson.date} на парі ${lesson.pair} (підгрупа ${lesson.subgroup}) уже є запис у файлі. Одна пара на слот, для підгруп вкажіть subgroup`);
+    }
     seen.add(key);
     lessons.push(lesson);
   });
@@ -275,15 +278,10 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
         const common = { type: l.type, audience: l.audience, teacherId, classroomId };
         await tx.lesson.upsert({
           where: {
-            groupId_date_pairNumber_subgroup_subject: {
-              groupId,
-              date: toDate(l.date),
-              pairNumber: l.pair,
-              subgroup: l.subgroup,
-              subject: l.subject,
-            },
+            groupId_date_pairNumber_subgroup: { groupId, date: toDate(l.date), pairNumber: l.pair, subgroup: l.subgroup },
           },
-          update: common,
+          // Предмет теж оновлюється: пара в слоті та сама, змінилась лише назва. id пари, а з ним і заміна, лишаються
+          update: { subject: l.subject, ...common },
           create: { groupId, date: toDate(l.date), pairNumber: l.pair, subgroup: l.subgroup, subject: l.subject, ...common },
         });
         touchedGroups.add(groupId);

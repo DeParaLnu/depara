@@ -11,11 +11,18 @@ let admin: string;
 let headman: string;
 let student: string;
 
-// Нова унікальна пара для кожного тесту, щоб заміни з попередніх запусків не заважали
+// Дата кожної створеної пари: розклад тижня цієї пари треба запитувати за датою (див. uniqueSlot у helpers)
+const dateOf = new Map<string, string>();
+const lessonsOf = (token: string, lessonId: string) => weekLessons(token, dateOf.get(lessonId));
+
+// Нова унікальна пара для кожного тесту (власний слот), щоб заміни з попередніх запусків не заважали
 async function freshLesson(): Promise<string> {
   const subject = `E2E заміна ${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  expect((await importLesson(admin, subject)).status).toBe(200);
-  return (await weekLessons(headman)).find((l) => l.subject === subject)!.id;
+  const { res, slot } = await importLesson(admin, subject);
+  expect(res.status).toBe(200);
+  const id = (await weekLessons(headman, slot.date)).find((l) => l.subject === subject)!.id;
+  dateOf.set(id, slot.date);
+  return id;
 }
 
 beforeAll(async () => {
@@ -38,7 +45,7 @@ describe('F6: створення замін', () => {
     const res = await send('POST', '/substitutions', headman, { lessonId, kind: 'CANCELLED', comment: 'Хвороба' });
     expect(res.status).toBe(201);
 
-    const lesson = (await weekLessons(student)).find((l) => l.id === lessonId);
+    const lesson = (await lessonsOf(student, lessonId)).find((l) => l.id === lessonId);
     expect(lesson?.substitution?.kind).toBe('CANCELLED');
   });
 
@@ -51,9 +58,8 @@ describe('F6: створення замін', () => {
     const l2 = await freshLesson();
     expect((await send('POST', '/substitutions', headman, { lessonId: l2, kind: 'ROOM_CHANGED', newClassroomId: room.id })).status).toBe(201);
 
-    const lessons = await weekLessons(student);
-    expect(lessons.find((l) => l.id === l1)?.substitution?.newTeacher).toBe(teacher.fullName);
-    expect(lessons.find((l) => l.id === l2)?.substitution?.newRoom).toBe(room.label);
+    expect((await lessonsOf(student, l1)).find((l) => l.id === l1)?.substitution?.newTeacher).toBe(teacher.fullName);
+    expect((await lessonsOf(student, l2)).find((l) => l.id === l2)?.substitution?.newRoom).toBe(room.label);
   });
 
   it('перенесення вимагає нову дату чи пару, що відрізняється від поточної', async () => {
@@ -82,11 +88,11 @@ describe('F6: створення замін', () => {
 
     // пара чужої групи, створена адміном
     const subject = `E2E чужа ${Date.now()}`;
-    await importLesson(admin, subject, 'ТЕСТ-32');
+    const { slot: foreignSlot } = await importLesson(admin, subject, 'ТЕСТ-32');
     const other = await setupStudent('f6.other@lnu.edu.ua');
     const groups = (await (await fetch(`${API}/groups`, { headers: authHeaders(other) })).json()) as { id: string; code: string }[];
     await send('PATCH', '/me', other, { groupId: groups.find((g) => g.code === 'ТЕСТ-32')!.id });
-    const foreign = (await weekLessons(other)).find((l) => l.subject === subject)!.id;
+    const foreign = (await weekLessons(other, foreignSlot.date)).find((l) => l.subject === subject)!.id;
 
     const res = await send('POST', '/substitutions', headman, { lessonId: foreign, kind: 'CANCELLED' });
     expect(res.status).toBe(403);
@@ -103,7 +109,7 @@ describe('F6: скасування заміни', () => {
 
     expect((await send('DELETE', `/substitutions/${created.id}`, student)).status).toBe(403);
     expect((await send('DELETE', `/substitutions/${created.id}`, headman)).status).toBe(204);
-    expect((await weekLessons(student)).find((l) => l.id === lessonId)?.substitution).toBeNull();
+    expect((await lessonsOf(student, lessonId)).find((l) => l.id === lessonId)?.substitution).toBeNull();
     expect((await send('DELETE', `/substitutions/${created.id}`, headman)).status).toBe(404);
     expect((await send('DELETE', '/substitutions/bad', headman)).status).toBe(400);
   });
