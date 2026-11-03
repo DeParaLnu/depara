@@ -73,6 +73,7 @@ export function currentMonday(): string {
 
 export interface WeekLesson {
   id: string;
+  date: string;
   subject: string;
   pairNumber: number;
   substitution: { id: string; kind: string; newTeacher: string | null; newRoom: string | null } | null;

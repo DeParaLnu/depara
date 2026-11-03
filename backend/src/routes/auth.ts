@@ -4,9 +4,9 @@ import { config } from '../config';
 import { prisma } from '../db';
 import { checkIdentity, verifyIdToken } from '../lib/microsoft';
 import {
-  consumeRefreshToken,
   issueRefreshToken,
   revokeRefreshToken,
+  rotateRefreshToken,
   signAccessToken,
 } from '../lib/tokens';
 
@@ -115,13 +115,16 @@ export async function authRoutes(app: FastifyInstance) {
     if (!isNonEmptyString(refreshToken) || !isNonEmptyString(deviceId)) {
       return reply.code(400).send({ error: 'REFRESH_TOKEN_AND_DEVICE_REQUIRED' });
     }
-    const session = await consumeRefreshToken(refreshToken, deviceId);
+    const session = await rotateRefreshToken(refreshToken, deviceId);
     if (!session) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
 
     const user = await prisma.user.findUnique({ where: { id: session.userId } });
-    if (!user) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+    if (!user) {
+      await revokeRefreshToken(session.refreshToken);
+      return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+    }
 
-    return startSession(user.id, deviceId);
+    return { accessToken: signAccessToken(user.id), refreshToken: session.refreshToken };
   });
 
   app.post('/auth/logout', async (req, reply) => {

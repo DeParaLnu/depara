@@ -33,20 +33,30 @@ export function verifyAccessToken(token: string): AccessCheck {
   }
 }
 
-// Видає refresh-токен і записує сесію в Redis: refresh:{jti} = hash(userId, deviceId), TTL 30 днів.
-export async function issueRefreshToken(userId: string, deviceId: string): Promise<string> {
+// Підписує refresh-токен і записує сесію в Redis: refresh:{jti} = hash(userId, deviceId), TTL 30 днів.
+async function createRefreshToken(userId: string, deviceId: string): Promise<{ token: string; jti: string }> {
   const jti = randomUUID();
   await redis.set(sessionKey(jti), fingerprint(userId, deviceId), 'EX', config.refreshTokenTtlSeconds);
-  return jwt.sign({ sub: userId, typ: 'refresh', jti } satisfies TokenPayload, config.jwtSecret, {
+  const token = jwt.sign({ sub: userId, typ: 'refresh', jti } satisfies TokenPayload, config.jwtSecret, {
     expiresIn: config.refreshTokenTtlSeconds,
   });
+  return { token, jti };
 }
 
-// Ротація: стару сесію видаляємо (одноразово, GETDEL), вона має збігатися з userId і deviceId.
-export async function consumeRefreshToken(
-  token: string,
-  deviceId: string,
-): Promise<{ userId: string } | null> {
+export async function issueRefreshToken(userId: string, deviceId: string): Promise<string> {
+  return (await createRefreshToken(userId, deviceId)).token;
+}
+
+const rotatedKey = (jti: string) => `refresh-rotated:${jti}`;
+
+export interface RotatedSession {
+  userId: string;
+  refreshToken: string;
+}
+
+// Ротація: стару сесію видаляємо (одноразово, GETDEL), вона має збігатися з userId і deviceId, і видаємо нову.
+// Для повтору запиту після втраченої відповіді нову пару запам'ятовуємо на refreshReuseGraceSeconds.
+export async function rotateRefreshToken(token: string, deviceId: string): Promise<RotatedSession | null> {
   let p: TokenPayload;
   try {
     p = jwt.verify(token, config.jwtSecret) as TokenPayload;
@@ -54,9 +64,27 @@ export async function consumeRefreshToken(
     return null;
   }
   if (p.typ !== 'refresh' || !p.jti) return null;
+
+  const fp = fingerprint(p.sub, deviceId);
   const stored = await redis.getdel(sessionKey(p.jti));
-  if (!stored || stored !== fingerprint(p.sub, deviceId)) return null;
-  return { userId: p.sub };
+  if (stored === fp) {
+    const next = await createRefreshToken(p.sub, deviceId);
+    if (config.refreshReuseGraceSeconds > 0) {
+      const replay = JSON.stringify({ fp, token: next.token, jti: next.jti });
+      await redis.set(rotatedKey(p.jti), replay, 'EX', config.refreshReuseGraceSeconds);
+    }
+    return { userId: p.sub, refreshToken: next.token };
+  }
+  // Сесія була, але належала іншому пристрою: вона вже видалена вище, повтор не допускаємо
+  if (stored || config.refreshReuseGraceSeconds === 0) return null;
+
+  // Токен уже обміняли: це повтор лише якщо той самий пристрій і нова пара ще не використана.
+  // Після першого ж використання нової пари старий токен знову відхиляється (як і раніше).
+  const raw = await redis.get(rotatedKey(p.jti));
+  if (!raw) return null;
+  const replay = JSON.parse(raw) as { fp: string; token: string; jti: string };
+  if (replay.fp !== fp || !(await redis.exists(sessionKey(replay.jti)))) return null;
+  return { userId: p.sub, refreshToken: replay.token };
 }
 
 // Вихід: видаляє сесію. Недійсний токен ігноруємо (операція ідемпотентна).

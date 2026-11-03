@@ -63,7 +63,7 @@ describe('F7: імпорт розкладу', () => {
       expect(res.status).toBe(200);
       expect(((await res.json()) as { imported: number }).imported).toBe(1);
     }
-    const found = (await weekLessons(student, slot.date)).filter((l) => l.pairNumber === slot.pair);
+    const found = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
     expect(found).toHaveLength(1);
     expect(found[0].subject).toBe(subject);
   });
@@ -76,12 +76,12 @@ describe('F7: імпорт розкладу', () => {
     const after = `E2E виправлена назва ${Date.now()}`;
 
     expect((await importLesson(admin, before, 'ТЕСТ-31', slot)).res.status).toBe(200);
-    const original = (await weekLessons(student, slot.date)).find((l) => l.pairNumber === slot.pair)!;
+    const original = (await weekLessons(student, slot.date)).find((l) => l.date === slot.date && l.pairNumber === slot.pair)!;
     const sub = await send('POST', '/substitutions', admin, { lessonId: original.id, kind: 'CANCELLED' });
     expect(sub.status).toBe(201);
 
     expect((await importLesson(admin, after, 'ТЕСТ-31', slot)).res.status).toBe(200);
-    const inSlot = (await weekLessons(student, slot.date)).filter((l) => l.pairNumber === slot.pair);
+    const inSlot = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
     expect(inSlot).toHaveLength(1);
     expect(inSlot[0]).toMatchObject({ id: original.id, subject: after });
     expect(inSlot[0].substitution?.kind).toBe('CANCELLED');
@@ -111,7 +111,7 @@ describe('F7: імпорт розкладу', () => {
       ],
     });
     expect(res.status).toBe(200);
-    const found = (await weekLessons(student, slot.date)).filter((l) => l.pairNumber === slot.pair);
+    const found = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
     expect(found.map((l) => l.subject).sort()).toEqual(['Лаб А', 'Лаб Б']);
   });
 
