@@ -1,10 +1,8 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { mondayOf, toIsoDate } from '../../lib/date';
 import { errorCode, isNetworkError } from '../../lib/errors';
 import { useGroups, useMe, useNow, useWeek } from '../../features/schedule/hooks';
 import { TodayView, type TodayState } from '../../features/schedule/TodayView';
-import { useCanManageSubstitutions } from '../../features/substitutions/hooks';
 
 // Контейнер екрана «Сьогодні»: бере дані з API і віддає їх у TodayView
 export default function TodayRoute() {
@@ -14,7 +12,6 @@ export default function TodayRoute() {
   const week = useWeek(toIsoDate(mondayOf(now)));
   const me = useMe();
   const groups = useGroups();
-  const canManageSubstitutions = useCanManageSubstitutions();
 
   let state: TodayState;
   if (week.data) {
@@ -49,11 +46,6 @@ export default function TodayRoute() {
         void week.refetch();
         void me.refetch();
       }}
-      onAddSubstitution={
-        canManageSubstitutions
-          ? () => router.push({ pathname: '/substitution', params: { date: toIsoDate(selected) } })
-          : undefined
-      }
     />
   );
 }

@@ -25,22 +25,10 @@ type Props = {
   state: TodayState;
   refreshing: boolean;
   onRefresh: () => void;
-  /** F6: кнопка «Додати заміну» (лише для старости й адміна) */
-  onAddSubstitution?: () => void;
 };
 
 // Екран «Сьогодні»: чисто презентаційний, дані й стан отримує ззовні (див. src/app/(tabs)/index.tsx)
-export function TodayView({
-  now,
-  selected,
-  onSelect,
-  subtitle,
-  isHeadman,
-  state,
-  refreshing,
-  onRefresh,
-  onAddSubstitution,
-}: Props) {
+export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state, refreshing, onRefresh }: Props) {
   const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
   const insets = useSafeAreaInsets();
   const days = useMemo(() => weekDays(mondayOf(now)), [now]);
@@ -125,7 +113,7 @@ export function TodayView({
         <FlatList
           data={dayLessons}
           keyExtractor={(item) => item.lesson.id}
-          contentContainerStyle={[styles.list, onAddSubstitution && styles.listWithFab]}
+          contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           renderItem={({ item }) => (
             <LessonCard lesson={item.lesson} status={item.status} onPress={() => setOpenLesson(item.lesson)} />
@@ -139,18 +127,6 @@ export function TodayView({
           }
         />
       )}
-      {onAddSubstitution && state.kind === 'ready' && state.published ? (
-        <Pressable
-          testID="add-substitution-fab"
-          accessibilityRole="button"
-          accessibilityLabel="Додати заміну"
-          onPress={onAddSubstitution}
-          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
-        >
-          <Ionicons name="add" size={24} color="#FFFFFF" />
-          <Text style={styles.fabText}>Додати заміну</Text>
-        </Pressable>
-      ) : null}
       <LessonDetailsSheet lesson={openLesson} onClose={() => setOpenLesson(null)} />
     </View>
   );
@@ -192,24 +168,4 @@ const styles = StyleSheet.create({
   offlineBold: { fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { paddingHorizontal: 21, paddingBottom: 24, gap: 11, flexGrow: 1 },
-  listWithFab: { paddingBottom: 96 },
-  fab: {
-    position: 'absolute',
-    right: 21,
-    bottom: 20,
-    minHeight: 54,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 27,
-    paddingHorizontal: 22,
-    backgroundColor: colors.primary,
-    elevation: 4,
-    shadowColor: '#000000',
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  fabPressed: { backgroundColor: colors.primaryDark },
-  fabText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
 });

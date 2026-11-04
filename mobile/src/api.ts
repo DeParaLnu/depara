@@ -43,18 +43,6 @@ export type Substitution = {
   newDate: string | null;
   newPairNumber: number | null;
 };
-export type Teacher = { id: string; fullName: string; position: string | null };
-
-// F6: тіло POST /substitutions. Які поля потрібні, залежить від kind (див. features/substitutions/form.ts)
-export type NewSubstitution = {
-  lessonId: string;
-  kind: SubstitutionKind;
-  newTeacherId?: string;
-  newClassroomId?: string;
-  newDate?: string;
-  newPairNumber?: number;
-  comment?: string;
-};
 
 export type Lesson = {
   id: string;
@@ -248,11 +236,4 @@ export const api = {
     const qs = params.toString();
     return request<Classroom[]>(`/classrooms${qs ? `?${qs}` : ''}`, {}, token);
   },
-  teachers: (token: string, q?: string) =>
-    request<Teacher[]>(`/teachers${q ? `?q=${encodeURIComponent(q)}` : ''}`, {}, token),
-  createSubstitution: (token: string, body: NewSubstitution) =>
-    request<{ id: string }>('/substitutions', { method: 'POST', body: JSON.stringify(body) }, token),
-  // Скасування заміни: 204 без тіла, пара повертається до звичайного вигляду
-  deleteSubstitution: (token: string, id: string) =>
-    request<void>(`/substitutions/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
 };
