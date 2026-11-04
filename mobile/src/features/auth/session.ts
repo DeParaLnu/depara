@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, setSessionBridge, type Session } from '../../api';
+import { clearPersistedQueries } from '../../lib/queryCache';
 import { getOrCreateDeviceId, loadStoredSession, saveStoredSession } from './storage';
 
 // A1: стан сесії зі збереженням токенів у expo-secure-store та авто-рефрешем
@@ -21,6 +22,9 @@ export const useSession = create<SessionState>((set, get) => ({
   initSession: async () => {
     try {
       const [deviceId, session] = await Promise.all([getOrCreateDeviceId(), loadStoredSession()]);
+      // Сесії немає (вийшли, її скинули або відновили бекап без secure-store): кеш попереднього акаунта
+      // видаляємо до того, як він відновиться в памʼять
+      if (!session) await clearPersistedQueries();
       set({ deviceId, session, isHydrated: true });
     } catch {
       set({ isHydrated: true });
@@ -48,6 +52,8 @@ export const useSession = create<SessionState>((set, get) => ({
     }
     set({ session: null });
     void saveStoredSession(null);
+    // Кеш у памʼяті очищає _layout.tsx, коли сесія стає null
+    void clearPersistedQueries();
   },
 }));
 

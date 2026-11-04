@@ -1,4 +1,5 @@
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -7,6 +8,7 @@ import { ApiError } from '../api';
 import { AppErrorBoundary } from '../components/AppErrorBoundary';
 import { useSession } from '../features/auth/session';
 import { log } from '../lib/logger';
+import { CACHE_BUSTER, CACHE_MAX_AGE, queryPersister, shouldPersistQuery } from '../lib/queryCache';
 
 // Глобальний обробник помилок запитів. Помилки API (мережа, 4xx/5xx) очікувані: рівень warn.
 // Усе інше це баг: рівень error зі стеком.
@@ -41,12 +43,17 @@ export default function RootLayout() {
           onError: (e, _variables, _result, mutation) =>
             onError(e, `мутація ${String(mutation.options.mutationKey?.[0] ?? 'без ключа')}`),
         }),
-        defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+        defaultOptions: { queries: { retry: 1, staleTime: 30_000, gcTime: CACHE_MAX_AGE } },
       }),
   );
   const session = useSession((s) => s.session);
   const signedIn = !!session;
   const onboarding = signedIn && session.needsOnboarding;
+
+  // Вихід або скинута сесія: дані попереднього акаунта не мають лишитися в памʼяті
+  useEffect(() => {
+    if (!session) queryClient.clear();
+  }, [session, queryClient]);
 
   if (!isHydrated) {
     return null;
@@ -54,7 +61,15 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{
+          persister: queryPersister,
+          maxAge: CACHE_MAX_AGE,
+          buster: CACHE_BUSTER,
+          dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+        }}
+      >
         <StatusBar style="auto" />
         <AppErrorBoundary>
           <Stack screenOptions={{ headerShown: false }}>
@@ -69,7 +84,7 @@ export default function RootLayout() {
             </Stack.Protected>
           </Stack>
         </AppErrorBoundary>
-      </QueryClientProvider>
+      </PersistQueryClientProvider>
     </SafeAreaProvider>
   );
 }
