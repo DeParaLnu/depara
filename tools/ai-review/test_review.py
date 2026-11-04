@@ -193,7 +193,43 @@ class ReviewTests(unittest.TestCase):
         self.assertIn("1 спростовано чи не підтверджено", posted)
         verify_req = Stub.state["chat_requests"][1]["messages"]
         self.assertIn("2: const total = items.length;", verify_req[1]["content"])  # перевіряльник бачить код
-        self.assertNotIn("tools", Stub.state["chat_requests"][1])
+        self.assertIn("   2| +const total = items.length;", verify_req[1]["content"])  # і зміни PR біля рядка
+        self.assertIn("рядок доданий у PR", verify_req[1]["content"])
+        self.assertIn("tools", Stub.state["chat_requests"][1])  # і може сам подивитись інші файли
+
+    def test_verifier_can_read_other_files(self):
+        """Регресія з PR #80: «хук викликають без enabled» спростовується лише в іншому файлі."""
+        Stub.state["replies"] = [
+            say({"summary": "s", "findings": [finding()]}),
+            tool_call("search_text", {"pattern": "total"}),
+            say("<think>дивлюсь виклики</think>" + json.dumps({"verdict": "refuted", "reason": "обробка є"})),
+        ]
+        self.run_main()
+        self.assertIn("Суттєвих проблем не знайдено", Stub.state["posted"])
+        tool_msgs = [m for m in Stub.state["chat_requests"][2]["messages"] if m["role"] == "tool"]
+        self.assertIn("backend/src/a.ts:2:", tool_msgs[0]["content"])
+
+    def test_verifier_without_steps_has_no_tools(self):
+        self.cfg.verify_steps = 0
+        f = review.parse_finding(finding())
+        Stub.state["replies"] = [say({"verdict": "confirmed"})]
+        self.assertEqual(review.verify_finding(self.cfg, f, review.RepoTools(self.root), dict(review.split_diff(DIFF))),
+                         "confirmed")
+        self.assertNotIn("tools", Stub.state["chat_requests"][0])
+
+    def test_verifier_sees_that_claimed_removal_is_an_added_line(self):
+        """Регресія з PR #71: «виклик видалено», а цитата це доданий рядок. Перевірка має бачити вид рядка."""
+        diff_by_path = dict(review.split_diff(DIFF))
+        removed = review.parse_finding(finding(evidence="const total = 0;", line=0))
+        self.assertTrue(review.anchor_finding(removed, diff_by_path))
+        self.assertEqual(removed.change, "removed")
+        self.assertIn("-const total = 0;", review.diff_excerpt(removed, diff_by_path))
+        added = review.parse_finding(finding(line=0))
+        review.anchor_finding(added, diff_by_path)
+        self.assertEqual(added.change, "added")
+        ctx = review.parse_finding(finding(evidence="import x from 'y';", line=0))
+        review.anchor_finding(ctx, diff_by_path)
+        self.assertEqual(ctx.change, "context")
 
     def test_verifier_sees_where_the_block_is_used(self):
         """Регресія з PR #52: стиль buttonIcon визначено внизу файла, а іконку з кольором задано вище, у JSX."""
@@ -208,7 +244,7 @@ class ReviewTests(unittest.TestCase):
         self.assertIn('color={colors.accent}', window)
         self.assertEqual(review.enclosing_name(src.splitlines(), 11), "buttonIcon")
 
-    def test_unsure_minor_dropped_but_unsure_important_kept(self):
+    def test_unsure_minor_dropped_and_unsure_important_lowered(self):
         Stub.state["replies"] = [
             tool_call("read_file", {"path": "backend/src/a.ts"}),
             say({"summary": "s", "findings": [
@@ -219,8 +255,63 @@ class ReviewTests(unittest.TestCase):
         ]
         self.run_main()
         posted = Stub.state["posted"]
-        self.assertIn("Важливе B", posted)
+        self.assertIn("Важливе B", posted.split("<details>")[1])  # без підтвердження лише серед дрібниць
         self.assertNotIn("Дрібниця A", posted)
+
+    # ---------- відповіді моделей з міркуваннями ----------
+
+    def test_reasoning_is_stripped_even_when_unclosed_or_without_opening_tag(self):
+        self.assertEqual(review.clean("<think>a</think> {\"x\": 1}"), '{"x": 1}')
+        self.assertEqual(review.clean('міркую {"y": 2}</think>{"x": 1}'), '{"x": 1}')
+        self.assertEqual(review.clean('<think>довгі міркування {"x": 1} обрізано'), "")
+
+    def test_json_with_expected_key_wins_over_examples(self):
+        text = 'Приклад: {"a": 1}. Ось відповідь:\n```json\n{"summary": "s", "findings": []}\n```'
+        self.assertEqual(review.parse_json_object(text, "findings"), {"summary": "s", "findings": []})
+        self.assertEqual(review.parse_json_object(text), {"a": 1})
+        self.assertIsNone(review.parse_json_object("{не json"))
+
+    def test_truncated_reply_keeps_complete_findings(self):
+        whole = json.dumps({"summary": "Частково.", "findings": [finding(), finding(title="Обрізаний")]}, ensure_ascii=False)
+        Stub.state["replies"] = [say(whole[: whole.index("Обрізаний")]), say({"verdict": "confirmed"})]
+        self.run_main()
+        posted = Stub.state["posted"]
+        self.assertIn("Порожній список ламає підсумок", posted)
+        self.assertIn("Частково.", posted)
+        self.assertEqual(len(Stub.state["chat_requests"]), 2)  # без запиту на виправлення формату
+
+    def test_token_limit_and_extra_body_are_sent(self):
+        os.environ["AI_REVIEW_EXTRA_BODY"] = '{"reasoning": {"enabled": false}, "model": "не підміняє"}'
+        os.environ["AI_REVIEW_MAX_TOKENS"] = "5000"
+        try:
+            cfg = review.Config.from_env()
+        finally:
+            del os.environ["AI_REVIEW_EXTRA_BODY"], os.environ["AI_REVIEW_MAX_TOKENS"]
+        cfg.base_url, cfg.api_key = self.cfg.base_url, "k"
+        Stub.state["replies"] = [say({"ok": True})]
+        review.chat(cfg, [{"role": "user", "content": "x"}], None)
+        body = Stub.state["chat_requests"][0]
+        self.assertEqual(body["max_tokens"], 5000)
+        self.assertEqual(body["reasoning"], {"enabled": False})
+        self.assertEqual(body["model"], review.Config.model)
+
+    def test_invalid_extra_body_is_ignored(self):
+        self.assertEqual(review._json_env("[1]"), {})
+        self.assertEqual(review._json_env("{зламано"), {})
+        self.assertEqual(review._json_env(None), {})
+
+    def test_summary_fallback_joins_sentences(self):
+        self.cfg.api_key = ""  # будь-який запит упаде: лишається власне склеювання
+        Stub.state["replies"] = []
+        out = review.summarize(self.cfg, {"title": "T"}, ["Перше речення", "Друге."])
+        self.assertEqual(out, "Перше речення. Друге.")
+
+    def test_model_sees_all_files_of_the_pr(self):
+        Stub.state["replies"] = [say({"summary": "s", "findings": []})]
+        self.run_main()
+        user = Stub.state["chat_requests"][0]["messages"][1]["content"]
+        self.assertIn("Усі файли PR", user)
+        self.assertNotIn("package-lock.json,", user.split("Усі файли PR")[1].split("\n")[0] + ",")
 
     def test_unread_file_lowers_severity_one_level(self):
         """Модель заявила «critical», не відкривши файл: пункт понижується і без підтвердження не лишається критичним."""
