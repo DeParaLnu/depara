@@ -81,7 +81,13 @@ export async function scheduleReminders(plan: PlannedReminder[]): Promise<void> 
   await cancelReminders();
   try {
     await ensureChannel();
-    for (const r of plan) {
+  } catch (error) {
+    warn('не вдалося створити канал сповіщень', error);
+  }
+  // Помилка одного нагадування не зупиняє решту: краще пропустити одну пару, ніж усі наступні
+  let failed = 0;
+  for (const r of plan) {
+    try {
       await Notifications.scheduleNotificationAsync({
         identifier: r.id,
         content: { title: r.title, body: r.body },
@@ -91,9 +97,11 @@ export async function scheduleReminders(plan: PlannedReminder[]): Promise<void> 
           ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
         },
       });
+    } catch (error) {
+      failed += 1;
+      if (failed === 1) warn('не вдалося запланувати нагадування', error);
     }
-    if (__DEV__) log.debug('reminders', `заплановано нагадувань: ${plan.length}`);
-  } catch (error) {
-    warn('не вдалося запланувати нагадування', error);
   }
+  if (failed > 1) log.warn('reminders', `не заплановано нагадувань: ${failed} з ${plan.length}`);
+  if (__DEV__) log.debug('reminders', `заплановано нагадувань: ${plan.length - failed}`);
 }
