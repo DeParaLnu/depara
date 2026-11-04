@@ -18,7 +18,12 @@ export type Me = {
   groupId: string | null;
   subgroup: number;
   reminderMinutes: number;
+  /** Перемикач «Зміни та скасування» (пуші F8); старі відповіді без поля вважаємо true */
+  notifySubstitutions?: boolean;
 };
+
+/** F9: налаштування, які PATCH /me змінює окремо від групи (передаються лише змінені поля) */
+export type ProfileSettings = { reminderMinutes?: number; notifySubstitutions?: boolean };
 
 export type LessonType = 'LECTURE' | 'PRACTICE' | 'LAB' | 'EXAM' | 'OTHER';
 export type SubstitutionKind = 'CANCELLED' | 'REPLACED' | 'MOVED' | 'ROOM_CHANGED';
@@ -233,6 +238,8 @@ export const api = {
   deleteAccount: (token: string) => request<void>('/me', { method: 'DELETE' }, token),
   groups: (token: string) => request<Group[]>('/groups', {}, token),
   me: (token: string) => request<Me>('/me', {}, token),
+  updateSettings: (token: string, settings: ProfileSettings) =>
+    request<Me>('/me', { method: 'PATCH', body: JSON.stringify(settings) }, token),
   setGroup: (token: string, groupId: string, subgroup: number) =>
     request<{ id: string; groupId: string; subgroup: number }>(
       '/me',

@@ -3,9 +3,9 @@ import { create } from 'zustand';
 import { log } from '../../lib/logger';
 import { isReminderMinutes, type ReminderMinutes } from './plan';
 
-// F8/F9: час нагадування перед парою. Зберігається на пристрої: нагадування локальні, і саме тут видно,
-// чи дав користувач дозвіл. Поки PATCH /me не вміє зберігати reminderMinutes (#86), сервер лише підказує
-// початкове значення (GET /me), а вибір у профілі живе тут.
+// F8/F9: час нагадування перед парою. Нагадування локальні, тож вибір зберігається на пристрої і діє одразу,
+// навіть без мережі. Профіль на сервері (PATCH /me { reminderMinutes }) отримує копію: з неї береться початкове
+// значення на новому пристрої (див. useReminderMinutes).
 const KEY = 'depara_reminder_minutes';
 
 type ReminderSettings = {

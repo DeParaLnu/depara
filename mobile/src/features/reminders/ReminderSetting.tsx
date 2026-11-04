@@ -1,7 +1,11 @@
-import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { api, type Me } from '../../api';
+import { log } from '../../lib/logger';
 import { colors } from '../../theme';
-import { requestPermission } from './notifications';
+import { useSession } from '../auth/session';
+import { hasPermission, requestPermission } from './notifications';
 import { REMINDER_OPTIONS, type ReminderMinutes } from './plan';
 import { useReminderSettings } from './settings';
 import { useReminderMinutes } from './useReminderSync';
@@ -10,26 +14,63 @@ const label = (m: ReminderMinutes) => (m === 0 ? 'Вимк' : `${m} хв`);
 
 // F9: «Нагадування перед парою: Вимк / 10 хв / 15 хв» (макет docs/design/19-profile.png).
 // Дозвіл на сповіщення питаємо лише тоді, коли користувач сам вмикає нагадування.
+// Вибір діє одразу на пристрої, а на сервер іде копією (PATCH /me): її невдача (офлайн) нагадувань не ламає.
 export function ReminderSetting() {
   const minutes = useReminderMinutes();
   const setMinutes = useReminderSettings((s) => s.setMinutes);
+  const token = useSession((s) => s.session?.accessToken);
+  const queryClient = useQueryClient();
   const [asking, setAsking] = useState(false);
   const [denied, setDenied] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
+  // Час обрано (наприклад, прийшов із сервера на новому пристрої), а дозволу немає: нагадування не прийдуть
+  const [missingPermission, setMissingPermission] = useState(false);
 
-  const choose = async (value: ReminderMinutes) => {
-    if (value === minutes) return;
+  useEffect(() => {
+    const check = () => {
+      if (minutes === 0) return setMissingPermission(false);
+      void hasPermission().then((granted) => setMissingPermission(!granted));
+    };
+    check();
+    // Користувач міг увімкнути сповіщення в налаштуваннях телефону і повернутися
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && check());
+    return () => sub.remove();
+  }, [minutes]);
+
+  const save = useMutation({
+    mutationKey: ['updateSettings'],
+    mutationFn: (reminderMinutes: ReminderMinutes) => api.updateSettings(token!, { reminderMinutes }),
+    onSuccess: (me: Me) => queryClient.setQueryData(['me'], me),
+  });
+  const saveToServer = (value: ReminderMinutes) => {
+    if (!token) return;
+    save.mutate(value, {
+      onError: () => log.warn('reminders', 'вибір нагадування не збережено на сервері, діє на пристрої'),
+    });
+  };
+
+  const enable = async (value: ReminderMinutes) => {
     setDenied(false);
-    if (value === 0) {
-      setMinutes(0);
-      return;
-    }
     setAsking(true);
     const result = await requestPermission();
     setAsking(false);
-    if (result === 'granted') setMinutes(value);
-    else if (result === 'unsupported') setUnsupported(true);
+    if (result === 'granted') {
+      setMissingPermission(false);
+      setMinutes(value);
+      saveToServer(value);
+    } else if (result === 'unsupported') setUnsupported(true);
     else setDenied(true);
+  };
+
+  const choose = (value: ReminderMinutes) => {
+    if (value === minutes && !missingPermission) return;
+    if (value === 0) {
+      setDenied(false);
+      setMinutes(0);
+      saveToServer(0);
+      return;
+    }
+    void enable(value);
   };
 
   return (
@@ -51,7 +92,7 @@ export function ReminderSetting() {
               aria-checked={selected}
               accessibilityLabel={m === 0 ? 'Без нагадування' : `За ${m} хвилин`}
               disabled={asking}
-              onPress={() => void choose(m)}
+              onPress={() => choose(m)}
               style={[styles.segment, selected && styles.segmentSelected]}
             >
               <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{label(m)}</Text>
@@ -68,6 +109,13 @@ export function ReminderSetting() {
         </View>
       ) : unsupported ? (
         <Text style={styles.hint}>Нагадування працюють лише в застосунку на телефоні.</Text>
+      ) : missingPermission ? (
+        <View style={styles.hintRow} accessibilityRole="alert">
+          <Text style={styles.hint}>Без дозволу на сповіщення нагадування не прийдуть.</Text>
+          <Pressable testID="reminder-allow" accessibilityRole="button" onPress={() => void enable(minutes)} hitSlop={8}>
+            <Text style={styles.link}>Дозволити</Text>
+          </Pressable>
+        </View>
       ) : null}
     </View>
   );
