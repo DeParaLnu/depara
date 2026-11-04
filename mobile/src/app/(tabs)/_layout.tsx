@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Platform, useWindowDimensions, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useReminderSync } from '../../features/reminders/useReminderSync';
 import { colors } from '../../theme';
 
 // Розміри з макета: іконка 22 px, підпис 11 px, вкладка ~65 px без безпечної зони
@@ -22,6 +23,8 @@ const iconColor = (color: ColorValue) => (typeof color === 'string' ? color : un
 
 // Нижня навігація з макетів: Сьогодні, Тиждень, Аудиторії, Профіль
 export default function TabsLayout() {
+  // F8: локальні нагадування перед парою живуть, поки користувач увійшов (вкладки змонтовані)
+  useReminderSync();
   const insets = useSafeAreaInsets();
   const { fontScale } = useWindowDimensions();
   // iOS 13+ не збільшує підписи вкладок (показує їх великими при довгому натисканні),
