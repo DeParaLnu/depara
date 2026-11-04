@@ -1,4 +1,4 @@
-import type { Building, Lesson, Me, Session, WeekSchedule } from '../api';
+import type { Building, Lesson, Me, Session, Substitution, Teacher, WeekSchedule } from '../api';
 import { addDays, fromIsoDate, mondayOf, toIsoDate } from '../lib/date';
 import { MOCK_BUILDINGS, MOCK_CLASSROOMS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MOCK_SCHEDULE_GROUP_ID, PAIR_TIMES } from './fixtures';
 
@@ -8,6 +8,16 @@ import { MOCK_BUILDINGS, MOCK_CLASSROOMS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MO
 const LATENCY_MS = 250;
 
 let state: { groupId: string | null; subgroup: number } = { groupId: null, subgroup: 0 };
+
+// F6: заміни, створені й скасовані в цьому запуску (за id пари). Пара мока має id mock-<понеділок>-<номер>
+const createdSubs = new Map<string, Substitution>();
+const removedSubs = new Set<string>();
+let subCounter = 0;
+
+// Викладачі для «Інший викладач»: усі, хто є в мок-розкладі
+const MOCK_TEACHERS: Teacher[] = [...new Set(MOCK_LESSONS.map((l) => l.teacher).filter((t): t is string => !!t))]
+  .sort((a, b) => a.localeCompare(b, 'uk'))
+  .map((fullName, i) => ({ id: `mock-t-${i}`, fullName, position: null }));
 
 const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -45,7 +55,14 @@ function weekOf(dateParam: string | null): WeekSchedule {
       substitution: l.substitution
         ? { id: `mock-sub-${weekStart}-${i}`, ...l.substitution, newBuilding: buildingOf(l.substitution.newRoom) }
         : null,
-    }));
+    }))
+    .map((l) =>
+      createdSubs.has(l.id)
+        ? { ...l, substitution: createdSubs.get(l.id)! }
+        : removedSubs.has(l.id)
+          ? { ...l, substitution: null }
+          : l,
+    );
   return { weekStart, published: true, lessons };
 }
 
@@ -58,6 +75,8 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
 
   if (method === 'POST' && route === '/auth/microsoft') {
     state = { groupId: null, subgroup: 0 };
+    createdSubs.clear();
+    removedSubs.clear();
     const session: Session = { accessToken: 'mock-access', refreshToken: 'mock-refresh', needsOnboarding: true };
     return reply(200, session);
   }
@@ -103,6 +122,30 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
 
   if (method === 'GET' && route === '/buildings') return reply(200, Object.values(MOCK_BUILDINGS));
 
+  if (method === 'GET' && route === '/teachers') {
+    const q = new URLSearchParams(query).get('q')?.trim().toLowerCase();
+    return reply(200, MOCK_TEACHERS.filter((t) => !q || t.fullName.toLowerCase().includes(q)).slice(0, 20));
+  }
+
+  if (method === 'POST' && route === '/substitutions') return createSubstitution(body);
+
+  if (method === 'DELETE' && route.startsWith('/substitutions/')) {
+    const id = decodeURIComponent(route.slice('/substitutions/'.length));
+    for (const [lessonId, sub] of createdSubs) {
+      if (sub.id === id) {
+        createdSubs.delete(lessonId);
+        removedSubs.add(lessonId);
+        return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
+      }
+    }
+    // Заміна з фікстур: id mock-sub-<понеділок>-<номер>, пара має id mock-<понеділок>-<номер>
+    const lessonId = id.replace(/^mock-sub-/, 'mock-');
+    const lesson = weekOf(lessonWeek(lessonId)).lessons.find((l) => l.id === lessonId);
+    if (!lesson?.substitution || lesson.substitution.id !== id) return reply(404, { error: 'SUBSTITUTION_NOT_FOUND' });
+    removedSubs.add(lessonId);
+    return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
+  }
+
   if (method === 'GET' && route === '/classrooms') {
     const params = new URLSearchParams(query);
     const q = params.get('q')?.trim().toLowerCase();
@@ -119,4 +162,39 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
   }
 
   return reply(404, { error: 'NOT_FOUND' });
+}
+
+// Понеділок тижня з id пари мока (mock-YYYY-MM-DD-N)
+const lessonWeek = (lessonId: string) => lessonId.slice('mock-'.length, 'mock-'.length + 10);
+
+// POST /substitutions у моку: ті самі перевірки, що й на бекенді (у скороченому вигляді)
+function createSubstitution(body: Record<string, unknown>): Response {
+  const lessonId = String(body.lessonId ?? '');
+  const lesson = /^mock-\d{4}-\d{2}-\d{2}-\d+$/.test(lessonId)
+    ? weekOf(lessonWeek(lessonId)).lessons.find((l) => l.id === lessonId)
+    : undefined;
+  if (!lesson) return reply(404, { error: 'LESSON_NOT_FOUND' });
+  if (lesson.substitution) return reply(409, { error: 'SUBSTITUTION_EXISTS' });
+
+  const kind = body.kind as Substitution['kind'];
+  const teacher = MOCK_TEACHERS.find((t) => t.id === body.newTeacherId) ?? null;
+  const room = MOCK_CLASSROOMS.find((r) => r.id === body.newClassroomId) ?? null;
+  if (kind === 'REPLACED' && !teacher) return reply(400, { error: 'NEW_TEACHER_REQUIRED' });
+  if (kind === 'ROOM_CHANGED' && !room) return reply(400, { error: 'NEW_CLASSROOM_REQUIRED' });
+  if (kind === 'MOVED' && !body.newDate && !body.newPairNumber) return reply(400, { error: 'NEW_DATE_OR_PAIR_REQUIRED' });
+  if (!['CANCELLED', 'REPLACED', 'MOVED', 'ROOM_CHANGED'].includes(kind)) return reply(400, { error: 'INVALID_KIND' });
+
+  const sub: Substitution = {
+    id: `mock-sub-new-${++subCounter}`,
+    kind,
+    comment: typeof body.comment === 'string' ? body.comment : null,
+    newTeacher: kind === 'REPLACED' ? teacher!.fullName : null,
+    newRoom: kind === 'ROOM_CHANGED' || kind === 'MOVED' ? (room?.label ?? null) : null,
+    newBuilding: kind === 'ROOM_CHANGED' || kind === 'MOVED' ? (room?.building ?? null) : null,
+    newDate: kind === 'MOVED' && typeof body.newDate === 'string' ? body.newDate : null,
+    newPairNumber: kind === 'MOVED' && typeof body.newPairNumber === 'number' ? body.newPairNumber : null,
+  };
+  createdSubs.set(lesson.id, sub);
+  removedSubs.delete(lesson.id);
+  return reply(201, { id: sub.id, lessonId: lesson.id, kind: sub.kind });
 }

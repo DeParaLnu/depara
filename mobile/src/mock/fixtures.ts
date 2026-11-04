@@ -4,11 +4,13 @@ import type { Building, Classroom, Group, LessonType, Substitution } from '../ap
 // backend/prisma/seed/schedule.seed.json (група ТЕСТ-31), а дати не фіксовані: у кожному тижні
 // пари повторюються з понеділка по пʼятницю, тож екрани «Сьогодні» і «Тиждень» не порожні.
 
+// Мок-користувач староста: так у MOCK=1 видно й форму заміни (F6). Студентський вигляд відрізняється лише
+// відсутністю бейджа «Староста» і кнопок заміни
 export const MOCK_ME = {
   id: 'mock-user',
   email: 'student@lnu.edu.ua',
   fullName: 'Тестовий Студент',
-  role: 'STUDENT' as const,
+  role: 'HEADMAN' as const,
   reminderMinutes: 15,
 };
 

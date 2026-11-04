@@ -39,6 +39,22 @@ export const errorMessages: Record<string, string> = {
   RATE_LIMITED: 'Забагато запитів. Зачекайте хвилину і спробуйте ще раз.',
   LAST_ADMIN: 'Ви останній адміністратор: спершу призначте іншого.',
   ACCOUNT_CONFLICT: 'Цей акаунт уже пов’язано з іншим входом. Зверніться до підтримки.',
+  // F6: заміни (коди з форми і з POST /substitutions)
+  LESSON_REQUIRED: 'Оберіть пару.',
+  KIND_REQUIRED: 'Оберіть тип зміни.',
+  NEW_TEACHER_REQUIRED: 'Оберіть нового викладача.',
+  NEW_CLASSROOM_REQUIRED: 'Оберіть нову аудиторію.',
+  NEW_DATE_OR_PAIR_REQUIRED: 'Оберіть нову дату або номер пари.',
+  MOVE_TARGET_SAME_AS_ORIGINAL: 'Нова дата й пара збігаються з поточними.',
+  INVALID_COMMENT: 'Коментар задовгий: до 500 символів.',
+  SUBSTITUTION_EXISTS: 'Для цієї пари вже є заміна. Спершу скасуйте її.',
+  FORBIDDEN_GROUP: 'Можна змінювати лише пари своєї групи.',
+  FORBIDDEN: 'Недостатньо прав для цієї дії.',
+  LESSON_NOT_FOUND: 'Пару не знайдено. Оновіть розклад.',
+  SUBSTITUTION_NOT_FOUND: 'Заміну вже скасовано. Оновіть розклад.',
+  TEACHER_NOT_FOUND: 'Викладача не знайдено.',
+  CLASSROOM_NOT_FOUND: 'Аудиторію не знайдено.',
+  PAIR_NOT_FOUND: 'Такої пари немає в розкладі дзвінків.',
 };
 
 export const errorText = (code: string) => errorMessages[code] ?? 'Щось пішло не так. Спробуйте ще раз.';
