@@ -74,7 +74,9 @@ export type Lesson = {
 
 // published = false: деканат ще нічого не опублікував для групи («Розклад ще не опубліковано»),
 // на відміну від порожнього тижня при published = true
-export type WeekSchedule = { weekStart: string; published: boolean; lessons: Lesson[] };
+// etag: заголовок ETag відповіді (не поле тіла). Зберігається в кеші разом із тижнем, щоб наступний запит
+// надіслав If-None-Match і при незмінному розкладі отримав 304 без тіла
+export type WeekSchedule = { weekStart: string; published: boolean; lessons: Lesson[]; etag?: string };
 
 export class ApiError extends Error {
   constructor(
@@ -145,9 +147,12 @@ async function handleTokenRefresh(): Promise<RefreshResult> {
   return refreshPromise;
 }
 
+type Sent = { body: unknown; status: number; headers: Headers };
+
 // Єдина точка всіх HTTP-запитів: тут логуємо метод, шлях, статус, код помилки з тіла і тривалість.
-// Токени, тіла відповідей і query-рядок у лог не потрапляють.
-async function request<T>(path: string, init: RequestInit = {}, token?: string, isRetry = false): Promise<T> {
+// Токени, тіла відповідей і query-рядок у лог не потрапляють. 304 (Not Modified) вважаємо успіхом:
+// що з ним робити, вирішує виклик, який надіслав If-None-Match (див. api.week).
+async function send(path: string, init: RequestInit = {}, token?: string, isRetry = false): Promise<Sent> {
   const method = init.method ?? 'GET';
   const route = path.split('?')[0];
   const started = Date.now();
@@ -157,6 +162,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
       ...init,
       headers: {
         'Content-Type': 'application/json',
+        ...(init.headers as Record<string, string> | undefined),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     };
@@ -169,7 +175,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
   const ms = Date.now() - started;
   const requestId = res.headers.get('x-request-id') ?? undefined;
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  if (!res.ok && res.status !== 304) {
     const code: string = body.error ?? `HTTP_${res.status}`;
     // A1: авто-refresh при 401 TOKEN_EXPIRED (specs/f1-login.md)
     if (
@@ -182,7 +188,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
     ) {
       log.info('auth', 'access токен прострочено, виконуємо авто-refresh');
       const refreshed = await handleTokenRefresh();
-      if (refreshed.kind === 'ok') return request<T>(path, init, refreshed.accessToken, true);
+      if (refreshed.kind === 'ok') return send(path, init, refreshed.accessToken, true);
       // Тимчасова помилка refresh: віддаємо її (наприклад NETWORK_ERROR) замість 401, щоб екран показав
       // «Офлайн» і збережений розклад, а загальний обробник не скинув сесію
       if (refreshed.kind === 'transient') throw refreshed.error;
@@ -191,7 +197,26 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
     throw new ApiError(code, res.status, requestId);
   }
   if (__DEV__) log.info('api', `${method} ${route} → ${res.status}`, { ms, requestId });
-  return body as T;
+  return { body, status: res.status, headers: res.headers };
+}
+
+async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+  return (await send(path, init, token)).body as T;
+}
+
+// F3: тиждень з ETag. Є збережений тиждень з etag: шлемо If-None-Match, і на 304 віддаємо його ж
+// (сервер підтвердив, що розклад не змінився), інакше беремо нове тіло і новий etag.
+async function fetchWeek(token: string, date?: string, cached?: WeekSchedule): Promise<WeekSchedule> {
+  const path = `/schedule/week${date ? `?date=${date}` : ''}`;
+  const init: RequestInit = cached?.etag ? { headers: { 'If-None-Match': cached.etag } } : {};
+  const res = await send(path, init, token);
+  if (res.status === 304) {
+    if (cached) return cached;
+    // 304 без нашого If-None-Match (наприклад, проксі): тіла немає, тож це помилка, а не порожній тиждень
+    throw new ApiError('HTTP_304', 304, res.headers.get('x-request-id') ?? undefined);
+  }
+  const etag = res.headers.get('etag') ?? undefined;
+  return { ...(res.body as WeekSchedule), etag };
 }
 
 export const api = {
@@ -214,8 +239,7 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify({ groupId, subgroup }) },
       token,
     ),
-  week: (token: string, date?: string) =>
-    request<WeekSchedule>(`/schedule/week${date ? `?date=${date}` : ''}`, {}, token),
+  week: fetchWeek,
   buildings: (token: string) => request<Building[]>('/buildings', {}, token),
   classrooms: (token: string, q?: string, building?: string) => {
     const params = new URLSearchParams();

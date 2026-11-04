@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { api } from '../../api';
+import { api, type WeekSchedule } from '../../api';
 import { useSession } from '../auth/session';
 
 /** Поточний час, що оновлюється раз на хвилину (для «ЗАРАЗ» і «залишилось N хв»). */
@@ -25,10 +25,15 @@ export function useGroups() {
   return useQuery({ queryKey: ['groups'], queryFn: () => api.groups(token!), enabled: !!token, staleTime: 10 * 60_000 });
 }
 
-/** Розклад тижня, до якого належить `date` (YYYY-MM-DD). */
+/** Розклад тижня, до якого належить `date` (YYYY-MM-DD). Збережений тиждень дає etag для відповіді 304. */
 export function useWeek(date: string) {
   const token = useToken();
-  return useQuery({ queryKey: ['week', date], queryFn: () => api.week(token!, date), enabled: !!token });
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ['week', date],
+    queryFn: () => api.week(token!, date, queryClient.getQueryData<WeekSchedule>(['week', date])),
+    enabled: !!token,
+  });
 }
 
 /** Підпис «ТЕСТ-31 · підгрупа 1» і ознака старости для заголовків екранів розкладу. */
