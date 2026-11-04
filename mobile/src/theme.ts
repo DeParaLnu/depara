@@ -38,6 +38,9 @@ export const errorMessages: Record<string, string> = {
   TEMPORARILY_UNAVAILABLE: 'Сервер тимчасово недоступний. Спробуйте за хвилину.',
   RATE_LIMITED: 'Забагато запитів. Зачекайте хвилину і спробуйте ще раз.',
   LAST_ADMIN: 'Ви останній адміністратор: спершу призначте іншого.',
+  HEADMAN_GROUP_LOCKED: 'Групу старости змінює адміністратор.',
+  GROUP_NOT_FOUND: 'Групу не знайдено. Оновіть список.',
+  INVALID_SUBGROUP: 'Оберіть підгрупу: усі, 1 або 2.',
   ACCOUNT_CONFLICT: 'Цей акаунт уже пов’язано з іншим входом. Зверніться до підтримки.',
   // F6: заміни (коди з форми і з POST /substitutions)
   LESSON_REQUIRED: 'Оберіть пару.',
