@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../api';
 import { config } from '../../config';
@@ -9,6 +9,7 @@ import { useSession } from '../../features/auth/session';
 import { canChangeOwnGroup, subgroupLabel } from '../../features/profile/group';
 import { useSetGroup } from '../../features/profile/hooks';
 import { SubgroupSheet } from '../../features/profile/SubgroupSheet';
+import { ReminderSetting } from '../../features/reminders/ReminderSetting';
 import { useGroups, useMe } from '../../features/schedule/hooks';
 import { reportError } from '../../lib/errors';
 import { colors, errorText } from '../../theme';
@@ -21,7 +22,7 @@ const initials = (name: string) =>
     .map((p) => p[0].toUpperCase())
     .join('');
 
-// F9: дані користувача, зміна групи й підгрупи, вихід і видалення акаунта. Налаштування сповіщень і теми зʼявляться пізніше
+// F9: дані користувача, зміна групи й підгрупи, нагадування перед парою, вихід і видалення акаунта. Тема зʼявиться пізніше
 export default function ProfileRoute() {
   const insets = useSafeAreaInsets();
   const signOut = useSession((s) => s.signOut);
@@ -74,7 +75,8 @@ export default function ProfileRoute() {
     ]);
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 24 }]}>
+    // Прокрутка: з налаштуваннями профіль не вміщається на малих екранах і при великому шрифті
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]}>
       <View style={styles.hero}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{initials(displayName) || ' '}</Text>
@@ -126,6 +128,8 @@ export default function ProfileRoute() {
         </Pressable>
       </View>
 
+      <ReminderSetting />
+
       <SubgroupSheet
         visible={subgroupOpen}
         value={me.data?.subgroup ?? 0}
@@ -170,12 +174,13 @@ export default function ProfileRoute() {
       >
         <Text style={styles.signOutText}>Вийти з акаунту</Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background, paddingHorizontal: 20 },
+  screen: { flex: 1, backgroundColor: colors.background },
+  content: { flexGrow: 1, paddingHorizontal: 20 },
   hero: { alignItems: 'center', gap: 6, marginBottom: 24 },
   avatar: {
     width: 90,

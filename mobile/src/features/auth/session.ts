@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { api, setSessionBridge, type Session } from '../../api';
 import { resetCaches } from '../../lib/cacheReset';
 import { clearPersistedQueries } from '../../lib/queryPersist';
+import { cancelReminders } from '../reminders/notifications';
+import { useReminderSettings } from '../reminders/settings';
 import { getOrCreateDeviceId, loadStoredSession, saveStoredSession } from './storage';
 
 // A1: стан сесії зі збереженням токенів у expo-secure-store та авто-рефрешем
@@ -54,6 +56,9 @@ export const useSession = create<SessionState>((set, get) => ({
     set({ session: null });
     void saveStoredSession(null);
     void resetCaches().catch(() => {});
+    // Нагадування про пари попереднього користувача не мають спрацювати після виходу
+    void cancelReminders();
+    useReminderSettings.getState().clear();
   },
 }));
 
