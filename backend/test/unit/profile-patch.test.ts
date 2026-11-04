@@ -18,6 +18,13 @@ describe('parseProfilePatch', () => {
     expect(patch({ groupId: GROUP, subgroup: 2 })).toEqual({ groupId: GROUP, subgroup: 2 });
   });
 
+  it('groupId великими літерами нормалізується: своя група не стає «іншою»', () => {
+    const p = patch({ groupId: GROUP.toUpperCase() });
+    expect(p).toEqual({ groupId: GROUP });
+    expect(resolvePatch({ groupId: GROUP }, p)).toEqual({ groupId: GROUP });
+    expect(rejectPatch({ role: 'HEADMAN', groupId: GROUP }, p)).toBeNull();
+  });
+
   it('кожне поле можна змінити окремо', () => {
     expect(patch({ subgroup: 1 })).toEqual({ subgroup: 1 });
     expect(patch({ reminderMinutes: 15 })).toEqual({ reminderMinutes: 15 });
