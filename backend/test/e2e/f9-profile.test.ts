@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  adminToken, API, authHeaders, DEVICE, importLesson, loginRaw, postJson, send, setupStudent, userId, weekLessons,
+  adminToken, API, authHeaders, DEVICE, emptyGroup, importLesson, loginRaw, postJson, send, setupStudent, userId, weekLessons,
 } from './helpers';
 
 const run = Date.now();
@@ -11,6 +11,67 @@ async function loginFull(email: string) {
   expect(res.status).toBe(200);
   return (await res.json()) as { accessToken: string; refreshToken: string; needsOnboarding: boolean; user: { id: string; role: string } };
 }
+
+type Me = { groupId: string | null; subgroup: number; reminderMinutes: number; notifySubstitutions: boolean };
+const me = async (token: string) => (await (await fetch(`${API}/me`, { headers: authHeaders(token) })).json()) as Me;
+
+describe('F9: налаштування профілю (PATCH /me)', () => {
+  it('новий акаунт: нагадування вимкнено, сповіщення про заміни увімкнено', async () => {
+    const { accessToken } = await loginFull(`f9.defaults.${run}@lnu.edu.ua`);
+    expect(await me(accessToken)).toMatchObject({ reminderMinutes: 0, notifySubstitutions: true });
+  });
+
+  it('нагадування й перемикач сповіщень зберігаються, решта профілю не змінюється', async () => {
+    const token = await setupStudent(`f9.settings.${run}@lnu.edu.ua`, 2);
+    const before = await me(token);
+
+    const res = await send('PATCH', '/me', token, { reminderMinutes: 10, notifySubstitutions: false });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Me;
+    expect(body).toMatchObject({ reminderMinutes: 10, notifySubstitutions: false, groupId: before.groupId, subgroup: 2 });
+    expect(await me(token)).toEqual(body); // відповідь як у GET /me
+  });
+
+  it('лише підгрупа змінюється без групи і одразу змінює розклад', async () => {
+    const token = await setupStudent(`f9.subgroup.${run}@lnu.edu.ua`, 1);
+    const groupId = (await me(token)).groupId;
+    expect((await send('PATCH', '/me', token, { subgroup: 2 })).status).toBe(200);
+    expect(await me(token)).toMatchObject({ groupId, subgroup: 2 });
+  });
+
+  it('нова група без підгрупи скидає підгрупу на 0', async () => {
+    const token = await setupStudent(`f9.regroup.${run}@lnu.edu.ua`, 2);
+    const other = await emptyGroup(await adminToken(), `F9-${run}`);
+    expect((await send('PATCH', '/me', token, { groupId: other })).status).toBe(200);
+    expect(await me(token)).toMatchObject({ groupId: other, subgroup: 0 });
+  });
+
+  it('некоректні значення дають 400 з кодом і нічого не змінюють', async () => {
+    const token = await setupStudent(`f9.invalid.${run}@lnu.edu.ua`);
+    const cases: [unknown, string][] = [
+      [{}, 'NOTHING_TO_UPDATE'],
+      [{ reminderMinutes: 5 }, 'INVALID_REMINDER_MINUTES'],
+      [{ notifySubstitutions: 'так' }, 'INVALID_NOTIFY_SUBSTITUTIONS'],
+      [{ subgroup: 3 }, 'INVALID_SUBGROUP'],
+      [{ groupId: null }, 'GROUP_REQUIRED'],
+      // одне некоректне поле відхиляє весь запит, навіть коли інші коректні
+      [{ reminderMinutes: 15, subgroup: 7 }, 'INVALID_SUBGROUP'],
+    ];
+    for (const [body, error] of cases) {
+      const res = await send('PATCH', '/me', token, body);
+      expect([res.status, await errorOf(res)]).toEqual([400, error]);
+    }
+    expect(await me(token)).toMatchObject({ reminderMinutes: 0, subgroup: 0, notifySubstitutions: true });
+  });
+
+  it('підгрупа без вибраної групи це GROUP_REQUIRED', async () => {
+    const { accessToken } = await loginFull(`f9.nogroup.${run}@lnu.edu.ua`);
+    const res = await send('PATCH', '/me', accessToken, { subgroup: 1 });
+    expect([res.status, await errorOf(res)]).toEqual([400, 'GROUP_REQUIRED']);
+    // а налаштування сповіщень до онбордингу змінювати можна
+    expect((await send('PATCH', '/me', accessToken, { reminderMinutes: 15 })).status).toBe(200);
+  });
+});
 
 describe('F9: видалення акаунта', () => {
   it('без токена 401', async () => {
