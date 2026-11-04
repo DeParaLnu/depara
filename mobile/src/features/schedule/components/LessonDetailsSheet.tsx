@@ -6,6 +6,7 @@ import type { Lesson } from '../../../api';
 import { dayMonth, fromIsoDate, weekdayShort } from '../../../lib/date';
 import { openRoute } from '../../../lib/maps';
 import { colors } from '../../../theme';
+import { SubstitutionActions } from '../../substitutions/SubstitutionActions';
 import { audienceLabel, lessonDetails, lessonTypeLabel, substitutionBadge } from '../lesson';
 
 type Props = { lesson: Lesson | null; onClose: () => void };
@@ -20,6 +21,7 @@ function Row({ icon, text, testID }: { icon: ComponentProps<typeof Ionicons>['na
 }
 
 // Деталі пари (макет «Деталі пари»): тип, підгрупа, час, викладач, корпус з адресою і «Прокласти маршрут».
+// Староста бачить тут ще «Додати заміну» або «Скасувати заміну» (F6, SubstitutionActions).
 // «Нагадати за 10 хв» зʼявиться разом із сповіщеннями (F8): без них кнопка нічого б не робила.
 export function LessonDetailsSheet({ lesson, onClose }: Props) {
   const insets = useSafeAreaInsets();
@@ -100,6 +102,7 @@ export function LessonDetailsSheet({ lesson, onClose }: Props) {
                 <Text style={styles.primaryText}>Прокласти маршрут</Text>
               </Pressable>
             ) : null}
+            <SubstitutionActions lesson={lesson} onClose={onClose} />
           </View>
         ) : null}
       </View>

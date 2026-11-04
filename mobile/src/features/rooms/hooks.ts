@@ -29,7 +29,7 @@ export function useBuildings() {
   });
 }
 
-export function useClassrooms(q?: string, building?: string) {
+export function useClassrooms(q?: string, building?: string, enabled = true) {
   const token = useToken();
   const trimmedQ = q?.trim() || undefined;
   const trimmedBuilding = building?.trim() || undefined;
@@ -40,7 +40,7 @@ export function useClassrooms(q?: string, building?: string) {
       if (!token) throw new Error('UNAUTHORIZED');
       return api.classrooms(token, trimmedQ, trimmedBuilding);
     },
-    enabled: !!token,
+    enabled: !!token && enabled,
     staleTime: 60_000,
   });
 }
