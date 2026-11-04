@@ -9,6 +9,7 @@ import { useSession } from '../auth/session';
 import { SUBGROUPS } from '../profile/group';
 import { useSetGroup } from '../profile/hooks';
 import { useGroups, useMe } from '../schedule/hooks';
+import { NotificationsStep } from './NotificationsStep';
 
 type Faculty = { name: string; groups: number };
 
@@ -70,13 +71,18 @@ export function OnboardingScreen(props: Props) {
     [facultyGroups, activeCourse],
   );
 
+  // Онбординг: після групи останній крок «Не пропустіть заміну» (макет 07). Група вже є, а онбординг не завершено
+  // (застосунок закрили на цьому кроці): одразу показуємо його, а не вибір групи
+  const [notificationsStep, setNotificationsStep] = useState(false);
+  const showNotifications = !changing && (notificationsStep || !!me.data?.groupId);
+
   const setGroup = useSetGroup();
   const save = {
     ...setGroup,
     mutate: () =>
       setGroup.mutate(
         { groupId: groupId!, subgroup },
-        { onSuccess: () => (props.mode === 'change' ? props.onDone() : finishOnboarding()) },
+        { onSuccess: () => (props.mode === 'change' ? props.onDone() : setNotificationsStep(true)) },
       ),
   };
   const unchanged = changing && groupId === me.data?.groupId && subgroup === me.data?.subgroup;
@@ -92,6 +98,8 @@ export function OnboardingScreen(props: Props) {
     save.reset();
   };
   const onCancel = props.mode === 'change' ? props.onCancel : null;
+
+  if (showNotifications) return <NotificationsStep onDone={finishOnboarding} />;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 24 }]}>

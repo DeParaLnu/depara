@@ -44,8 +44,19 @@ export async function loginAsStudent(): Promise<void> {
     await byLabel(`${SEED.group}, ${SEED.course} курс`).click();
     // Підгрупа за замовчуванням 0 = «усі підгрупи»: сценарії бачать усі пари групи
     await byTestId('onboarding-continue').click();
-    await tabs.waitForDisplayed({ timeout: 15000 });
   }
+
+  // Останній крок онбордингу «Не пропустіть заміну» (F8): сценарії не вмикають сповіщення, тиснуть «Пізніше».
+  // Крок показується й тоді, коли група вже є, а онбординг минулого запуску не завершили
+  const notifications = byTestId('onboarding-notifications');
+  await browser.waitUntil(async () => (await notifications.isDisplayed()) || (await tabs.isDisplayed()), {
+    timeout: 15000,
+    timeoutMsg: 'Після вибору групи не відкрився ні крок сповіщень, ні вкладки',
+  });
+  if (await notifications.isDisplayed()) {
+    await byTestId('onboarding-notifications-later').click();
+  }
+  await tabs.waitForDisplayed({ timeout: 15000 });
 }
 
 // Вкладки нижньої навігації: testID tab-today, tab-week, tab-rooms, tab-profile
