@@ -67,3 +67,21 @@ export function weekDay(offset: number): string {
   d.setUTCDate(d.getUTCDate() + offset);
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * Вхід тестовим старостою (кнопка «Увійти як староста (E2E)»). Групу й роль йому заздалегідь
+ * призначає ensureHeadman() з e2e/api.ts, тож онбордингу немає і відкриваються вкладки.
+ */
+export async function loginAsHeadman(): Promise<void> {
+  await byTestId('login-headman-button').click();
+  await byTestId('tab-today').waitForDisplayed({ timeout: 20000 });
+}
+
+// Елемент у прокручуваному списку: прокручує, доки не знайде resource-id, що закінчується на suffix
+export const scrollToTestIdSuffix = (suffix: string) =>
+  $(
+    `android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceIdMatches(".*${suffix}$"))`,
+  );
+
+// Кнопка підтвердження в системному Alert Android (остання кнопка в Alert.alert, наприклад «Скасувати заміну»)
+export const alertConfirm = () => $('android=new UiSelector().resourceId("android:id/button1")');
