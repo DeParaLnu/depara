@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { api, type Group } from '../../api';
+import type { Group } from '../../api';
 import { errorCode } from '../../lib/errors';
 import { colors, errorText } from '../../theme';
 import { useSession } from '../auth/session';
-import { useGroups } from '../schedule/hooks';
+import { SUBGROUPS } from '../profile/group';
+import { useSetGroup } from '../profile/hooks';
+import { useGroups, useMe } from '../schedule/hooks';
 
 type Faculty = { name: string; groups: number };
 
@@ -28,25 +29,31 @@ const groupsLabel = (n: number) => {
   return `${n} груп`;
 };
 
-const SUBGROUPS = [
-  { value: 0, label: 'Усі' },
-  { value: 1, label: '1' },
-  { value: 2, label: '2' },
-] as const;
+type Props =
+  | { mode?: 'onboarding' }
+  /** F9: зміна групи з профілю. Починає з поточної групи; «Назад» зі списку факультетів закриває екран */
+  | { mode: 'change'; onDone: () => void; onCancel: () => void };
 
 // F2: факультет → група і підгрупа. Крок «спеціальність», код старости і дозвіл на сповіщення
-// додамо, коли для них зʼявиться підтримка в API.
-export function OnboardingScreen() {
+// додамо, коли для них зʼявиться підтримка в API. Той самий екран змінює групу з профілю (F9, mode="change").
+export function OnboardingScreen(props: Props) {
+  const changing = props.mode === 'change';
   const insets = useSafeAreaInsets();
-  const token = useSession((s) => s.session?.accessToken ?? '');
   const finishOnboarding = useSession((s) => s.finishOnboarding);
-  const queryClient = useQueryClient();
   const groups = useGroups();
+  const me = useMe();
+  // Поточна група: при зміні з профілю з неї починається вибір
+  const current = changing ? groups.data?.find((g) => g.id === me.data?.groupId) : undefined;
 
-  const [faculty, setFaculty] = useState<string | null>(null);
-  const [groupId, setGroupId] = useState<string | null>(null);
-  const [subgroup, setSubgroup] = useState<number>(0);
-  const [course, setCourse] = useState<number | null>(null);
+  // undefined = ще не обирали, тоді діє поточне значення профілю (при онбордингу його немає)
+  const [chosenFaculty, setFaculty] = useState<string | null | undefined>(undefined);
+  const [chosenGroupId, setGroupId] = useState<string | null | undefined>(undefined);
+  const [chosenSubgroup, setSubgroup] = useState<number | undefined>(undefined);
+  const [chosenCourse, setCourse] = useState<number | null | undefined>(undefined);
+  const faculty = chosenFaculty === undefined ? (current?.faculty ?? null) : chosenFaculty;
+  const groupId = chosenGroupId === undefined ? (current?.id ?? null) : chosenGroupId;
+  const subgroup = chosenSubgroup ?? (changing ? (me.data?.subgroup ?? 0) : 0);
+  const course = chosenCourse === undefined ? (current?.faculty === faculty ? (current?.course ?? null) : null) : chosenCourse;
 
   const faculties = useMemo(() => toFaculties(groups.data ?? []), [groups.data]);
   const facultyGroups = useMemo(
@@ -63,14 +70,17 @@ export function OnboardingScreen() {
     [facultyGroups, activeCourse],
   );
 
-  const save = useMutation({
-    mutationKey: ['setGroup'],
-    mutationFn: () => api.setGroup(token, groupId!, subgroup),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['me'] });
-      finishOnboarding();
-    },
-  });
+  const setGroup = useSetGroup();
+  const save = {
+    ...setGroup,
+    mutate: () =>
+      setGroup.mutate(
+        { groupId: groupId!, subgroup },
+        { onSuccess: () => (props.mode === 'change' ? props.onDone() : finishOnboarding()) },
+      ),
+  };
+  const unchanged = changing && groupId === me.data?.groupId && subgroup === me.data?.subgroup;
+  const saveDisabled = !groupId || save.isPending || unchanged;
 
   const error = groups.isError ? groups.error : save.isError ? save.error : null;
   const errorMessageCode = error ? errorCode(error) : null;
@@ -81,6 +91,7 @@ export function OnboardingScreen() {
     setCourse(null);
     save.reset();
   };
+  const onCancel = props.mode === 'change' ? props.onCancel : null;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
@@ -95,15 +106,26 @@ export function OnboardingScreen() {
           >
             <Ionicons name="chevron-back" size={28} color={colors.primary} />
           </Pressable>
+        ) : onCancel ? (
+          <Pressable
+            testID="change-group-cancel"
+            accessibilityRole="button"
+            accessibilityLabel="Назад до профілю"
+            onPress={onCancel}
+            hitSlop={12}
+            style={styles.back}
+          >
+            <Ionicons name="chevron-back" size={28} color={colors.primary} />
+          </Pressable>
         ) : (
           <View style={styles.back} />
         )}
         <Text style={styles.title} accessibilityRole="header">
-          {faculty ? 'Оберіть групу' : 'Ваш факультет'}
+          {faculty ? (changing ? 'Змінити групу' : 'Оберіть групу') : changing ? 'Факультет' : 'Ваш факультет'}
         </Text>
       </View>
       <Text style={styles.subtitle}>
-        {faculty ? faculty : 'Далі оберете свою групу, щоб бачити розклад'}
+        {faculty ? faculty : changing ? 'Оберіть факультет нової групи' : 'Далі оберете свою групу, щоб бачити розклад'}
       </Text>
 
       {errorMessageCode && (
@@ -136,7 +158,12 @@ export function OnboardingScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={item.name}
-              onPress={() => setFaculty(item.name)}
+              onPress={() => {
+                // Новий факультет: група й курс обираються заново (поточна група лишилась би непоміченою)
+                setFaculty(item.name);
+                setGroupId(null);
+                setCourse(null);
+              }}
               style={({ pressed }) => [styles.option, pressed && styles.optionSelected]}
             >
               <View style={styles.radio} />
@@ -212,7 +239,7 @@ export function OnboardingScreen() {
                     accessibilityRole="radio"
                     accessibilityState={{ selected, checked: selected }}
                     aria-checked={selected}
-                    accessibilityLabel={s.value === 0 ? 'Усі підгрупи' : `Підгрупа ${s.label}`}
+                    accessibilityLabel={s.a11y}
                     onPress={() => setSubgroup(s.value)}
                     style={[styles.segment, selected && styles.segmentSelected]}
                   >
@@ -222,22 +249,22 @@ export function OnboardingScreen() {
               })}
             </View>
             <Pressable
-              testID="onboarding-continue"
+              testID={changing ? 'change-group-save' : 'onboarding-continue'}
               accessibilityRole="button"
-              accessibilityLabel="Продовжити"
-              accessibilityState={{ disabled: !groupId || save.isPending }}
-              disabled={!groupId || save.isPending}
+              accessibilityLabel={changing ? 'Зберегти' : 'Продовжити'}
+              accessibilityState={{ disabled: saveDisabled }}
+              disabled={saveDisabled}
               onPress={() => save.mutate()}
               style={({ pressed }) => [
                 styles.primary,
-                (!groupId || save.isPending) && styles.primaryDisabled,
+                saveDisabled && styles.primaryDisabled,
                 pressed && styles.primaryPressed,
               ]}
             >
               {save.isPending ? (
                 <ActivityIndicator color={colors.surface} />
               ) : (
-                <Text style={styles.primaryText}>Продовжити</Text>
+                <Text style={styles.primaryText}>{changing ? 'Зберегти' : 'Продовжити'}</Text>
               )}
             </Pressable>
           </View>

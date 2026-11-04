@@ -1,9 +1,14 @@
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../api';
 import { config } from '../../config';
 import { useSession } from '../../features/auth/session';
+import { canChangeOwnGroup, subgroupLabel } from '../../features/profile/group';
+import { useSetGroup } from '../../features/profile/hooks';
+import { SubgroupSheet } from '../../features/profile/SubgroupSheet';
 import { useGroups, useMe } from '../../features/schedule/hooks';
 import { reportError } from '../../lib/errors';
 import { colors, errorText } from '../../theme';
@@ -16,7 +21,7 @@ const initials = (name: string) =>
     .map((p) => p[0].toUpperCase())
     .join('');
 
-// F9 (початок): дані користувача, група, вихід і видалення акаунта. Налаштування сповіщень і теми зʼявляться пізніше
+// F9: дані користувача, зміна групи й підгрупи, вихід і видалення акаунта. Налаштування сповіщень і теми зʼявляться пізніше
 export default function ProfileRoute() {
   const insets = useSafeAreaInsets();
   const signOut = useSession((s) => s.signOut);
@@ -27,7 +32,27 @@ export default function ProfileRoute() {
   const groups = useGroups();
   const group = groups.data?.find((g) => g.id === me.data?.groupId);
   const displayName = me.data?.fullName ?? me.data?.email ?? '';
-  const subgroup = me.data ? (me.data.subgroup === 0 ? 'Усі' : String(me.data.subgroup)) : '';
+  const subgroup = me.data ? subgroupLabel(me.data.subgroup) : '';
+  // Староста не змінює групу сам (бекенд: HEADMAN_GROUP_LOCKED), лише підгрупу
+  const groupEditable = canChangeOwnGroup(me.data);
+
+  const [subgroupOpen, setSubgroupOpen] = useState(false);
+  const [subgroupError, setSubgroupError] = useState<string | null>(null);
+  const setGroup = useSetGroup();
+  const changeSubgroup = async (value: number) => {
+    if (!me.data?.groupId) return;
+    if (value === me.data.subgroup) {
+      setSubgroupOpen(false);
+      return;
+    }
+    setSubgroupError(null);
+    try {
+      await setGroup.mutateAsync({ groupId: me.data.groupId, subgroup: value });
+      setSubgroupOpen(false);
+    } catch (e) {
+      setSubgroupError(errorText(reportError('profile', e)));
+    }
+  };
 
   // Видалення акаунта (вимога Google Play і App Store): підтвердження, виклик API, потім звичайний вихід
   const deleteAccount = async () => {
@@ -61,15 +86,54 @@ export default function ProfileRoute() {
       </View>
 
       <View>
-        <View style={styles.row}>
+        <Pressable
+          testID="profile-group"
+          accessibilityRole="button"
+          accessibilityLabel={`Група ${group?.code ?? 'не обрана'}`}
+          accessibilityHint={groupEditable ? 'Відкриває вибір групи' : undefined}
+          accessibilityState={{ disabled: !groupEditable }}
+          disabled={!groupEditable}
+          onPress={() => router.push('/change-group')}
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+        >
           <Text style={styles.rowLabel}>Група</Text>
-          <Text style={styles.rowValue}>{group?.code ?? '—'}</Text>
-        </View>
-        <View style={styles.row}>
+          <View style={styles.rowRight}>
+            <Text style={styles.rowValue}>{group?.code ?? '—'}</Text>
+            {groupEditable ? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} /> : null}
+          </View>
+        </Pressable>
+        {!groupEditable ? (
+          <Text style={styles.rowHint}>Групу старости змінює адміністратор.</Text>
+        ) : null}
+        <Pressable
+          testID="profile-subgroup"
+          accessibilityRole="button"
+          accessibilityLabel={`Підгрупа ${subgroup || 'не обрана'}`}
+          accessibilityHint="Відкриває вибір підгрупи"
+          accessibilityState={{ disabled: !me.data?.groupId }}
+          disabled={!me.data?.groupId}
+          onPress={() => {
+            setSubgroupError(null);
+            setSubgroupOpen(true);
+          }}
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+        >
           <Text style={styles.rowLabel}>Підгрупа</Text>
-          <Text style={styles.rowValue}>{subgroup || '—'}</Text>
-        </View>
+          <View style={styles.rowRight}>
+            <Text style={styles.rowValue}>{subgroup || '—'}</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </View>
+        </Pressable>
       </View>
+
+      <SubgroupSheet
+        visible={subgroupOpen}
+        value={me.data?.subgroup ?? 0}
+        saving={setGroup.isPending}
+        error={subgroupError}
+        onSelect={(value) => void changeSubgroup(value)}
+        onClose={() => setSubgroupOpen(false)}
+      />
 
       <View style={styles.footer}>
         {deleteError ? <Text style={styles.error}>{deleteError}</Text> : null}
@@ -135,6 +199,9 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: 17, color: colors.text },
   rowValue: { fontSize: 17, fontWeight: '700', color: colors.text },
+  rowPressed: { backgroundColor: colors.chip },
+  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rowHint: { fontSize: 13, lineHeight: 18, color: colors.textMuted, paddingTop: 6, paddingBottom: 4 },
   footer: { marginTop: 'auto', alignItems: 'center', gap: 6, paddingBottom: 12 },
   error: { color: colors.error, fontSize: 15, textAlign: 'center' },
   link: { color: colors.textMuted, fontSize: 15, textDecorationLine: 'underline', paddingVertical: 8 },
