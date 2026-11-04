@@ -1,4 +1,4 @@
-import type { Prisma, Role } from '@prisma/client';
+import type { Role } from '@prisma/client';
 import { isSubgroup, isUuid } from './validation';
 
 // Хвилини нагадування перед парою: вимкнено, 10 або 15 (F9)
@@ -14,7 +14,7 @@ export interface ProfilePatch {
 export type ProfilePatchResult = { ok: true; patch: ProfilePatch } | { ok: false; error: string };
 
 // Розбір тіла PATCH /me. Усі поля необовʼязкові, змінюється лише те, що передано.
-// Нова група без підгрупи скидає підгрупу на 0: підгрупа старої групи для нової не має сенсу.
+// Що робити з підгрупою при зміні групи, вирішує resolvePatch: для цього потрібна поточна група з бази.
 export function parseProfilePatch(body: unknown): ProfilePatchResult {
   const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   const patch: ProfilePatch = {};
@@ -28,8 +28,6 @@ export function parseProfilePatch(body: unknown): ProfilePatchResult {
   if (b.subgroup !== undefined) {
     if (!isSubgroup(b.subgroup)) return { ok: false, error: 'INVALID_SUBGROUP' };
     patch.subgroup = b.subgroup;
-  } else if (patch.groupId) {
-    patch.subgroup = 0;
   }
   if (b.reminderMinutes !== undefined) {
     if (!REMINDER_MINUTES.includes(b.reminderMinutes as never)) return { ok: false, error: 'INVALID_REMINDER_MINUTES' };
@@ -60,9 +58,9 @@ export function rejectPatch(
   return null;
 }
 
-// Ті самі умови, що в rejectPatch, як фільтр UPDATE: перевірка й оновлення стають атомарними
-export function patchGuards(patch: ProfilePatch): Prisma.UserWhereInput[] {
-  if (patch.groupId) return [{ OR: [{ role: { not: 'HEADMAN' } }, { groupId: null }, { groupId: patch.groupId }] }];
-  if (patch.subgroup !== undefined) return [{ groupId: { not: null } }];
-  return [];
+// Що записати в базу. Нова група без підгрупи скидає підгрупу на 0: підгрупа старої групи для нової не має сенсу.
+// Повторно надіслана поточна група підгрупу не чіпає.
+export function resolvePatch(user: { groupId: string | null }, patch: ProfilePatch): ProfilePatch {
+  if (patch.groupId && patch.subgroup === undefined && patch.groupId !== user.groupId) return { ...patch, subgroup: 0 };
+  return patch;
 }

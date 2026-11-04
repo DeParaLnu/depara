@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { prisma } from '../db';
 import { canDeleteAccount } from '../lib/accountDeletion';
-import { parseProfilePatch, patchGuards, rejectPatch } from '../lib/profilePatch';
+import { parseProfilePatch, rejectPatch, resolvePatch } from '../lib/profilePatch';
 import { requireAuth } from '../plugins/auth';
 
 type Profile = {
@@ -59,18 +59,20 @@ export async function profileRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
     }
     // Access-токен живе 15 хв і після видалення акаунта ще дійсний: відсутній користувач це 401, а не 500
-    const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { role: true, groupId: true } });
-    if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    const rejected = rejectPatch(user, patch);
-    if (rejected) return reply.code(rejected.status).send({ error: rejected.error });
-
-    // Ті самі умови ще раз у WHERE: між перевіркою вище й оновленням адмін міг змінити роль чи групу користувача
-    const updated = await prisma.user.updateManyAndReturn({ where: { id: req.userId, AND: patchGuards(patch) }, data: patch });
-    if (updated.length > 0) return toMe(updated[0]);
-    const now = await prisma.user.findUnique({ where: { id: req.userId }, select: { role: true, groupId: true } });
-    const reason = now ? rejectPatch(now, patch) : null;
-    if (reason) return reply.code(reason.status).send({ error: reason.error });
-    return reply.code(401).send({ error: 'UNAUTHORIZED' });
+    // Рішення (чи можна, що робити з підгрупою) залежать від ролі й групи. Оновлення йде лише якщо в базі досі
+    // ті самі роль і група: якщо адмін змінив їх між читанням і записом, рішення приймається заново
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { role: true, groupId: true } });
+      if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      const rejected = rejectPatch(user, patch);
+      if (rejected) return reply.code(rejected.status).send({ error: rejected.error });
+      const updated = await prisma.user.updateManyAndReturn({
+        where: { id: req.userId, role: user.role, groupId: user.groupId },
+        data: resolvePatch(user, patch),
+      });
+      if (updated.length > 0) return toMe(updated[0]);
+    }
+    return reply.code(409).send({ error: 'PROFILE_CHANGED' }); // профіль змінювали тричі поспіль: клієнт повторить
   });
 
   // Видалення власного акаунта (вимога магазинів застосунків). Запис користувача видаляється повністю

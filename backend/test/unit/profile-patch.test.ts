@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseProfilePatch, patchGuards, rejectPatch } from '../../src/lib/profilePatch';
+import { parseProfilePatch, rejectPatch, resolvePatch } from '../../src/lib/profilePatch';
 
 const GROUP = '3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f';
 const error = (body: unknown) => {
@@ -13,8 +13,8 @@ const patch = (body: unknown) => {
 };
 
 describe('parseProfilePatch', () => {
-  it('нова група без підгрупи скидає підгрупу на 0, з підгрупою бере її', () => {
-    expect(patch({ groupId: GROUP })).toEqual({ groupId: GROUP, subgroup: 0 });
+  it('група з підгрупою і без неї (що робити з підгрупою, вирішує resolvePatch)', () => {
+    expect(patch({ groupId: GROUP })).toEqual({ groupId: GROUP });
     expect(patch({ groupId: GROUP, subgroup: 2 })).toEqual({ groupId: GROUP, subgroup: 2 });
   });
 
@@ -69,11 +69,11 @@ describe('rejectPatch і patchGuards', () => {
     expect(rejectPatch({ role: 'STUDENT', groupId: null }, { reminderMinutes: 15 })).toBeNull();
   });
 
-  it('умови для WHERE збігаються з перевірками', () => {
-    expect(patchGuards({ groupId: OTHER, subgroup: 0 })).toEqual([
-      { OR: [{ role: { not: 'HEADMAN' } }, { groupId: null }, { groupId: OTHER }] },
-    ]);
-    expect(patchGuards({ subgroup: 1 })).toEqual([{ groupId: { not: null } }]);
-    expect(patchGuards({ notifySubstitutions: false })).toEqual([]);
+  it('нова група без підгрупи скидає підгрупу на 0, повторно надіслана поточна не скидає', () => {
+    expect(resolvePatch({ groupId: GROUP }, { groupId: OTHER })).toEqual({ groupId: OTHER, subgroup: 0 });
+    expect(resolvePatch({ groupId: null }, { groupId: OTHER })).toEqual({ groupId: OTHER, subgroup: 0 });
+    expect(resolvePatch({ groupId: GROUP }, { groupId: GROUP })).toEqual({ groupId: GROUP });
+    expect(resolvePatch({ groupId: GROUP }, { groupId: OTHER, subgroup: 2 })).toEqual({ groupId: OTHER, subgroup: 2 });
+    expect(resolvePatch({ groupId: GROUP }, { reminderMinutes: 10 })).toEqual({ reminderMinutes: 10 });
   });
 });

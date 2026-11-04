@@ -39,6 +39,13 @@ describe('F9: налаштування профілю (PATCH /me)', () => {
     expect(await me(token)).toMatchObject({ groupId, subgroup: 2 });
   });
 
+  it('повторно надіслана поточна група без підгрупи підгрупу не скидає', async () => {
+    const token = await setupStudent(`f9.samegroup.${run}@lnu.edu.ua`, 2);
+    const { groupId } = await me(token);
+    expect((await send('PATCH', '/me', token, { groupId })).status).toBe(200);
+    expect(await me(token)).toMatchObject({ groupId, subgroup: 2 });
+  });
+
   it('нова група без підгрупи скидає підгрупу на 0', async () => {
     const token = await setupStudent(`f9.regroup.${run}@lnu.edu.ua`, 2);
     const other = await emptyGroup(await adminToken(), `F9-${run}`);
