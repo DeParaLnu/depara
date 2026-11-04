@@ -49,6 +49,14 @@ export async function profileRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
     }
     // Access-токен живе 15 хв і після видалення акаунта ще дійсний: відсутній користувач це 401, а не 500
+    const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { role: true, groupId: true } });
+    if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
+    // Права старости прив'язані до його групи (F6: заміни лише своєї групи). Якби староста міг сам перейти
+    // в іншу групу, він отримав би право змінювати її розклад. Тому групу старості змінює адмін
+    // (PATCH /admin/users/:id/group), а сам він може змінити лише підгрупу.
+    if (user.role === 'HEADMAN' && user.groupId && user.groupId !== groupId) {
+      return reply.code(403).send({ error: 'HEADMAN_GROUP_LOCKED' });
+    }
     const updated = await prisma.user.updateMany({
       where: { id: req.userId },
       data: { groupId, subgroup: (subgroup as number | undefined) ?? 0 },
