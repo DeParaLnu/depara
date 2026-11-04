@@ -167,3 +167,67 @@ describe('авто-refresh при TOKEN_EXPIRED', () => {
     expect(callsTo('/auth/refresh')).toHaveLength(1);
   });
 });
+
+describe('тиждень з ETag (F3)', () => {
+  const week = { weekStart: '2026-11-02', published: true, lessons: [{ id: 'l1' }] };
+  const withEtag = (status: number, body: unknown, etag: string) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', etag } });
+  const headersOf = (i: number) => (fetchMock.mock.calls[i][1] as RequestInit).headers as Record<string, string>;
+
+  it('без збереженого тижня не шле If-None-Match і запамʼятовує etag відповіді', async () => {
+    fetchMock.mockResolvedValueOnce(withEtag(200, week, '"v1"'));
+
+    const res = await api.week('tok', '2026-11-02');
+
+    expect(res).toEqual({ ...week, etag: '"v1"' });
+    expect(headersOf(0)['If-None-Match']).toBeUndefined();
+    expect(routeOf(fetchMock.mock.calls[0])).toBe('/schedule/week?date=2026-11-02');
+  });
+
+  it('шле If-None-Match і на 304 віддає збережений тиждень', async () => {
+    const cached = { ...week, etag: '"v1"' };
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 304, headers: { etag: '"v1"' } }));
+
+    await expect(api.week('tok', '2026-11-02', cached as never)).resolves.toBe(cached);
+    expect(headersOf(0)['If-None-Match']).toBe('"v1"');
+    expect(headersOf(0).Authorization).toBe('Bearer tok');
+  });
+
+  it('змінений розклад (200) замінює збережений тиждень і etag', async () => {
+    const changed = { ...week, lessons: [] };
+    fetchMock.mockResolvedValueOnce(withEtag(200, changed, '"v2"'));
+
+    await expect(api.week('tok', '2026-11-02', { ...week, etag: '"v1"' } as never)).resolves.toEqual({
+      ...changed,
+      etag: '"v2"',
+    });
+  });
+
+  it('збережений тиждень без etag (старий кеш) запитується без If-None-Match', async () => {
+    fetchMock.mockResolvedValueOnce(withEtag(200, week, '"v1"'));
+    await api.week('tok', '2026-11-02', week as never);
+    expect(headersOf(0)['If-None-Match']).toBeUndefined();
+  });
+
+  it('304 без збереженого тижня дає помилку, а не порожній розклад', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }));
+    await expect(api.week('tok', '2026-11-02')).rejects.toMatchObject({ code: 'HTTP_304', status: 304 });
+  });
+
+  it('після авто-refresh повторний запит теж несе If-None-Match і новий токен', async () => {
+    const cached = { ...week, etag: '"v1"' };
+    fetchMock
+      .mockResolvedValueOnce(expired())
+      .mockResolvedValueOnce(json(200, { accessToken: 'new-access', refreshToken: 'new-refresh' }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }));
+
+    await expect(api.week('old-access', '2026-11-02', cached as never)).resolves.toBe(cached);
+    expect(headersOf(2)['If-None-Match']).toBe('"v1"');
+    expect(headersOf(2).Authorization).toBe('Bearer new-access');
+  });
+
+  it('помилка мережі не підміняється збереженим тижнем: екран сам покаже «Офлайн»', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
+    await expect(api.week('tok', '2026-11-02', { ...week, etag: '"v1"' } as never)).rejects.toBeInstanceOf(ApiError);
+  });
+});
