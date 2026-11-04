@@ -72,6 +72,7 @@ model User {
   groupId         String?  @map("group_id") @db.Uuid
   subgroup        Int      @default(0) // 0 = бачити всі підгрупи
   reminderMinutes Int      @default(0) @map("reminder_minutes") // 0, 10, 15
+  notifySubstitutions Boolean @default(true) @map("notify_substitutions") // пуш про заміни й скасування (F8)
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
