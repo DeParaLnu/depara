@@ -140,3 +140,38 @@ describe('F9: видалення акаунта', () => {
     expect((await send('DELETE', '/me', b)).status).toBe(204);
   });
 });
+
+describe('F9: зміна групи', () => {
+  const groupsOf = async (token: string) =>
+    (await (await fetch(`${API}/groups`, { headers: authHeaders(token) })).json()) as { id: string; code: string }[];
+
+  it('студент змінює групу й підгрупу сам', async () => {
+    const student = await setupStudent(`f9.student.${run}@lnu.edu.ua`);
+    const other = { id: await emptyGroup(await adminToken(), `F9-S-${run}`) };
+    const res = await send('PATCH', '/me', student, { groupId: other.id, subgroup: 2 });
+    expect(res.status).toBe(200);
+    const me = (await (await fetch(`${API}/me`, { headers: authHeaders(student) })).json()) as { groupId: string; subgroup: number };
+    expect(me).toMatchObject({ groupId: other.id, subgroup: 2 });
+  });
+
+  it('староста не може сам перейти в іншу групу (403), підгрупу змінює, групу йому змінює адмін', async () => {
+    const admin = await adminToken();
+    const headman = await setupStudent(`f9.headman.${run}@lnu.edu.ua`);
+    await send('PATCH', `/admin/users/${await userId(headman)}/role`, admin, { role: 'HEADMAN' });
+    const groups = await groupsOf(headman);
+    const own = groups.find((g) => g.code === 'ТЕСТ-31')!;
+    const other = { id: await emptyGroup(admin, `F9-H-${run}`) };
+
+    const moved = await send('PATCH', '/me', headman, { groupId: other.id });
+    expect(moved.status).toBe(403);
+    expect(await errorOf(moved)).toBe('HEADMAN_GROUP_LOCKED');
+
+    expect((await send('PATCH', '/me', headman, { groupId: own.id, subgroup: 1 })).status).toBe(200);
+    // підгрупу й налаштування староста змінює й без groupId
+    expect((await send('PATCH', '/me', headman, { subgroup: 2, reminderMinutes: 10 })).status).toBe(200);
+
+    expect((await send('PATCH', `/admin/users/${await userId(headman)}/group`, admin, { groupId: other.id })).status).toBe(200);
+    const me = (await (await fetch(`${API}/me`, { headers: authHeaders(headman) })).json()) as { groupId: string };
+    expect(me.groupId).toBe(other.id);
+  });
+});

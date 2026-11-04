@@ -94,6 +94,7 @@ export default function RootLayout() {
           </Stack.Protected>
           <Stack.Protected guard={signedIn && !onboarding}>
             <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="substitution" />
           </Stack.Protected>
         </Stack>
       </AppErrorBoundary>

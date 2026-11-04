@@ -1,3 +1,4 @@
+import type { Prisma, Role } from '@prisma/client';
 import { isSubgroup, isUuid } from './validation';
 
 // Хвилини нагадування перед парою: вимкнено, 10 або 15 (F9)
@@ -41,4 +42,27 @@ export function parseProfilePatch(body: unknown): ProfilePatchResult {
 
   if (Object.keys(patch).length === 0) return { ok: false, error: 'NOTHING_TO_UPDATE' };
   return { ok: true, patch };
+}
+
+// Чи можна застосувати зміну до цього користувача (стан із бази), або яку помилку віддати
+export function rejectPatch(
+  user: { role: Role; groupId: string | null },
+  patch: ProfilePatch,
+): { status: number; error: string } | null {
+  // Права старости привʼязані до його групи (F6: заміни лише своєї групи). Якби староста міг сам перейти в іншу
+  // групу, він отримав би право змінювати її розклад. Групу старості змінює адмін (PATCH /admin/users/:id/group),
+  // сам він змінює лише підгрупу. Староста без групи обирає її сам (онбординг).
+  if (patch.groupId && user.role === 'HEADMAN' && user.groupId && user.groupId !== patch.groupId) {
+    return { status: 403, error: 'HEADMAN_GROUP_LOCKED' };
+  }
+  // Підгрупа без групи нічого не означає: спершу онбординг (вибір групи)
+  if (patch.subgroup !== undefined && !patch.groupId && !user.groupId) return { status: 400, error: 'GROUP_REQUIRED' };
+  return null;
+}
+
+// Ті самі умови, що в rejectPatch, як фільтр UPDATE: перевірка й оновлення стають атомарними
+export function patchGuards(patch: ProfilePatch): Prisma.UserWhereInput[] {
+  if (patch.groupId) return [{ OR: [{ role: { not: 'HEADMAN' } }, { groupId: null }, { groupId: patch.groupId }] }];
+  if (patch.subgroup !== undefined) return [{ groupId: { not: null } }];
+  return [];
 }
