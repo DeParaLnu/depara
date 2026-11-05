@@ -11,4 +11,6 @@ export const config = {
   // Посилання на політику конфіденційності (PRIVACY_URL при збірці); без нього підпис на екрані входу не показуємо
   privacyUrl: extra.privacyUrl,
   e2eIdToken: 'test:student@lnu.edu.ua',
+  // Друга кнопка входу в E2E-збірці: староста (роль і групу йому призначає сценарій через API, e2e/api.ts)
+  e2eHeadmanIdToken: 'test:headman@lnu.edu.ua',
 };

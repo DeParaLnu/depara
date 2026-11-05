@@ -16,7 +16,7 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const login = async () => {
+  const login = async (idToken: string = config.e2eIdToken) => {
     setError(null);
     if (!config.e2e && !config.mock) {
       // Справжній вхід через Microsoft Entra підключимо окремою задачею
@@ -26,7 +26,7 @@ export function LoginScreen() {
     setLoading(true);
     try {
       const deviceId = await getOrCreateDeviceId();
-      setSession(await api.loginWithMicrosoft(config.e2eIdToken, deviceId));
+      setSession(await api.loginWithMicrosoft(idToken, deviceId));
     } catch (e) {
       setError(errorText(reportError('auth', e)));
     } finally {
@@ -48,7 +48,7 @@ export function LoginScreen() {
           testID="login-button"
           accessibilityRole="button"
           accessibilityLabel="Увійти через корпоративну пошту ЛНУ"
-          onPress={login}
+          onPress={() => void login()}
           disabled={loading}
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
         >
@@ -63,6 +63,19 @@ export function LoginScreen() {
             </>
           )}
         </Pressable>
+        {config.e2e ? (
+          // Лише в E2E-збірці: вхід тестовим старостою для сценаріїв F6 (e2e/specs/f6-substitutions.e2e.ts)
+          <Pressable
+            testID="login-headman-button"
+            accessibilityRole="button"
+            accessibilityLabel="Увійти як староста (E2E)"
+            onPress={() => void login(config.e2eHeadmanIdToken)}
+            disabled={loading}
+            style={styles.e2eButton}
+          >
+            <Text style={styles.e2eButtonText}>Увійти як староста (E2E)</Text>
+          </Pressable>
+        ) : null}
 
         <View style={styles.info}>
           <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
@@ -134,4 +147,6 @@ const styles = StyleSheet.create({
   },
   infoText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.textMuted },
   privacy: { fontSize: 14, color: colors.textMuted, textAlign: 'center' },
+  e2eButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  e2eButtonText: { color: colors.textMuted, fontSize: 15, textDecorationLine: 'underline' },
 });
