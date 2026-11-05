@@ -23,7 +23,8 @@ export function parseProfilePatch(body: unknown): ProfilePatchResult {
     // null чи порожній рядок не очищають групу: без групи немає розкладу
     if (!b.groupId) return { ok: false, error: 'GROUP_REQUIRED' };
     if (!isUuid(b.groupId)) return { ok: false, error: 'INVALID_GROUP_ID' };
-    patch.groupId = b.groupId;
+    // База повертає UUID малими літерами: без цього своя група великими вважалась би іншою
+    patch.groupId = b.groupId.toLowerCase();
   }
   if (b.subgroup !== undefined) {
     if (!isSubgroup(b.subgroup)) return { ok: false, error: 'INVALID_SUBGROUP' };

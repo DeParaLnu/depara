@@ -43,6 +43,7 @@ describe('F9: налаштування профілю (PATCH /me)', () => {
     const token = await setupStudent(`f9.samegroup.${run}@lnu.edu.ua`, 2);
     const { groupId } = await me(token);
     expect((await send('PATCH', '/me', token, { groupId })).status).toBe(200);
+    expect((await send('PATCH', '/me', token, { groupId: groupId!.toUpperCase() })).status).toBe(200);
     expect(await me(token)).toMatchObject({ groupId, subgroup: 2 });
   });
 
