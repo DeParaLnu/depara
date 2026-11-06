@@ -1,6 +1,8 @@
 import { SubstitutionKind } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
+import { config } from '../config';
 import { prisma } from '../db';
+import { enqueueSubstitutionPush } from '../lib/push/queue';
 import { isIsoDate, isUuid } from '../lib/validation';
 import { requireRole } from '../plugins/roles';
 
@@ -79,6 +81,12 @@ export async function substitutionRoutes(app: FastifyInstance) {
     const sub = await prisma.substitution.create({
       data: { lessonId: lesson.id, kind, comment: (b.comment as string | null | undefined) ?? null, createdById: user.id, ...data },
     });
+    // F8: пуш групі. Збій черги (Redis) не скасовує заміну: вона вже в розкладі, пушу просто не буде
+    if (config.pushEnabled) {
+      await enqueueSubstitutionPush(sub.id).catch((err) =>
+        req.log.warn({ err, substitutionId: sub.id }, 'пуш про заміну не поставлено в чергу'),
+      );
+    }
 
     return reply.code(201).send({
       id: sub.id,

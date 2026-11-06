@@ -42,6 +42,15 @@ export const config = {
     .map((o) => o.trim().replace(/\/$/, ''))
     .filter(Boolean),
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
+  // Пуші про заміни (F8) через Expo Push. EXPO_PUSH_URL міняють лише E2E (підставний сервер). У тестовому режимі без
+  // EXPO_PUSH_URL пуші вимкнені, щоб тести не ходили в справжній Expo. PUSH_ENABLED=false вимикає їх завжди.
+  pushEnabled:
+    process.env.PUSH_ENABLED !== 'false' && !(process.env.NODE_ENV === 'test' && !process.env.EXPO_PUSH_URL),
+  expoPushUrl: process.env.EXPO_PUSH_URL || 'https://exp.host/--/api/v2/push/send',
+  // Потрібен, лише якщо в проєкті Expo увімкнено «Enhanced Security for Push Notifications»
+  expoAccessToken: (process.env.EXPO_ACCESS_TOKEN ?? '').trim(),
+  // Перша пауза перед повтором невдалої відправки, далі вдвічі довша
+  pushRetryDelayMs: positiveInt(process.env.PUSH_RETRY_DELAY_MS, 30_000),
   // Пошти, які отримують роль ADMIN при вході (перший адмін; далі ролі міняє PATCH /admin/users/:id/role).
   adminEmails: (process.env.ADMIN_EMAILS ?? '')
     .split(',')
