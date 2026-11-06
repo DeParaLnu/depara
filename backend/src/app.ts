@@ -11,6 +11,7 @@ import { authRoutes } from './routes/auth';
 import { classroomRoutes } from './routes/classrooms';
 import { legalRoutes } from './routes/legal';
 import { profileRoutes } from './routes/profile';
+import { pushTokenRoutes } from './routes/pushTokens';
 import { scheduleRoutes } from './routes/schedule';
 import { substitutionRoutes } from './routes/substitutions';
 import { teacherRoutes } from './routes/teachers';
@@ -173,6 +174,7 @@ export function buildApp(
 
   app.register(authRoutes, { authPerMinute: opts.rateLimit?.authPerMinute });
   app.register(profileRoutes);
+  app.register(pushTokenRoutes);
   app.register(legalRoutes);
   app.register(scheduleRoutes);
   app.register(classroomRoutes);

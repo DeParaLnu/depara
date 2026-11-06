@@ -86,7 +86,7 @@ model User {
 model NotificationToken {
   id         String   @id @default(uuid()) @db.Uuid
   userId     String   @map("user_id") @db.Uuid
-  fcmToken   String   @unique @map("fcm_token")
+  pushToken  String   @unique @map("push_token") // Expo push-токен пристрою (F8)
   lastSeenAt DateTime @default(now()) @map("last_seen_at")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
