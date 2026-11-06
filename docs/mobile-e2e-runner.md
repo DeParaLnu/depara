@@ -25,8 +25,8 @@
 | `macos-26` (хмара GitHub) | Єдиний варіант для iOS-симулятора без власного Mac; для публічного репо хвилини безкоштовні | Довга збірка, немає контейнерів Postgres і Redis (`services` працюють лише на Linux) | Збірка iOS уже тут (`mobile-ios.yml`) |
 
 Рішення для MVP: Android на окремому Linux-ПК, а поки його немає — `ubuntu-latest`.
-iOS: на PR зі змінами в `mobile/` і на push у `develop` застосунок збирається під симулятор (`mobile-ios.yml`, `macos-26`:
-Expo SDK 58 потребує Xcode 26.4+, на `macos-15` його немає). Власний Mac для цього не потрібен, підпис і акаунт Apple Developer теж.
+iOS: на PR зі змінами в `mobile/` і на push у `develop` застосунок збирається під симулятор і архітектуру iPhone (`mobile-ios.yml`, `macos-26`:
+Expo SDK 58 потребує Xcode 26.4+, на `macos-15` його немає). Власний Mac для цього не потрібен. Збірки без підпису: акаунта Apple Developer немає, тому на телефон застосунок ставиться лише через Expo Go.
 iOS-сценарії E2E ще не бігають: селектори в `mobile/e2e/helpers.ts` прив'язані до Android, а Postgres і Redis на macOS-раннері треба ставити окремо.
 
 ## Вимоги до Linux-машини
