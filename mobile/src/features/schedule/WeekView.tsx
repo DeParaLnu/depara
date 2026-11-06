@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
@@ -97,6 +97,9 @@ type Props = {
   subtitle: string;
   isHeadman: boolean;
   state: TodayState;
+  /** Пара, яку треба відкрити одразу (натискання на пуш) */
+  focusLesson?: Lesson | null;
+  onFocusShown?: () => void;
   refreshing: boolean;
   onRefresh: () => void;
 };
@@ -113,11 +116,19 @@ export function WeekView({
   subtitle,
   isHeadman,
   state,
+  focusLesson,
+  onFocusShown,
   refreshing,
   onRefresh,
 }: Props) {
   const insets = useSafeAreaInsets();
   const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
+
+  useEffect(() => {
+    if (!focusLesson) return;
+    setOpenLesson(focusLesson);
+    onFocusShown?.();
+  }, [focusLesson, onFocusShown]);
 
   const sections = useMemo<DaySection[]>(() => {
     const lessons = state.kind === 'ready' ? state.lessons : [];

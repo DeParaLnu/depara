@@ -33,3 +33,24 @@ describe('updateSettings', () => {
     });
   });
 });
+
+// F8: токен пристрою
+describe('push-токен', () => {
+  it('реєстрація шле POST /me/push-token', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await api.registerPushToken('tok', 'ExponentPushToken[abc]');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/me/push-token');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ token: 'ExponentPushToken[abc]' });
+  });
+
+  it('видалення шле DELETE з тим самим токеном у тілі', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await api.removePushToken('tok', 'ExponentPushToken[abc]');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/me/push-token');
+    expect(init.method).toBe('DELETE');
+    expect(JSON.parse(String(init.body))).toEqual({ token: 'ExponentPushToken[abc]' });
+  });
+});

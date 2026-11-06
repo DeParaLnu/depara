@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { addDays, mondayOf, toIsoDate } from '../../lib/date';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { addDays, fromIsoDate, mondayOf, toIsoDate } from '../../lib/date';
 import { errorCode, isNetworkError } from '../../lib/errors';
 import { useGroupLabel, useNow, useWeek } from '../../features/schedule/hooks';
 import type { TodayState } from '../../features/schedule/TodayView';
@@ -11,7 +12,19 @@ export default function WeekRoute() {
   const currentMonday = mondayOf(now);
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
 
+  // F8: натискання на пуш про заміну відкриває її тиждень і деталі пари (див. features/push/usePush.ts)
+  const { date, lessonId, openedAt } = useLocalSearchParams<{ date?: string; lessonId?: string; openedAt?: string }>();
+  const [focusId, setFocusId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!date || !lessonId) return;
+    setWeekStart(mondayOf(fromIsoDate(date)));
+    setFocusId(lessonId);
+    // openedAt змінюється з кожним натисканням, навіть коли пара та сама
+  }, [openedAt]);
+
   const week = useWeek(toIsoDate(weekStart));
+  // Чекаємо на свіжі дані: у збереженому тижні заміни, про яку пуш, ще немає
+  const focusLesson = (focusId && !week.isFetching && week.data?.lessons.find((l) => l.id === focusId)) || null;
   const { subtitle, isHeadman, refetchMe } = useGroupLabel();
 
   let state: TodayState;
@@ -41,6 +54,8 @@ export default function WeekRoute() {
       subtitle={subtitle}
       isHeadman={isHeadman}
       state={state}
+      focusLesson={focusLesson}
+      onFocusShown={() => setFocusId(null)}
       refreshing={week.isRefetching && !week.isPending}
       onRefresh={() => {
         void week.refetch();

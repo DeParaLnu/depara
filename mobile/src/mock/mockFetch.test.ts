@@ -64,4 +64,17 @@ describe('мок: заміни (F6)', () => {
     const res = await call('/substitutions', { method: 'POST', body: JSON.stringify({ lessonId: lesson.id, kind: 'ROOM_CHANGED' }) });
     expect(res).toMatchObject({ status: 400, body: { error: 'NEW_CLASSROOM_REQUIRED' } });
   });
+
+  it('налаштування змінюються без групи, токен пристрою приймається (F8, F9)', async () => {
+    const before = await call('/me');
+    const patch = await call('/me', { method: 'PATCH', body: JSON.stringify({ notifySubstitutions: false }) });
+    expect(patch.status).toBe(200);
+    expect(patch.body).toMatchObject({ notifySubstitutions: false, groupId: before.body.groupId });
+    expect((await call('/me')).body.notifySubstitutions).toBe(false);
+    await call('/me', { method: 'PATCH', body: JSON.stringify({ notifySubstitutions: true }) });
+
+    const token = JSON.stringify({ token: 'ExponentPushToken[abc]' });
+    expect((await call('/me/push-token', { method: 'POST', body: token })).status).toBe(204);
+    expect((await call('/me/push-token', { method: 'DELETE', body: token })).status).toBe(204);
+  });
 });
