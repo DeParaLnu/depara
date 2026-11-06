@@ -1,0 +1,94 @@
+name: mobile-ios
+
+# Збірка застосунку під iOS: ловить те, що не видно на Android і в typecheck (нативні модулі, Pods,
+# конфіг-плагіни, бандл Metro). Дві цілі: симулятор і справжня архітектура iPhone (iphoneos).
+# Обидві без підпису: акаунта Apple Developer немає, тож файл для встановлення на телефон тут не виходить.
+# Окремий workflow з фільтром шляхів: macOS-збірка довга, бекендовим PR вона нічого не перевіряє.
+# Обов'язковою перевіркою в ruleset її не робимо: PR без змін у mobile/ чекав би її вічно.
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-ios.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-ios.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-ios-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-build:
+    name: ios-build (${{ matrix.target }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: simulator
+            sdk: iphonesimulator
+            destination: generic/platform=iOS Simulator
+          - target: device
+            sdk: iphoneos
+            destination: generic/platform=iOS
+    # Expo SDK 58 потребує Xcode 26.4+: на macos-15 його немає (максимум 26.3), тому macos-26
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      # Беремо типовий Xcode образу: конкретну версію з нього можуть прибрати, а нижче 26.4 він не опуститься.
+      # Версія в лозі потрібна, щоб пояснити падіння після оновлення образу
+      - name: Версія Xcode
+        run: xcodebuild -version
+
+      - run: npm ci
+
+      # ios/ не зберігається в git: prebuild генерує його з app.json (Continuous Native Generation).
+      # E2E=1 і localhost: та сама збірка піде в iOS E2E, симулятор бачить бекенд на хості напряму.
+      # Release, а не Debug: у Debug немає JS, тож бандл Metro не перевірявся б.
+      - name: Згенерувати ios/ і поставити Pods
+        env:
+          E2E: '1'
+          API_URL: http://localhost:3000
+        run: |
+          npx expo prebuild --platform ios --no-install
+          cd ios && pod install
+
+      - name: Зібрати Release
+        env:
+          E2E: '1'
+          API_URL: http://localhost:3000
+          NODE_ENV: production
+        # Ім'я схеми береться з назви застосунку, тому шукаємо воркспейс, а не пишемо його тут
+        run: |
+          workspace=$(ls -d ios/*.xcworkspace)
+          scheme=$(basename "$workspace" .xcworkspace)
+          set -o pipefail
+          xcodebuild -workspace "$workspace" -scheme "$scheme" \
+            -configuration Release -sdk "${{ matrix.sdk }}" \
+            -destination "${{ matrix.destination }}" \
+            -derivedDataPath ios/build CODE_SIGNING_ALLOWED=NO build \
+            | tee xcodebuild.log | grep -E 'error:|BUILD (SUCCEEDED|FAILED)'
+
+      - name: Зберегти лог збірки
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-ios-xcodebuild-log-${{ matrix.target }}
+          path: mobile/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
