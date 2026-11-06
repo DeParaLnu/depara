@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../theme';
+import { SubstitutionPushSetting } from '../push/SubstitutionPushSetting';
 import { hasPermission } from './notifications';
 import type { ReminderMinutes } from './plan';
 import { ReminderPicker } from './ReminderPicker';
@@ -53,6 +54,7 @@ export function ReminderSetting() {
   return (
     <View style={styles.block}>
       <Text style={styles.section}>СПОВІЩЕННЯ</Text>
+      <SubstitutionPushSetting />
       <View style={styles.labelRow}>
         <Text style={styles.label}>Нагадування перед парою</Text>
         {asking ? <ActivityIndicator color={colors.primary} accessibilityLabel="Запит дозволу" /> : null}

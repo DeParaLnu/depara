@@ -7,7 +7,8 @@ import { MOCK_BUILDINGS, MOCK_CLASSROOMS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MO
 
 const LATENCY_MS = 250;
 
-let state: { groupId: string | null; subgroup: number } = { groupId: null, subgroup: 0 };
+const INITIAL_STATE = { groupId: null as string | null, subgroup: 0, reminderMinutes: MOCK_ME.reminderMinutes, notifySubstitutions: true };
+let state = INITIAL_STATE;
 
 // F6: заміни, створені й скасовані в цьому запуску (за id пари). Пара мока має id mock-<понеділок>-<номер>
 const createdSubs = new Map<string, Substitution>();
@@ -24,6 +25,8 @@ const reply = (status: number, body: unknown) =>
     status,
     headers: { 'content-type': 'application/json', 'x-request-id': 'mock' },
   });
+
+const currentMe = (): Me => ({ ...MOCK_ME, ...state });
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -74,7 +77,7 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
   const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : {};
 
   if (method === 'POST' && route === '/auth/microsoft') {
-    state = { groupId: null, subgroup: 0 };
+    state = INITIAL_STATE;
     createdSubs.clear();
     removedSubs.clear();
     const session: Session = { accessToken: 'mock-access', refreshToken: 'mock-refresh', needsOnboarding: true };
@@ -99,18 +102,28 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
 
   if (route === '/me') {
     if (method === 'DELETE') {
-      state = { groupId: null, subgroup: 0 };
+      state = INITIAL_STATE;
       return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
     }
     if (method === 'PATCH') {
+      // F9: налаштування без групи
+      if (body.groupId === undefined) {
+        const { reminderMinutes = state.reminderMinutes, notifySubstitutions = state.notifySubstitutions } = body;
+        state = { ...state, reminderMinutes, notifySubstitutions };
+        return reply(200, currentMe());
+      }
       if (!MOCK_GROUPS.some((g) => g.id === body.groupId)) return reply(404, { error: 'GROUP_NOT_FOUND' });
       const subgroup = Number.isInteger(body.subgroup) ? body.subgroup : 0;
       if (subgroup < 0 || subgroup > 2) return reply(400, { error: 'INVALID_SUBGROUP' });
-      state = { groupId: body.groupId, subgroup };
+      state = { ...state, groupId: body.groupId, subgroup };
       return reply(200, { id: MOCK_ME.id, groupId: state.groupId, subgroup: state.subgroup });
     }
-    const me: Me = { ...MOCK_ME, groupId: state.groupId, subgroup: state.subgroup };
-    return reply(200, me);
+    return reply(200, currentMe());
+  }
+
+  // F8: у моку пушів немає, токен лише приймаємо
+  if (route === '/me/push-token' && (method === 'POST' || method === 'DELETE')) {
+    return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
   }
 
   if (method === 'GET' && route === '/schedule/week') {

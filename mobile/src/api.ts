@@ -236,6 +236,11 @@ export const api = {
     request<void>('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken }) }),
   // Видалення власного акаунта: 204 без тіла
   deleteAccount: (token: string) => request<void>('/me', { method: 'DELETE' }, token),
+  // F8: Expo push-токен цього пристрою
+  registerPushToken: (token: string, pushToken: string) =>
+    request<void>('/me/push-token', { method: 'POST', body: JSON.stringify({ token: pushToken }) }, token),
+  removePushToken: (token: string, pushToken: string) =>
+    request<void>('/me/push-token', { method: 'DELETE', body: JSON.stringify({ token: pushToken }) }, token),
   groups: (token: string) => request<Group[]>('/groups', {}, token),
   me: (token: string) => request<Me>('/me', {}, token),
   updateSettings: (token: string, settings: ProfileSettings) =>

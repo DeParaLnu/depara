@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
+import { requestPermission } from '../reminders/notifications';
 import type { ReminderMinutes } from '../reminders/plan';
 import { ReminderPicker } from '../reminders/ReminderPicker';
 import { useApplyReminder } from '../reminders/useApplyReminder';
@@ -10,9 +11,10 @@ import { useApplyReminder } from '../reminders/useApplyReminder';
 type Props = { onDone: () => void };
 
 // F2/F8: останній крок онбордингу «Не пропустіть заміну» (макет docs/design/07-notifications.png).
-// «Дозволити сповіщення» питає дозвіл і вмикає нагадування з обраним часом; «Пізніше» нічого не вмикає.
-// Відмова в дозволі онбординг не зупиняє: нагадування можна ввімкнути пізніше в профілі.
-// Пуші про заміни (F8) з'являться пізніше, дозвіл для них той самий.
+// «Дозволити сповіщення» питає дозвіл (він потрібен і пушам про заміни, тож навіть без нагадувань) і вмикає
+// нагадування з обраним часом; «Пізніше» нічого не вмикає.
+// Відмова в дозволі онбординг не зупиняє: увімкнути можна пізніше в профілі.
+// Токен пристрою реєструється вже у вкладках (features/push/usePush.ts).
 export function NotificationsStep({ onDone }: Props) {
   const insets = useSafeAreaInsets();
   const { saveChoice, enable } = useApplyReminder();
@@ -20,13 +22,13 @@ export function NotificationsStep({ onDone }: Props) {
   const [asking, setAsking] = useState(false);
 
   const allow = async () => {
+    setAsking(true);
     if (minutes === 0) {
       saveChoice(0);
-      onDone();
-      return;
+      await requestPermission();
+    } else {
+      await enable(minutes);
     }
-    setAsking(true);
-    await enable(minutes);
     setAsking(false);
     onDone();
   };
@@ -57,7 +59,7 @@ export function NotificationsStep({ onDone }: Props) {
         {asking ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
-          <Text style={styles.primaryText}>{minutes === 0 ? 'Продовжити' : 'Дозволити сповіщення'}</Text>
+          <Text style={styles.primaryText}>Дозволити сповіщення</Text>
         )}
       </Pressable>
       <Pressable

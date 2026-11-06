@@ -4,7 +4,7 @@ import { log } from '../../lib/logger';
 import type { PlannedReminder } from './plan';
 
 // F8: обгортка над expo-notifications для локальних нагадувань. У вебі планування сповіщень немає: усе no-op.
-const supported = Platform.OS === 'android' || Platform.OS === 'ios';
+export const notificationsSupported = Platform.OS === 'android' || Platform.OS === 'ios';
 const CHANNEL_ID = 'lesson-reminders';
 const PREFIX = 'lesson-';
 
@@ -12,7 +12,7 @@ const warn = (message: string, error: unknown) =>
   log.warn('reminders', message, { reason: error instanceof Error ? error.message : String(error) });
 
 // Нагадування, що спрацювало, коли застосунок відкритий, теж показуємо банером
-if (supported) {
+if (notificationsSupported) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
@@ -24,10 +24,15 @@ if (supported) {
 }
 
 // На Android 8+ сповіщення мають належати каналу, а на Android 13+ без каналу не зʼявиться запит дозволу
-async function ensureChannel() {
+export async function ensureChannels() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: 'Нагадування про пари',
+    importance: Notifications.AndroidImportance.HIGH,
+  });
+  // Пуші про заміни (F8) бекенд шле без channelId, тож вони йдуть у канал default
+  await Notifications.setNotificationChannelAsync('default', {
+    name: 'Зміни та скасування',
     importance: Notifications.AndroidImportance.HIGH,
   });
 }
@@ -36,7 +41,7 @@ export type PermissionResult = 'granted' | 'denied' | 'unsupported';
 
 /** Чи можна показувати сповіщення, без запиту користувачу. */
 export async function hasPermission(): Promise<boolean> {
-  if (!supported) return false;
+  if (!notificationsSupported) return false;
   try {
     return (await Notifications.getPermissionsAsync()).granted;
   } catch (error) {
@@ -47,9 +52,9 @@ export async function hasPermission(): Promise<boolean> {
 
 /** Запитати дозвіл (лише коли користувач сам вмикає нагадування в профілі). */
 export async function requestPermission(): Promise<PermissionResult> {
-  if (!supported) return 'unsupported';
+  if (!notificationsSupported) return 'unsupported';
   try {
-    await ensureChannel();
+    await ensureChannels();
     const current = await Notifications.getPermissionsAsync();
     if (current.granted) return 'granted';
     if (!current.canAskAgain) return 'denied';
@@ -62,7 +67,7 @@ export async function requestPermission(): Promise<PermissionResult> {
 
 /** Прибрати всі нагадування про пари (інших запланованих сповіщень застосунок не має, але чіпаємо лише свої). */
 export async function cancelReminders(): Promise<void> {
-  if (!supported) return;
+  if (!notificationsSupported) return;
   try {
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
     await Promise.all(
@@ -77,10 +82,10 @@ export async function cancelReminders(): Promise<void> {
 
 /** Замінити заплановані нагадування новим планом. */
 export async function scheduleReminders(plan: PlannedReminder[]): Promise<void> {
-  if (!supported) return;
+  if (!notificationsSupported) return;
   await cancelReminders();
   try {
-    await ensureChannel();
+    await ensureChannels();
   } catch (error) {
     warn('не вдалося створити канал сповіщень', error);
   }

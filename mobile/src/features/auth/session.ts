@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api, setSessionBridge, type Session } from '../../api';
 import { resetCaches } from '../../lib/cacheReset';
 import { clearPersistedQueries } from '../../lib/queryPersist';
+import { unregisterPushToken } from '../push/registration';
 import { cancelReminders } from '../reminders/notifications';
 import { useReminderSettings } from '../reminders/settings';
 import { getOrCreateDeviceId, loadStoredSession, saveStoredSession } from './storage';
@@ -16,6 +17,20 @@ type SessionState = {
   finishOnboarding: () => void;
   signOut: () => void;
 };
+
+// Сесія, що завершується на сервері. Екран входу зʼявляється одразу, а токен пристрою прибирається вже після цього.
+// Якщо access за цей час прострочений, авто-refresh має її бачити, інакше токен лишиться і пуші йтимуть на телефон
+// користувача, який вийшов.
+let closing: Session | null = null;
+
+// Спершу токен пристрою: для нього потрібен дійсний access, а вихід знищує сесію. Refresh беремо вже після нього:
+// авто-refresh міг його замінити
+async function closeOnServer(session: Session) {
+  closing = session;
+  await unregisterPushToken(session.accessToken);
+  await api.logout(closing.refreshToken).catch(() => {});
+  closing = null;
+}
 
 export const useSession = create<SessionState>((set, get) => ({
   session: null,
@@ -50,9 +65,7 @@ export const useSession = create<SessionState>((set, get) => ({
 
   signOut: () => {
     const current = get().session;
-    if (current?.refreshToken) {
-      void api.logout(current.refreshToken).catch(() => {});
-    }
+    if (current?.refreshToken) void closeOnServer(current);
     set({ session: null });
     void saveStoredSession(null);
     void resetCaches().catch(() => {});
@@ -64,10 +77,11 @@ export const useSession = create<SessionState>((set, get) => ({
 
 // Підключаємо міст авто-рефрешу для перехоплення 401 TOKEN_EXPIRED в api.ts
 setSessionBridge({
-  getSession: () => useSession.getState().session,
+  getSession: () => useSession.getState().session ?? closing,
   getDeviceId: () => getOrCreateDeviceId(),
   onRefreshed: async (tokens) => {
     const current = useSession.getState().session;
+    if (!current && closing) closing = { ...closing, ...tokens };
     if (current) {
       const updated: Session = {
         ...current,
@@ -79,6 +93,8 @@ setSessionBridge({
     }
   },
   onRefreshFailed: async () => {
+    // Користувач уже вийшов, закривається лише його сесія на сервері
+    if (!useSession.getState().session) return;
     useSession.getState().signOut();
   },
 });

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Me } from '../../api';
 import { log } from '../../lib/logger';
 import { useSession } from '../auth/session';
+import { syncPushToken } from '../push/registration';
 import { requestPermission, type PermissionResult } from './notifications';
 import type { ReminderMinutes } from './plan';
 import { useReminderSettings } from './settings';
@@ -31,7 +32,11 @@ export function useApplyReminder() {
   /** Запитати дозвіл і, якщо дали, увімкнути нагадування за `value` хвилин. */
   const enable = async (value: ReminderMinutes): Promise<PermissionResult> => {
     const result = await requestPermission();
-    if (result === 'granted') saveChoice(value);
+    if (result === 'granted') {
+      saveChoice(value);
+      // Той самий дозвіл вмикає й пуші про заміни
+      if (token) void syncPushToken(token);
+    }
     return result;
   };
 
