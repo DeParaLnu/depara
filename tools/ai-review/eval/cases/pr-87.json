@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r87-1",
-      "real": null,
+      "real": true,
       "file": "mobile/src/features/profile/hooks.ts",
       "lines": [
         17,
@@ -21,7 +21,7 @@
       "severity": "minor",
       "summary": "Write the saved group and subgroup into `['me']` on success.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, підтверджено вручну"
     }
   ],
   "known_false": []

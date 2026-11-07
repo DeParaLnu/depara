@@ -51,7 +51,7 @@
     },
     {
       "id": "r90-4",
-      "real": null,
+      "real": true,
       "file": "mobile/src/features/reminders/useReminderSync.ts",
       "lines": [
         60,
@@ -60,7 +60,7 @@
       "severity": "important",
       "summary": "Recheck permission when the app becomes active.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, підтверджено вручну"
     },
     {
       "id": "r90-5",

@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r93-1",
-      "real": null,
+      "real": true,
       "file": "mobile/src/features/onboarding/OnboardingScreen.tsx",
       "lines": [
         77,
@@ -21,7 +21,7 @@
       "severity": "important",
       "summary": "Persist the notification-step transition after saving the group.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, підтверджено вручну"
     },
     {
       "id": "r93-2",
