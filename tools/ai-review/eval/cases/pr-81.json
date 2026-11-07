@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r81-1",
-      "real": null,
+      "real": true,
       "file": "tools/ai-review/review.py",
       "lines": [
         592,
@@ -21,7 +21,7 @@
       "severity": "minor",
       "summary": "Return the salvaged result only when it contains at least one finding.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     }
   ],
   "known_false": []

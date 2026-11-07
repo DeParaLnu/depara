@@ -1,7 +1,7 @@
 """Підрахунок метрик eval: чистий код без мережі, щоб його можна було перевірити тестами.
 
 Мітки кейса:
-  issues       реальні проблеми. real=true рахується, real=null ще не розмічено й не рахується ніде.
+  issues       зауваження. real=true реальна проблема, real=false хибне, real=null ще не розмічено й не рахується ніде.
   known_false  твердження, які люди вже спростували: такий пункт точно хибний.
 Пункт, що не збігся ні з чим, це «нерозмічений»: він може бути і хибним, і новою реальною проблемою,
 тому хибних показуємо двома числами: точно хибні й верхня межа разом із нерозміченими.
@@ -26,7 +26,8 @@ def matches(finding: dict, label: dict) -> bool:
 def score_case(case: dict, report: dict) -> dict:
     real = [i for i in case.get("issues", []) if i.get("real") is True]
     pending = [i for i in case.get("issues", []) if i.get("real") is None]
-    known_false = case.get("known_false", [])
+    # real=false це теж людський вердикт: такий пункт точно хибний, а не нерозмічений
+    known_false = [*case.get("known_false", []), *(i for i in case.get("issues", []) if i.get("real") is False)]
     found: set[str] = set()
     false_known: list[dict] = []
     unlabeled: list[dict] = []

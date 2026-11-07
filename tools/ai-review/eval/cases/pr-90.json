@@ -25,7 +25,7 @@
     },
     {
       "id": "r90-2",
-      "real": null,
+      "real": true,
       "file": "mobile/src/features/reminders/ReminderSetting.tsx",
       "lines": [
         47,
@@ -34,7 +34,7 @@
       "severity": "important",
       "summary": "Send rapid choices to the server in order.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     },
     {
       "id": "r90-3",

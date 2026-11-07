@@ -63,6 +63,11 @@ class ScoreCase(unittest.TestCase):
         s = score.score_case(self.case, {"findings": [finding("c.ts", 5)]})
         self.assertEqual((s["real_total"], s["unlabeled"], s["false_known"]), (2, 0, 0))
 
+    def test_issue_marked_not_real_counts_as_false(self):
+        case = {"pr": 1, "issues": [{"id": "r1", "real": False, "file": "a.ts", "lines": [11, 11]}], "known_false": []}
+        s = score.score_case(case, {"findings": [finding()]})
+        self.assertEqual((s["real_total"], s["false_known"], s["unlabeled"]), (0, 1, 0))
+
     def test_failed_review_is_reported(self):
         self.assertTrue(score.score_case(self.case, {"error": "збій"})["failed"])
 

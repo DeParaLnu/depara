@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r73-1",
-      "real": null,
+      "real": false,
       "file": "specs/README.md",
       "lines": [
         19,
@@ -21,7 +21,7 @@
       "severity": "minor",
       "summary": "Align the F2 and F3 spec status lines with the feature table.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     }
   ],
   "known_false": []
