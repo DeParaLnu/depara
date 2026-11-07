@@ -1,0 +1,14 @@
+{
+  "pr": 99,
+  "title": "feat(backend): пуш про заміну через Expo Push (F8)",
+  "body": "## Що і навіщо\r\nСтудент дізнається про заміну одразу: після створення заміни бекенд надсилає пуш групі через Expo Push. Це бекендова частина F8, мобільна (дозвіл, реєстрація токена, відкриття пари з пушу) буде окремим PR.\r\n\r\n## Що змінилось\r\n- `POST /me/push-token` і `DELETE /me/push-token`: збереження і видалення токена пристрою, до 10 пристроїв на користувача.\r\n- `POST /substitutions` ставить задачу в чергу Redis, воркер у процесі бекенду рахує отримувачів у момент відправки: група пари, підгрупа, `notifySubstitutions`, без автора. Збій черги не скасовує заміну.\r\n- `DeviceNotRegistered` видаляє токен. Мережа, 429 і 5xx повторюються через 30 с, 1 хв і 2 хв.\r\n- Міграція: `fcm_token` стала `push_token`, таблиця досі не використовувалась.\r\n- Нові змінні: `EXPO_ACCESS_TOKEN`, `PUSH_ENABLED`, `EXPO_PUSH_URL`, `PUSH_RETRY_DELAY_MS`. Оновлено прод-compose, `.env.example`, `docs/deploy.md`, `ci.yml`.\r\n\r\n## Спека\r\n[specs/f8-notifications.md](specs/f8-notifications.md), [specs/f6-substitutions.md](specs/f6-substitutions.md)\r\n\r\n## Як перевірити\r\n1. Локально на окремій базі: lint, typecheck, усі тести (202 із 202, разом з `f8-notifications` на підставному Expo).\r\n2. Команди: розділ «E2E-тести» в README, там додано `EXPO_PUSH_URL` і `PUSH_RETRY_DELAY_MS`.\r\n\r\n## Чеклист\r\n- [ ] CI зелений (`backend-lint-typecheck`, `backend-e2e`)\r\n- [x] E2E-сценарій додано або оновлено\r\n- [x] Немає секретів і `.env` у коміті\r\n- [x] Документація API оновлена (якщо змінився контракт)\r\n\r\n## На що звернути увагу ревʼюеру\r\n- На справжньому пристрої доставка не перевірялась: у застосунку ще немає реєстрації токена, E2E працює з підставним Expo.\r\n- Квитанції доставки Expo (receipts) не перевіряються, пуш про скасування заміни не надсилається. Обидва пункти описані в спеці.\r\n- Воркер живе в процесі бекенду, бо бекенд працює одним екземпляром. Для кількох екземплярів це треба переглянути.\r\n",
+  "base": "64b78bd2b84f20b66fa65489bca48f1223d96db5",
+  "head": "353b1e595f2b214d2cd7e292a684a5221bfd07d1",
+  "head_ref": "feat/push-substitutions",
+  "base_ref": "develop",
+  "set": "holdout",
+  "smoke": false,
+  "note": "",
+  "issues": [],
+  "known_false": []
+}

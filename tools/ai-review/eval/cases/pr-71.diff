@@ -1,0 +1,2914 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 83ade40..84b8197 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -27,6 +27,24 @@ jobs:
+       - run: npm run lint
+       - run: npm run typecheck
+ 
++  # Мобільний застосунок: типи (разом з e2e) і юніт-тести логіки. Раніше типи мобільного перевірялись лише в
++  # mobile-e2e, який вимкнений для PR, тож помилка типів у мобільному коді не блокувала злиття.
++  mobile-typecheck-test:
++    runs-on: ubuntu-latest
++    defaults:
++      run:
++        working-directory: mobile
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 22
++          cache: npm
++          cache-dependency-path: mobile/package-lock.json
++      - run: npm ci
++      - run: npm run typecheck
++      - run: npm test
++
+   # E2E backend: справжній Postgres, запущений API, HTTP-запити ззовні
+   backend-e2e:
+     runs-on: ubuntu-latest
+@@ -63,6 +81,9 @@ jobs:
+       AUTH_MODE: fake
+       ADMIN_EMAILS: e2e.admin@lnu.edu.ua
+       CORS_ORIGINS: http://localhost:5173
++      # E2E робить багато імпортів і входів за хвилину з одного IP: ліміти для них піднімаємо
++      RATE_LIMIT_IMPORT_PER_MINUTE: 1000
++      RATE_LIMIT_AUTH_PER_MINUTE: 5000
+       JWT_SECRET: ci-only-secret
+     steps:
+       - uses: actions/checkout@v4
+diff --git a/README.md b/README.md
+index c811738..9d3f508 100644
+--- a/README.md
++++ b/README.md
+@@ -27,6 +27,7 @@ npm run dev                          # http://localhost:3000/health
+ ```bash
+ cd backend
+ export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=e2e.admin@lnu.edu.ua CORS_ORIGINS=http://localhost:5173
++export RATE_LIMIT_IMPORT_PER_MINUTE=1000 RATE_LIMIT_AUTH_PER_MINUTE=5000   # E2E робить багато імпортів і входів з одного IP
+ npm run seed -- --shift-to-current-week
+ npm run test:e2e
+ ```
+@@ -85,6 +86,19 @@ routes/           ендпоінти за фічами (auth, profile, schedule,
+   або CSV (`Content-Type: text/csv`, колонки `group,date,pair,subject[,type,teacher,audience,subgroup,room,faculty]`).
+   Імпорт атомарний: при помилці в базу не потрапляє нічого. Повторний імпорт оновлює пари, а не дублює.
+ 
++## Помилки API і ліміти запитів
++
++Усі помилки мають вигляд `{ "error": "КОД" }`. Окремо від кодів конкретних фіч (див. `specs/`): `INTERNAL_ERROR` (500) і
++`TEMPORARILY_UNAVAILABLE` (503: недоступний Redis чи база; клієнту варто повторити пізніше) містять `requestId`, за яким
++запис знаходиться в логах, а текст внутрішнього винятку клієнту не віддається; `BAD_REQUEST` (400), `NOT_FOUND` (404),
++`PAYLOAD_TOO_LARGE` (413), `UNSUPPORTED_MEDIA_TYPE` (415) і `RATE_LIMITED` (429, з `retryAfterSeconds` і заголовком
++`Retry-After`).
++
++Ліміти (змінні `RATE_LIMIT_*`, див. [docs/deploy.md](docs/deploy.md)): звичайні запити рахуються на користувача за
++токеном, без токена на IP; вхід, refresh і вихід мають окремий щедріший ліміт на IP (студенти часто за спільним IP
++кампусу); імпорт розкладу лімітується на адміна. Лічильники в Redis, а поки він недоступний, ліміт не діє, і запити
++не затримуються.
++
+ ## Демо-консоль
+ 
+ Проста сторінка-«застосунок» для ручного тестування API в браузері (вхід, вибір групи, розклад, заміни, пошук аудиторій, ролі та імпорт).
+diff --git a/backend/package-lock.json b/backend/package-lock.json
+index 666d611..e01a686 100644
+--- a/backend/package-lock.json
++++ b/backend/package-lock.json
+@@ -9,6 +9,7 @@
+       "version": "0.1.0",
+       "dependencies": {
+         "@fastify/cors": "^11.3.1",
++        "@fastify/rate-limit": "^11.2.2",
+         "@prisma/client": "^6.0.0",
+         "fastify": "^5.0.0",
+         "ioredis": "^6.0.0",
+@@ -801,6 +802,28 @@
+         "ipaddr.js": "^2.1.0"
+       }
+     },
++    "node_modules/@fastify/rate-limit": {
++      "version": "11.2.2",
++      "resolved": "https://registry.npmjs.org/@fastify/rate-limit/-/rate-limit-11.2.2.tgz",
++      "integrity": "sha512-Ynxk9BU82Y5Ux7NOk9NqyZpTMdFes8EY8quXrN6ePDsbtG4G9Afb3l9mD8Vw2nv0hXg0iFjV+gkdABReFPlShw==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/fastify"
++        },
++        {
++          "type": "opencollective",
++          "url": "https://opencollective.com/fastify"
++        }
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "@lukeed/ms": "^2.0.2",
++        "fastify-plugin": "^6.0.0",
++        "ip-address": "^10.2.0",
++        "toad-cache": "^3.7.0"
++      }
++    },
+     "node_modules/@hapi/address": {
+       "version": "5.1.1",
+       "resolved": "https://registry.npmjs.org/@hapi/address/-/address-5.1.1.tgz",
+@@ -955,6 +978,15 @@
+         "@jridgewell/sourcemap-codec": "^1.4.14"
+       }
+     },
++    "node_modules/@lukeed/ms": {
++      "version": "2.0.2",
++      "resolved": "https://registry.npmjs.org/@lukeed/ms/-/ms-2.0.2.tgz",
++      "integrity": "sha512-9I2Zn6+NJLfaGoz9jN3lpwDgAYvfGeNYdbAIjJOqzs4Tpc+VU3Jqq4IofSUBKajiDS8k9fZIg18/z13mpk1bsA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/@oxc-project/types": {
+       "version": "0.155.0",
+       "resolved": "https://registry.npmjs.org/@oxc-project/types/-/types-0.155.0.tgz",
+@@ -1180,9 +1212,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1201,9 +1230,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1222,9 +1248,6 @@
+         "ppc64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1243,9 +1266,6 @@
+         "s390x"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1264,9 +1284,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1285,9 +1302,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3088,6 +3102,15 @@
+         "url": "https://opencollective.com/ioredis"
+       }
+     },
++    "node_modules/ip-address": {
++      "version": "10.7.5",
++      "resolved": "https://registry.npmjs.org/ip-address/-/ip-address-10.7.5.tgz",
++      "integrity": "sha512-t2v0rkILYv9WXmSL7TpAaU3HXgaFYOPUcH3QHgwQ++gpJuH3bqyMy4Fvt/DJCTKwzH3Cf+bAp5W/mFL39KPLzA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 12"
++      }
++    },
+     "node_modules/ipaddr.js": {
+       "version": "2.5.0",
+       "resolved": "https://registry.npmjs.org/ipaddr.js/-/ipaddr.js-2.5.0.tgz",
+@@ -3479,9 +3502,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -3504,9 +3524,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -3529,9 +3546,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -3554,9 +3568,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+diff --git a/backend/package.json b/backend/package.json
+index 856ec0a..4a07259 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -19,6 +19,7 @@
+   },
+   "dependencies": {
+     "@fastify/cors": "^11.3.1",
++    "@fastify/rate-limit": "^11.2.2",
+     "@prisma/client": "^6.0.0",
+     "fastify": "^5.0.0",
+     "ioredis": "^6.0.0",
+diff --git a/backend/prisma/migrations/20261103000000_lesson_slot_key/migration.sql b/backend/prisma/migrations/20261103000000_lesson_slot_key/migration.sql
+new file mode 100644
+index 0000000..4b7e078
+--- /dev/null
++++ b/backend/prisma/migrations/20261103000000_lesson_slot_key/migration.sql
+@@ -0,0 +1,18 @@
++-- Ключ пари: (група, дата, номер пари, підгрупа) замість ключа з предметом.
++-- Раніше виправлення назви предмета в новому імпорті додавало другу пару в той самий слот. Такі дублі, якщо вони
++-- вже є, прибираємо перед створенням унікального індексу: лишаємо пару із заміною (щоб не втратити заміну
++-- старости), а серед решти найсвіжішу за updated_at.
++DELETE FROM "lesson" AS l
++USING (
++  SELECT
++    x."id",
++    ROW_NUMBER() OVER (
++      PARTITION BY x."group_id", x."date", x."pair_number", x."subgroup"
++      ORDER BY EXISTS (SELECT 1 FROM "substitution" s WHERE s."lesson_id" = x."id") DESC, x."updated_at" DESC, x."id"
++    ) AS rn
++  FROM "lesson" x
++) d
++WHERE l."id" = d."id" AND d.rn > 1;
++
++DROP INDEX "lesson_group_id_date_pair_number_subgroup_subject_key";
++CREATE UNIQUE INDEX "lesson_group_id_date_pair_number_subgroup_key" ON "lesson"("group_id", "date", "pair_number", "subgroup");
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 226d934..9b60413 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -164,8 +164,9 @@ model Lesson {
+   classroom    Classroom?    @relation(fields: [classroomId], references: [id])
+   substitution Substitution?
+ 
+-  // Ключ для ідемпотентного імпорту (повторний імпорт оновлює, а не дублює).
+-  @@unique([groupId, date, pairNumber, subgroup, subject])
++  // Ключ для ідемпотентного імпорту: одна пара на групу, дату, номер і підгрупу. Предмет в ключ не входить,
++  // щоб виправлення назви в новому імпорті оновлювало пару, а не додавало другу в той самий слот.
++  @@unique([groupId, date, pairNumber, subgroup])
+   @@index([groupId, date])
+   @@map("lesson")
+ }
+diff --git a/backend/src/app.ts b/backend/src/app.ts
+index 04c8fc3..3128db8 100644
+--- a/backend/src/app.ts
++++ b/backend/src/app.ts
+@@ -1,8 +1,10 @@
+ import { randomUUID } from 'node:crypto';
+ import { readFileSync } from 'node:fs';
+ import cors from '@fastify/cors';
+-import Fastify, { type FastifyRequest, type FastifyServerOptions } from 'fastify';
++import Fastify, { type FastifyError, type FastifyRequest, type FastifyServerOptions } from 'fastify';
++import { Prisma } from '@prisma/client';
+ import { config } from './config';
++import { registerRateLimit, type RateLimitOptions } from './plugins/rateLimit';
+ import { adminRoutes } from './routes/admin';
+ import { authRoutes } from './routes/auth';
+ import { classroomRoutes } from './routes/classrooms';
+@@ -29,7 +31,32 @@ function loggerOptions(custom?: FastifyServerOptions['logger']): FastifyServerOp
+   return { ...custom, serializers: { ...custom.serializers, ...requestSerializers } };
+ }
+ 
+-export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {}) {
++// Збої залежностей (Redis, база), після яких клієнту варто повторити запит пізніше: 503, а не 500
++const PRISMA_UNAVAILABLE = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024']);
++const NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE']);
++
++export function isDependencyUnavailable(err: unknown): boolean {
++  if (err instanceof Prisma.PrismaClientInitializationError) return true;
++  if (err instanceof Prisma.PrismaClientKnownRequestError) return PRISMA_UNAVAILABLE.has(err.code);
++  if (typeof err !== 'object' || err === null) return false;
++  const e = err as { name?: string; code?: string; message?: string };
++  return (
++    e.name === 'MaxRetriesPerRequestError' ||
++    (typeof e.code === 'string' && NETWORK_CODES.has(e.code)) ||
++    e.message === 'Connection is closed.'
++  );
++}
++
++// Коди помилок клієнтських статусів, які породжує сам Fastify (клієнти читають поле error)
++const CLIENT_ERROR_CODES: Record<number, string> = {
++  400: 'BAD_REQUEST',
++  404: 'NOT_FOUND',
++  413: 'PAYLOAD_TOO_LARGE',
++  415: 'UNSUPPORTED_MEDIA_TYPE',
++  429: 'RATE_LIMITED',
++};
++
++export function buildApp(opts: { logger?: FastifyServerOptions['logger']; rateLimit?: RateLimitOptions } = {}) {
+   const app = Fastify({
+     logger: loggerOptions(opts.logger),
+     trustProxy: config.trustProxy,
+@@ -41,6 +68,21 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
+     },
+   });
+ 
++  // Єдиний формат помилок { error: КОД }. Деталі внутрішніх збоїв (текст винятків Prisma, Redis) клієнту не
++  // віддаємо: вони лише в логах, а клієнт отримує requestId, за яким запис знаходиться.
++  app.setErrorHandler((err: FastifyError, req, reply) => {
++    const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
++    if (status < 500) {
++      const body: Record<string, unknown> = { error: CLIENT_ERROR_CODES[status] ?? 'BAD_REQUEST' };
++      if (status === 429) body.retryAfterSeconds = (err as FastifyError & { retryAfterSeconds?: number }).retryAfterSeconds;
++      return reply.code(status).send(body);
++    }
++    req.log.error({ err }, 'необроблена помилка');
++    if (isDependencyUnavailable(err)) return reply.code(503).send({ error: 'TEMPORARILY_UNAVAILABLE', requestId: req.id });
++    return reply.code(500).send({ error: 'INTERNAL_ERROR', requestId: req.id });
++  });
++  app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'NOT_FOUND' }));
++
+   // Клієнт бачить id запиту й може назвати його при звернені: за ним знаходимо запис у логах
+   app.addHook('onSend', async (req, reply) => {
+     reply.header('x-request-id', req.id);
+@@ -62,12 +104,15 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
+       origin: config.corsOrigins,
+       methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+       allowedHeaders: ['authorization', 'content-type', 'if-none-match', 'x-request-id'],
+-      exposedHeaders: ['etag', 'x-request-id'],
++      exposedHeaders: ['etag', 'x-request-id', 'retry-after'],
+       maxAge: 600,
+     });
+   }
+ 
+-  app.get('/health', async () => ({ status: 'ok' }));
++  registerRateLimit(app, opts.rateLimit);
++
++  // Перевірку здоров'я Docker і smoke-скрипти не лімітуємо
++  app.get('/health', { config: { rateLimit: false } }, async () => ({ status: 'ok' }));
+ 
+   // Демо-консоль для ручного тестування в браузері. Існує лише при AUTH_MODE=fake (тестовий режим).
+   if (config.fakeAuth) {
+@@ -76,7 +121,7 @@ export function buildApp(opts: { logger?: FastifyServerOptions['logger'] } = {})
+     app.get('/', async (_req, reply) => reply.redirect('/dev'));
+   }
+ 
+-  app.register(authRoutes);
++  app.register(authRoutes, { authPerMinute: opts.rateLimit?.authPerMinute });
+   app.register(profileRoutes);
+   app.register(scheduleRoutes);
+   app.register(classroomRoutes);
+diff --git a/backend/src/config.ts b/backend/src/config.ts
+index 8336f92..c8c0c06 100644
+--- a/backend/src/config.ts
++++ b/backend/src/config.ts
+@@ -8,14 +8,29 @@ function resolveJwtSecret(): string {
+   throw new Error('JWT_SECRET is required. Set it in .env (див. .env.example).');
+ }
+ 
++const positiveInt = (v: string | undefined, fallback: number) => {
++  const n = Number(v);
++  return Number.isInteger(n) && n > 0 ? n : fallback;
++};
++
+ export const config = {
+   jwtSecret: resolveJwtSecret(),
+   allowedEmailDomain: (process.env.ALLOWED_EMAIL_DOMAIN ?? 'lnu.edu.ua').trim().toLowerCase(),
+   accessTokenTtl: '15m',
+   refreshTokenTtlSeconds: 30 * 24 * 60 * 60,
++  // Refresh одноразовий. Якщо відповідь на refresh загубилась по дорозі (слабка мережа), клієнт повторює запит зі
++  // старим токеном: протягом цього вікна сервер віддає ту саму нову пару, але лише того самого пристрою і поки
++  // нова пара не використана. 0 вимикає вікно (повторний refresh завжди відхиляється).
++  refreshReuseGraceSeconds: Math.max(0, Number(process.env.REFRESH_REUSE_GRACE_SECONDS ?? 30) || 0),
+   // Вхід через Microsoft Entra. Поки тенант не зареєстровано, обидві змінні порожні і /auth/microsoft відповідає 503.
+   microsoftClientId: process.env.MICROSOFT_CLIENT_ID ?? '', // aud ID-токена (Application/Client ID)
+   microsoftTenantId: process.env.MICROSOFT_TENANT_ID ?? '', // tid організації, з якої пускаємо
++  // Ліміти запитів на хвилину. Звичайні запити рахуються на користувача (за токеном), без токена на IP; вхід і
++  // refresh (без токена) на IP. Студенти ЛНУ часто сидять за спільним IP кампусу, тож ліміт входу щедрий:
++  // це страховка від зловживань, а не обмеження звичайного використання.
++  rateLimitPerMinute: positiveInt(process.env.RATE_LIMIT_PER_MINUTE, 600),
++  rateLimitAuthPerMinute: positiveInt(process.env.RATE_LIMIT_AUTH_PER_MINUTE, 300),
++  rateLimitImportPerMinute: positiveInt(process.env.RATE_LIMIT_IMPORT_PER_MINUTE, 30),
+   // Origin веб-адмінки (через кому). Порожньо = CORS вимкнений. Мобільному застосунку CORS не потрібен.
+   corsOrigins: (process.env.CORS_ORIGINS ?? '')
+     .split(',')
+diff --git a/backend/src/lib/cache.ts b/backend/src/lib/cache.ts
+deleted file mode 100644
+index 197ca4c..0000000
+--- a/backend/src/lib/cache.ts
++++ /dev/null
+@@ -1,9 +0,0 @@
+-import { redis } from '../redis';
+-
+-// Скидає кеш розкладу групи (ключі schedule:{groupId}:*). Викликається після заміни та імпорту.
+-export async function invalidateGroupSchedule(groupId: string): Promise<void> {
+-  const keys: string[] = [];
+-  const stream = redis.scanStream({ match: `schedule:${groupId}:*`, count: 100 });
+-  for await (const batch of stream) keys.push(...(batch as string[]));
+-  if (keys.length > 0) await redis.del(...keys);
+-}
+diff --git a/backend/src/lib/scheduleImport.ts b/backend/src/lib/scheduleImport.ts
+index ab45ff2..d70f6af 100644
+--- a/backend/src/lib/scheduleImport.ts
++++ b/backend/src/lib/scheduleImport.ts
+@@ -86,9 +86,12 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload }
+     return { full_name: t.full_name, position: typeof t.position === 'string' ? t.position : null } as ImportPayload['teachers'][number];
+   });
+ 
+-  const rawLessons = raw.lessons;
+-  if (!Array.isArray(rawLessons) || rawLessons.length === 0) {
+-    errors.push('lessons: потрібен непорожній масив');
++  // Імпорт лише довідників (наприклад, виправлені адреси корпусів) дозволений без пар. Порожній запит чи порожні
++  // lessons без жодного довідника це помилка: так випадковий `{}` не виглядає успішним імпортом.
++  const hasReference = pair_times.length + faculties.length + groups.length + buildings.length + teachers.length > 0;
++  const rawLessons = raw.lessons ?? (hasReference ? [] : undefined);
++  if (!Array.isArray(rawLessons) || (rawLessons.length === 0 && !hasReference)) {
++    errors.push('lessons: потрібен непорожній масив (або довідники: pair_times, faculties, groups, buildings, teachers)');
+     return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
+   }
+   if (rawLessons.length > MAX_LESSONS) {
+@@ -130,9 +133,12 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload }
+       subgroup: typeof l.subgroup === 'number' ? l.subgroup : 0,
+       room: typeof l.room === 'string' && l.room.trim() ? l.room.trim() : null,
+     };
+-    // Той самий ключ, що й унікальний індекс у БД: інакше повторний імпорт мовчки злив би пари
+-    const key = [lesson.faculty ?? '', lesson.group, lesson.date, lesson.pair, lesson.subgroup, lesson.subject].join('|');
+-    if (seen.has(key)) errors.push(`${at}: дубль пари (${lesson.group}, ${lesson.date}, пара ${lesson.pair}, "${lesson.subject}"). Розрізніть через subgroup`);
++    // Той самий ключ, що й унікальний індекс у БД: група, дата, номер пари й підгрупа. Дві різні пари в одному
++    // слоті в одному файлі були б взаємним перезаписом, тож це помилка, а не мовчазне «остання перемагає»
++    const key = [lesson.faculty ?? '', lesson.group, lesson.date, lesson.pair, lesson.subgroup].join('|');
++    if (seen.has(key)) {
++      errors.push(`${at}: у групи ${lesson.group} ${lesson.date} на парі ${lesson.pair} (підгрупа ${lesson.subgroup}) уже є запис у файлі. Одна пара на слот, для підгруп вкажіть subgroup`);
++    }
+     seen.add(key);
+     lessons.push(lesson);
+   });
+@@ -275,15 +281,10 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
+         const common = { type: l.type, audience: l.audience, teacherId, classroomId };
+         await tx.lesson.upsert({
+           where: {
+-            groupId_date_pairNumber_subgroup_subject: {
+-              groupId,
+-              date: toDate(l.date),
+-              pairNumber: l.pair,
+-              subgroup: l.subgroup,
+-              subject: l.subject,
+-            },
++            groupId_date_pairNumber_subgroup: { groupId, date: toDate(l.date), pairNumber: l.pair, subgroup: l.subgroup },
+           },
+-          update: common,
++          // Предмет теж оновлюється: пара в слоті та сама, змінилась лише назва. id пари, а з ним і заміна, лишаються
++          update: { subject: l.subject, ...common },
+           create: { groupId, date: toDate(l.date), pairNumber: l.pair, subgroup: l.subgroup, subject: l.subject, ...common },
+         });
+         touchedGroups.add(groupId);
+diff --git a/backend/src/lib/tokens.ts b/backend/src/lib/tokens.ts
+index 8b5761f..6b0c6cf 100644
+--- a/backend/src/lib/tokens.ts
++++ b/backend/src/lib/tokens.ts
+@@ -33,20 +33,30 @@ export function verifyAccessToken(token: string): AccessCheck {
+   }
+ }
+ 
+-// Видає refresh-токен і записує сесію в Redis: refresh:{jti} = hash(userId, deviceId), TTL 30 днів.
+-export async function issueRefreshToken(userId: string, deviceId: string): Promise<string> {
++// Підписує refresh-токен і записує сесію в Redis: refresh:{jti} = hash(userId, deviceId), TTL 30 днів.
++async function createRefreshToken(userId: string, deviceId: string): Promise<{ token: string; jti: string }> {
+   const jti = randomUUID();
+   await redis.set(sessionKey(jti), fingerprint(userId, deviceId), 'EX', config.refreshTokenTtlSeconds);
+-  return jwt.sign({ sub: userId, typ: 'refresh', jti } satisfies TokenPayload, config.jwtSecret, {
++  const token = jwt.sign({ sub: userId, typ: 'refresh', jti } satisfies TokenPayload, config.jwtSecret, {
+     expiresIn: config.refreshTokenTtlSeconds,
+   });
++  return { token, jti };
++}
++
++export async function issueRefreshToken(userId: string, deviceId: string): Promise<string> {
++  return (await createRefreshToken(userId, deviceId)).token;
++}
++
++const rotatedKey = (jti: string) => `refresh-rotated:${jti}`;
++
++export interface RotatedSession {
++  userId: string;
++  refreshToken: string;
+ }
+ 
+-// Ротація: стару сесію видаляємо (одноразово, GETDEL), вона має збігатися з userId і deviceId.
+-export async function consumeRefreshToken(
+-  token: string,
+-  deviceId: string,
+-): Promise<{ userId: string } | null> {
++// Ротація: стару сесію видаляємо (одноразово, GETDEL), вона має збігатися з userId і deviceId, і видаємо нову.
++// Для повтору запиту після втраченої відповіді нову пару запам'ятовуємо на refreshReuseGraceSeconds.
++export async function rotateRefreshToken(token: string, deviceId: string): Promise<RotatedSession | null> {
+   let p: TokenPayload;
+   try {
+     p = jwt.verify(token, config.jwtSecret) as TokenPayload;
+@@ -54,9 +64,27 @@ export async function consumeRefreshToken(
+     return null;
+   }
+   if (p.typ !== 'refresh' || !p.jti) return null;
++
++  const fp = fingerprint(p.sub, deviceId);
+   const stored = await redis.getdel(sessionKey(p.jti));
+-  if (!stored || stored !== fingerprint(p.sub, deviceId)) return null;
+-  return { userId: p.sub };
++  if (stored === fp) {
++    const next = await createRefreshToken(p.sub, deviceId);
++    if (config.refreshReuseGraceSeconds > 0) {
++      const replay = JSON.stringify({ fp, token: next.token, jti: next.jti });
++      await redis.set(rotatedKey(p.jti), replay, 'EX', config.refreshReuseGraceSeconds);
++    }
++    return { userId: p.sub, refreshToken: next.token };
++  }
++  // Сесія була, але належала іншому пристрою: вона вже видалена вище, повтор не допускаємо
++  if (stored || config.refreshReuseGraceSeconds === 0) return null;
++
++  // Токен уже обміняли: це повтор лише якщо той самий пристрій і нова пара ще не використана.
++  // Після першого ж використання нової пари старий токен знову відхиляється (як і раніше).
++  const raw = await redis.get(rotatedKey(p.jti));
++  if (!raw) return null;
++  const replay = JSON.parse(raw) as { fp: string; token: string; jti: string };
++  if (replay.fp !== fp || !(await redis.exists(sessionKey(replay.jti)))) return null;
++  return { userId: p.sub, refreshToken: replay.token };
+ }
+ 
+ // Вихід: видаляє сесію. Недійсний токен ігноруємо (операція ідемпотентна).
+diff --git a/backend/src/plugins/rateLimit.ts b/backend/src/plugins/rateLimit.ts
+new file mode 100644
+index 0000000..7d30377
+--- /dev/null
++++ b/backend/src/plugins/rateLimit.ts
+@@ -0,0 +1,45 @@
++import rateLimit from '@fastify/rate-limit';
++import type { FastifyInstance, FastifyRequest } from 'fastify';
++import { config } from '../config';
++import { verifyAccessToken } from '../lib/tokens';
++import { redis, redisUsable } from '../redis';
++
++export interface RateLimitOptions {
++  perMinute?: number;
++  authPerMinute?: number;
++  /** Префікс ключів у Redis: тести беруть унікальний, щоб лічильники різних прогонів не змішувались */
++  nameSpace?: string;
++}
++
++// Ключ ліміту: користувач з дійсним access-токеном, інакше IP. Так студенти за спільним IP кампусу не ділять
++// один ліміт на всіх, а підроблений чи прострочений токен не дає окремого лічильника.
++export function rateLimitKey(req: FastifyRequest): string {
++  const header = req.headers.authorization ?? '';
++  if (header.startsWith('Bearer ')) {
++    const result = verifyAccessToken(header.slice(7));
++    if (result.ok) return `user:${result.userId}`;
++  }
++  return `ip:${req.ip}`;
++}
++
++// Вхід, refresh і вихід ділять окремий лічильник (groupId) з власним, вищим ліміту на IP
++export const authRateLimit = (max: number) => ({ max, timeWindow: '1 minute', groupId: 'auth' });
++
++// Ліміт запитів у Redis (спільний для перезапусків). Якщо Redis недоступний, запити пропускаються (skipOnError),
++// а не блокуються: ліміт це страховка, а не залежність, від якої має падати API.
++// Викликати на кореневому екземплярі до реєстрації маршрутів (плагін fastify-plugin, діє на весь екземпляр).
++export function registerRateLimit(app: FastifyInstance, opts: RateLimitOptions = {}) {
++  app.register(rateLimit, {
++    global: true,
++    max: opts.perMinute ?? config.rateLimitPerMinute,
++    timeWindow: '1 minute',
++    redis,
++    nameSpace: opts.nameSpace ?? 'rate-limit:',
++    keyGenerator: rateLimitKey,
++    // Поки Redis недоступний, ліміт не діє і не затримує запити (інакше кожен запит чекав би на збій сховища)
++    allowList: () => !redisUsable(),
++    skipOnError: true,
++    errorResponseBuilder: (_req, context) =>
++      Object.assign(new Error('RATE_LIMITED'), { statusCode: 429, retryAfterSeconds: Math.ceil(context.ttl / 1000) }),
++  });
++}
+diff --git a/backend/src/redis.ts b/backend/src/redis.ts
+index 539ad19..fb44d64 100644
+--- a/backend/src/redis.ts
++++ b/backend/src/redis.ts
+@@ -1,4 +1,23 @@
+ import { Redis } from 'ioredis';
+ import { config } from './config';
+ 
+-export const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 2, lazyConnect: true });
++// Коротка деградація замість довгого очікування, коли Redis недоступний: команда падає за ~1 с (потім API відповідає 503
++// або пропускає ліміт), а не за 10+ с через наростаючий backoff ioredis за замовчуванням.
++export const redis = new Redis(config.redisUrl, {
++  maxRetriesPerRequest: 1,
++  lazyConnect: true,
++  connectTimeout: 1000,
++  commandTimeout: 1500,
++  retryStrategy: (times) => Math.min(times * 100, 1000),
++});
++
++// Без обробника ioredis пише «Unhandled error event» на кожну спробу. Логуємо не частіше, ніж раз на 30 с.
++let lastErrorLog = 0;
++redis.on('error', (err) => {
++  if (Date.now() - lastErrorLog < 30_000) return;
++  lastErrorLog = Date.now();
++  console.error(`Redis недоступний: ${err.message}`);
++});
++
++// Redis справний або ще підключається (lazyConnect: стан wait до першої команди). reconnecting/close/end = збій.
++export const redisUsable = (): boolean => ['wait', 'connecting', 'connect', 'ready'].includes(redis.status);
+diff --git a/backend/src/routes/admin.ts b/backend/src/routes/admin.ts
+index b498454..2643a66 100644
+--- a/backend/src/routes/admin.ts
++++ b/backend/src/routes/admin.ts
+@@ -1,7 +1,7 @@
+ import { Role } from '@prisma/client';
+ import type { FastifyInstance } from 'fastify';
++import { config } from '../config';
+ import { prisma } from '../db';
+-import { invalidateGroupSchedule } from '../lib/cache';
+ import { csvToLessons } from '../lib/csv';
+ import { ImportError, importSchedule, validateImport } from '../lib/scheduleImport';
+ import { isSubgroup, isUuid } from '../lib/validation';
+@@ -70,7 +70,12 @@ export async function adminRoutes(app: FastifyInstance) {
+   // Імпорт розкладу: JSON (Content-Type: application/json) або CSV (text/csv)
+   app.post(
+     '/admin/schedule/import',
+-    { preHandler: requireRole('ADMIN'), bodyLimit: MAX_IMPORT_BYTES },
++    {
++      preHandler: requireRole('ADMIN'),
++      bodyLimit: MAX_IMPORT_BYTES,
++      // Імпорт важкий (одна довга транзакція), тож окремий, нижчий ліміт на адміна
++      config: { rateLimit: { max: config.rateLimitImportPerMinute, timeWindow: '1 minute', groupId: 'import' } },
++    },
+     async (req, reply) => {
+       let payload: unknown = req.body;
+       if (req.headers['content-type']?.startsWith('text/csv')) {
+@@ -84,7 +89,6 @@ export async function adminRoutes(app: FastifyInstance) {
+ 
+       try {
+         const result = await importSchedule(prisma, checked.data);
+-        await Promise.all(result.groupIds.map(invalidateGroupSchedule));
+         return { imported: result.imported, groups: result.groupIds.length, warnings: result.warnings };
+       } catch (e) {
+         if (e instanceof ImportError) return reply.code(422).send({ error: 'INVALID_IMPORT', details: e.errors });
+diff --git a/backend/src/routes/auth.ts b/backend/src/routes/auth.ts
+index 39f7566..6b9aead 100644
+--- a/backend/src/routes/auth.ts
++++ b/backend/src/routes/auth.ts
+@@ -1,12 +1,13 @@
+ import { Prisma } from '@prisma/client';
+ import type { FastifyInstance, FastifyReply } from 'fastify';
+ import { config } from '../config';
++import { authRateLimit } from '../plugins/rateLimit';
+ import { prisma } from '../db';
+ import { checkIdentity, verifyIdToken } from '../lib/microsoft';
+ import {
+-  consumeRefreshToken,
+   issueRefreshToken,
+   revokeRefreshToken,
++  rotateRefreshToken,
+   signAccessToken,
+ } from '../lib/tokens';
+ 
+@@ -26,8 +27,10 @@ function publicUser(u: { id: string; email: string; role: string; groupId: strin
+ }
+ 
+ // F1: вхід через Microsoft Entra, оновлення і вихід
+-export async function authRoutes(app: FastifyInstance) {
+-  app.post('/auth/microsoft', async (req, reply: FastifyReply) => {
++export async function authRoutes(app: FastifyInstance, opts: { authPerMinute?: number } = {}) {
++  const limited = { config: { rateLimit: authRateLimit(opts.authPerMinute ?? config.rateLimitAuthPerMinute) } };
++
++  app.post('/auth/microsoft', limited, async (req, reply: FastifyReply) => {
+     const { idToken, deviceId } = (req.body ?? {}) as { idToken?: unknown; deviceId?: unknown };
+     if (!isNonEmptyString(idToken)) return reply.code(400).send({ error: 'ID_TOKEN_REQUIRED' });
+     if (!isNonEmptyString(deviceId)) return reply.code(400).send({ error: 'DEVICE_ID_REQUIRED' });
+@@ -107,7 +110,7 @@ export async function authRoutes(app: FastifyInstance) {
+     };
+   });
+ 
+-  app.post('/auth/refresh', async (req, reply) => {
++  app.post('/auth/refresh', limited, async (req, reply) => {
+     const { refreshToken, deviceId } = (req.body ?? {}) as {
+       refreshToken?: unknown;
+       deviceId?: unknown;
+@@ -115,16 +118,19 @@ export async function authRoutes(app: FastifyInstance) {
+     if (!isNonEmptyString(refreshToken) || !isNonEmptyString(deviceId)) {
+       return reply.code(400).send({ error: 'REFRESH_TOKEN_AND_DEVICE_REQUIRED' });
+     }
+-    const session = await consumeRefreshToken(refreshToken, deviceId);
++    const session = await rotateRefreshToken(refreshToken, deviceId);
+     if (!session) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
+ 
+     const user = await prisma.user.findUnique({ where: { id: session.userId } });
+-    if (!user) return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
++    if (!user) {
++      await revokeRefreshToken(session.refreshToken);
++      return reply.code(401).send({ error: 'INVALID_REFRESH_TOKEN' });
++    }
+ 
+-    return startSession(user.id, deviceId);
++    return { accessToken: signAccessToken(user.id), refreshToken: session.refreshToken };
+   });
+ 
+-  app.post('/auth/logout', async (req, reply) => {
++  app.post('/auth/logout', limited, async (req, reply) => {
+     const { refreshToken } = (req.body ?? {}) as { refreshToken?: unknown };
+     if (isNonEmptyString(refreshToken)) await revokeRefreshToken(refreshToken);
+     return reply.code(204).send();
+diff --git a/backend/src/routes/substitutions.ts b/backend/src/routes/substitutions.ts
+index 570eb4b..5e94213 100644
+--- a/backend/src/routes/substitutions.ts
++++ b/backend/src/routes/substitutions.ts
+@@ -1,7 +1,6 @@
+ import { SubstitutionKind } from '@prisma/client';
+ import type { FastifyInstance } from 'fastify';
+ import { prisma } from '../db';
+-import { invalidateGroupSchedule } from '../lib/cache';
+ import { isIsoDate, isUuid } from '../lib/validation';
+ import { requireRole } from '../plugins/roles';
+ 
+@@ -80,7 +79,6 @@ export async function substitutionRoutes(app: FastifyInstance) {
+     const sub = await prisma.substitution.create({
+       data: { lessonId: lesson.id, kind, comment: (b.comment as string | null | undefined) ?? null, createdById: user.id, ...data },
+     });
+-    await invalidateGroupSchedule(lesson.groupId);
+ 
+     return reply.code(201).send({
+       id: sub.id,
+@@ -107,7 +105,6 @@ export async function substitutionRoutes(app: FastifyInstance) {
+     }
+ 
+     await prisma.substitution.delete({ where: { id } });
+-    await invalidateGroupSchedule(sub.lesson.groupId);
+     return reply.code(204).send();
+   });
+ }
+diff --git a/backend/test/e2e/f1-login.test.ts b/backend/test/e2e/f1-login.test.ts
+index c57f70b..5e6388d 100644
+--- a/backend/test/e2e/f1-login.test.ts
++++ b/backend/test/e2e/f1-login.test.ts
+@@ -113,6 +113,9 @@ describe('F1: refresh і вихід', () => {
+     const list = (await groups.json()) as { code: string; faculty: string }[];
+     expect(list.find((g) => g.code === 'ТЕСТ-31')?.faculty).toBe('Тестовий факультет');
+ 
++    // наступний обмін споживає next, і вже перший токен (на два покоління назад) відхиляється
++    const third = await postJson('/auth/refresh', { refreshToken: next.refreshToken, deviceId: DEVICE });
++    expect(third.status).toBe(200);
+     const reuse = await postJson('/auth/refresh', {
+       refreshToken: first.refreshToken,
+       deviceId: DEVICE,
+@@ -121,6 +124,30 @@ describe('F1: refresh і вихід', () => {
+     expect(await errorOf(reuse)).toBe('INVALID_REFRESH_TOKEN');
+   });
+ 
++  // Втрачена відповідь на refresh: клієнт повторює запит зі старим токеном. Вікно (REFRESH_REUSE_GRACE_SECONDS,
++  // 30 с за замовчуванням) віддає ту саму нову пару, але лише тому самому пристрою й поки пара не використана.
++  it('повтор refresh після втраченої відповіді віддає ту саму пару, чужому пристрою відмова', async () => {
++    const first = await login('f1.replay@lnu.edu.ua');
++
++    const a = await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: DEVICE });
++    expect(a.status).toBe(200);
++    const rotated = (await a.json()) as { accessToken: string; refreshToken: string };
++
++    const again = await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: DEVICE });
++    expect(again.status).toBe(200);
++    const replayed = (await again.json()) as { accessToken: string; refreshToken: string };
++    expect(replayed.refreshToken).toBe(rotated.refreshToken);
++    expect((await fetch(`${API}/groups`, { headers: authHeaders(replayed.accessToken) })).status).toBe(200);
++
++    const stranger = await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: 'another-device' });
++    expect(stranger.status).toBe(401);
++
++    // нова пара після цього працює, а після її використання перший токен знову мертвий
++    const next = await postJson('/auth/refresh', { refreshToken: rotated.refreshToken, deviceId: DEVICE });
++    expect(next.status).toBe(200);
++    expect((await postJson('/auth/refresh', { refreshToken: first.refreshToken, deviceId: DEVICE })).status).toBe(401);
++  });
++
+   it('refresh з іншого deviceId відхиляється', async () => {
+     const first = await login('f1.device@lnu.edu.ua');
+     const res = await postJson('/auth/refresh', {
+diff --git a/backend/test/e2e/f6-substitutions.test.ts b/backend/test/e2e/f6-substitutions.test.ts
+index 0991e74..5040689 100644
+--- a/backend/test/e2e/f6-substitutions.test.ts
++++ b/backend/test/e2e/f6-substitutions.test.ts
+@@ -11,11 +11,18 @@ let admin: string;
+ let headman: string;
+ let student: string;
+ 
+-// Нова унікальна пара для кожного тесту, щоб заміни з попередніх запусків не заважали
++// Дата кожної створеної пари: розклад тижня цієї пари треба запитувати за датою (див. uniqueSlot у helpers)
++const dateOf = new Map<string, string>();
++const lessonsOf = (token: string, lessonId: string) => weekLessons(token, dateOf.get(lessonId));
++
++// Нова унікальна пара для кожного тесту (власний слот), щоб заміни з попередніх запусків не заважали
+ async function freshLesson(): Promise<string> {
+   const subject = `E2E заміна ${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+-  expect((await importLesson(admin, subject)).status).toBe(200);
+-  return (await weekLessons(headman)).find((l) => l.subject === subject)!.id;
++  const { res, slot } = await importLesson(admin, subject);
++  expect(res.status).toBe(200);
++  const id = (await weekLessons(headman, slot.date)).find((l) => l.subject === subject)!.id;
++  dateOf.set(id, slot.date);
++  return id;
+ }
+ 
+ beforeAll(async () => {
+@@ -38,7 +45,7 @@ describe('F6: створення замін', () => {
+     const res = await send('POST', '/substitutions', headman, { lessonId, kind: 'CANCELLED', comment: 'Хвороба' });
+     expect(res.status).toBe(201);
+ 
+-    const lesson = (await weekLessons(student)).find((l) => l.id === lessonId);
++    const lesson = (await lessonsOf(student, lessonId)).find((l) => l.id === lessonId);
+     expect(lesson?.substitution?.kind).toBe('CANCELLED');
+   });
+ 
+@@ -51,9 +58,8 @@ describe('F6: створення замін', () => {
+     const l2 = await freshLesson();
+     expect((await send('POST', '/substitutions', headman, { lessonId: l2, kind: 'ROOM_CHANGED', newClassroomId: room.id })).status).toBe(201);
+ 
+-    const lessons = await weekLessons(student);
+-    expect(lessons.find((l) => l.id === l1)?.substitution?.newTeacher).toBe(teacher.fullName);
+-    expect(lessons.find((l) => l.id === l2)?.substitution?.newRoom).toBe(room.label);
++    expect((await lessonsOf(student, l1)).find((l) => l.id === l1)?.substitution?.newTeacher).toBe(teacher.fullName);
++    expect((await lessonsOf(student, l2)).find((l) => l.id === l2)?.substitution?.newRoom).toBe(room.label);
+   });
+ 
+   it('перенесення вимагає нову дату чи пару, що відрізняється від поточної', async () => {
+@@ -82,11 +88,11 @@ describe('F6: створення замін', () => {
+ 
+     // пара чужої групи, створена адміном
+     const subject = `E2E чужа ${Date.now()}`;
+-    await importLesson(admin, subject, 'ТЕСТ-32');
++    const { slot: foreignSlot } = await importLesson(admin, subject, 'ТЕСТ-32');
+     const other = await setupStudent('f6.other@lnu.edu.ua');
+     const groups = (await (await fetch(`${API}/groups`, { headers: authHeaders(other) })).json()) as { id: string; code: string }[];
+     await send('PATCH', '/me', other, { groupId: groups.find((g) => g.code === 'ТЕСТ-32')!.id });
+-    const foreign = (await weekLessons(other)).find((l) => l.subject === subject)!.id;
++    const foreign = (await weekLessons(other, foreignSlot.date)).find((l) => l.subject === subject)!.id;
+ 
+     const res = await send('POST', '/substitutions', headman, { lessonId: foreign, kind: 'CANCELLED' });
+     expect(res.status).toBe(403);
+@@ -103,7 +109,7 @@ describe('F6: скасування заміни', () => {
+ 
+     expect((await send('DELETE', `/substitutions/${created.id}`, student)).status).toBe(403);
+     expect((await send('DELETE', `/substitutions/${created.id}`, headman)).status).toBe(204);
+-    expect((await weekLessons(student)).find((l) => l.id === lessonId)?.substitution).toBeNull();
++    expect((await lessonsOf(student, lessonId)).find((l) => l.id === lessonId)?.substitution).toBeNull();
+     expect((await send('DELETE', `/substitutions/${created.id}`, headman)).status).toBe(404);
+     expect((await send('DELETE', '/substitutions/bad', headman)).status).toBe(400);
+   });
+diff --git a/backend/test/e2e/f7-admin.test.ts b/backend/test/e2e/f7-admin.test.ts
+index 92a0920..319af22 100644
+--- a/backend/test/e2e/f7-admin.test.ts
++++ b/backend/test/e2e/f7-admin.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from 'vitest';
+ import {
+-  adminToken, API, authHeaders, CORS_ORIGIN, currentMonday, emptyGroup, importLesson, loginToken, send, setupStudent, userId, weekLessons,
++  adminToken, API, authHeaders, CORS_ORIGIN, emptyGroup, importLesson, loginToken, send, setupStudent, uniqueSlot, userId, weekLessons,
+ } from './helpers';
+ 
+ const errorOf = async (res: Response) => ((await res.json()) as { error: string }).error;
+@@ -57,20 +57,70 @@ describe('F7: імпорт розкладу', () => {
+     const student = await setupStudent('f7.student@lnu.edu.ua');
+     const subject = `E2E імпорт ${Date.now()}`;
+ 
++    const slot = uniqueSlot();
+     for (let i = 0; i < 2; i++) {
+-      const res = await importLesson(admin, subject);
++      const { res } = await importLesson(admin, subject, 'ТЕСТ-31', slot);
+       expect(res.status).toBe(200);
+       expect(((await res.json()) as { imported: number }).imported).toBe(1);
+     }
+-    const found = (await weekLessons(student)).filter((l) => l.subject === subject);
++    const found = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
+     expect(found).toHaveLength(1);
++    expect(found[0].subject).toBe(subject);
++  });
++
++  it('виправлена назва предмета в тій самій парі оновлює її, а не додає другу; заміна старости лишається', async () => {
++    const admin = await adminToken();
++    const student = await setupStudent('f7.rename@lnu.edu.ua');
++    const slot = uniqueSlot();
++    const before = `E2E стара назва ${Date.now()}`;
++    const after = `E2E виправлена назва ${Date.now()}`;
++
++    expect((await importLesson(admin, before, 'ТЕСТ-31', slot)).res.status).toBe(200);
++    const original = (await weekLessons(student, slot.date)).find((l) => l.date === slot.date && l.pairNumber === slot.pair)!;
++    const sub = await send('POST', '/substitutions', admin, { lessonId: original.id, kind: 'CANCELLED' });
++    expect(sub.status).toBe(201);
++
++    expect((await importLesson(admin, after, 'ТЕСТ-31', slot)).res.status).toBe(200);
++    const inSlot = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
++    expect(inSlot).toHaveLength(1);
++    expect(inSlot[0]).toMatchObject({ id: original.id, subject: after });
++    expect(inSlot[0].substitution?.kind).toBe('CANCELLED');
++  });
++
++  it('два різних записи в одному слоті одного файлу дають 422', async () => {
++    const admin = await adminToken();
++    const slot = uniqueSlot();
++    const res = await send('POST', '/admin/schedule/import', admin, {
++      lessons: [
++        { group: 'ТЕСТ-31', ...slot, subject: 'Перший' },
++        { group: 'ТЕСТ-31', ...slot, subject: 'Другий' },
++      ],
++    });
++    expect(res.status).toBe(422);
++    expect(((await res.json()) as { details: string[] }).details[0]).toContain('уже є запис у файлі');
++  });
++
++  it('підгрупи одного слота не конфліктують', async () => {
++    const admin = await adminToken();
++    const student = await setupStudent('f7.subgroups@lnu.edu.ua');
++    const slot = uniqueSlot(2);
++    const res = await send('POST', '/admin/schedule/import', admin, {
++      lessons: [
++        { group: 'ТЕСТ-31', ...slot, subject: 'Лаб А', subgroup: 1 },
++        { group: 'ТЕСТ-31', ...slot, subject: 'Лаб Б', subgroup: 2 },
++      ],
++    });
++    expect(res.status).toBe(200);
++    const found = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
++    expect(found.map((l) => l.subject).sort()).toEqual(['Лаб А', 'Лаб Б']);
+   });
+ 
+   it('CSV-імпорт (роздільник ; і лапки)', async () => {
+     const admin = await adminToken();
+     const student = await setupStudent('f7.csv@lnu.edu.ua');
+     const subject = `E2E csv; "лапки" ${Date.now()}`;
+-    const csv = `group;date;pair;subject;type;room\nТЕСТ-31;${currentMonday()};4;"${subject.replace(/"/g, '""')}";LAB;1/Б\n`;
++    const slot = uniqueSlot(4);
++    const csv = `group;date;pair;subject;type;room\nТЕСТ-31;${slot.date};4;"${subject.replace(/"/g, '""')}";LAB;1/Б\n`;
+ 
+     const res = await fetch(`${API}/admin/schedule/import`, {
+       method: 'POST',
+@@ -78,10 +128,30 @@ describe('F7: імпорт розкладу', () => {
+       body: csv,
+     });
+     expect(res.status).toBe(200);
+-    const lesson = (await weekLessons(student)).find((l) => l.subject === subject);
++    const lesson = (await weekLessons(student, slot.date)).find((l) => l.subject === subject);
+     expect(lesson).toBeTruthy();
+   });
+ 
++  it('імпорт лише довідників без пар: виправляє адресу корпусу, яку бачать студенти', async () => {
++    const admin = await adminToken();
++    const student = await setupStudent('f7.reference@lnu.edu.ua');
++    const code = 'ТЕСТ-К';
++    const address = `вул. Довідкова, ${Date.now()}`;
++
++    const res = await send('POST', '/admin/schedule/import', admin, {
++      buildings: [{ code, name: 'Корпус для тестів довідників', address }],
++    });
++    expect(res.status).toBe(200);
++    expect(await res.json()).toMatchObject({ imported: 0, groups: 0 });
++
++    const buildings = (await (await fetch(`${API}/buildings`, { headers: authHeaders(student) })).json()) as { code: string; address: string }[];
++    expect(buildings.find((b) => b.code === code)?.address).toBe(address);
++
++    // порожній запит чи порожні lessons без довідників, як і раніше, помилка
++    expect((await send('POST', '/admin/schedule/import', admin, {})).status).toBe(422);
++    expect((await send('POST', '/admin/schedule/import', admin, { lessons: [] })).status).toBe(422);
++  });
++
+   it('некоректні дані дають 422 з переліком помилок', async () => {
+     const admin = await adminToken();
+     const res = await send('POST', '/admin/schedule/import', admin, {
+@@ -97,14 +167,15 @@ describe('F7: імпорт розкладу', () => {
+     const admin = await adminToken();
+     const student = await setupStudent('f7.atomic@lnu.edu.ua');
+     const subject = `E2E rollback ${Date.now()}`;
++    const slot = uniqueSlot(3);
+     const res = await send('POST', '/admin/schedule/import', admin, {
+       lessons: [
+-        { group: 'ТЕСТ-31', date: currentMonday(), pair: 3, subject },
+-        { group: 'НЕМАЄ-99', date: currentMonday(), pair: 3, subject },
++        { group: 'ТЕСТ-31', ...slot, subject },
++        { group: 'НЕМАЄ-99', ...slot, subject },
+       ],
+     });
+     expect(res.status).toBe(422);
+-    expect((await weekLessons(student)).some((l) => l.subject === subject)).toBe(false);
++    expect((await weekLessons(student, slot.date)).some((l) => l.subject === subject)).toBe(false);
+   });
+ });
+ 
+diff --git a/backend/test/e2e/helpers.ts b/backend/test/e2e/helpers.ts
+index 3307542..8971da6 100644
+--- a/backend/test/e2e/helpers.ts
++++ b/backend/test/e2e/helpers.ts
+@@ -73,23 +73,44 @@ export function currentMonday(): string {
+ 
+ export interface WeekLesson {
+   id: string;
++  date: string;
+   subject: string;
+   pairNumber: number;
+   substitution: { id: string; kind: string; newTeacher: string | null; newRoom: string | null } | null;
+ }
+ 
+-export async function weekLessons(token: string): Promise<WeekLesson[]> {
+-  const res = await fetch(`${API}/schedule/week`, { headers: authHeaders(token) });
++// Розклад тижня, до якого належить date (за замовчуванням поточний)
++export async function weekLessons(token: string, date?: string): Promise<WeekLesson[]> {
++  const res = await fetch(`${API}/schedule/week${date ? `?date=${date}` : ''}`, { headers: authHeaders(token) });
+   return ((await res.json()) as { lessons: WeekLesson[] }).lessons;
+ }
+ 
++export interface Slot {
++  date: string;
++  pair: number;
++}
++
++// Пара ідентифікується слотом (група, дата, номер пари, підгрупа), тож тести, які створюють «свіжі» пари,
++// беруть унікальну дату далеко в майбутньому: інакше вони перезаписували б одна одну й пари з попередніх запусків
++// (разом із їхніми замінами). Перегляд такої пари: weekLessons(token, slot.date).
++export function uniqueSlot(pair = 5): Slot {
++  const day = Math.floor(Math.random() * 36500);
++  return { date: new Date(Date.UTC(2100, 0, 1) + day * 86_400_000).toISOString().slice(0, 10), pair };
++}
++
+ // Створює через імпорт нову унікальну пару (щоб тести не залежали від попередніх запусків)
+-export async function importLesson(admin: string, subject: string, group = 'ТЕСТ-31'): Promise<Response> {
+-  return send('POST', '/admin/schedule/import', admin, {
++export async function importLesson(
++  admin: string,
++  subject: string,
++  group = 'ТЕСТ-31',
++  slot: Slot = uniqueSlot(),
++): Promise<{ res: Response; slot: Slot }> {
++  const res = await send('POST', '/admin/schedule/import', admin, {
+     faculties: [{ name: 'Тестовий факультет', short_name: 'ТФ' }],
+     groups: [{ code: group, course: 3, faculty: 'ТФ' }],
+-    lessons: [{ group, date: currentMonday(), pair: 5, subject, type: 'PRACTICE', subgroup: 0 }],
++    lessons: [{ group, date: slot.date, pair: slot.pair, subject, type: 'PRACTICE', subgroup: 0 }],
+   });
++  return { res, slot };
+ }
+ 
+ // Origin веб-адмінки, дозволений у CORS_ORIGINS сервера E2E (див. README і ci.yml)
+@@ -100,7 +121,7 @@ export async function emptyGroup(admin: string, code: string): Promise<string> {
+   const res = await send('POST', '/admin/schedule/import', admin, {
+     faculties: [{ name: 'Тестовий факультет', short_name: 'ТФ' }],
+     groups: [{ code, course: 1, faculty: 'ТФ' }],
+-    lessons: [{ group: 'ТЕСТ-31', date: currentMonday(), pair: 5, subject: `Службова пара ${code}`, type: 'OTHER' }],
++    lessons: [{ group: 'ТЕСТ-31', ...uniqueSlot(), subject: `Службова пара ${code}`, type: 'OTHER' }],
+   });
+   if (res.status !== 200) throw new Error(`Не вдалося створити групу ${code}: ${res.status}`);
+   const groups = (await (await fetch(`${API}/groups`, { headers: authHeaders(admin) })).json()) as { id: string; code: string }[];
+diff --git a/backend/test/unit/app-errors.test.ts b/backend/test/unit/app-errors.test.ts
+new file mode 100644
+index 0000000..1a1079c
+--- /dev/null
++++ b/backend/test/unit/app-errors.test.ts
+@@ -0,0 +1,122 @@
++import { randomUUID } from 'node:crypto';
++import { Prisma } from '@prisma/client';
++import { afterAll, describe, expect, it } from 'vitest';
++import { buildApp, isDependencyUnavailable } from '../../src/app';
++import { signAccessToken } from '../../src/lib/tokens';
++
++// Роутер без запуску сервера (inject). Додаткові маршрути лише для перевірки обробника помилок.
++function appWith(opts: Parameters<typeof buildApp>[0] = {}) {
++  const app = buildApp(opts);
++  // Через register, а не напряму: плагін лімітів діє лише на маршрути, додані після нього в черзі реєстрації
++  app.register(async (i) => {
++    i.get('/__boom/generic', async () => {
++      throw new Error('secret internal detail: password=hunter2 at prisma.user.findMany');
++    });
++    i.get('/__boom/redis', async () => {
++      throw Object.assign(new Error('Reached the max retries per request limit (which is 2)'), { name: 'MaxRetriesPerRequestError' });
++    });
++    i.get('/__boom/db', async () => {
++      throw new Prisma.PrismaClientKnownRequestError("Can't reach database server at db:5432", { code: 'P1001', clientVersion: 'x' });
++    });
++    i.get('/__boom/prisma-other', async () => {
++      throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`email`)', { code: 'P2002', clientVersion: 'x' });
++    });
++    i.get('/__ok', async () => ({ ok: true }));
++  });
++  return app;
++}
++
++const apps: ReturnType<typeof buildApp>[] = [];
++const make = (opts?: Parameters<typeof buildApp>[0]) => {
++  const app = appWith(opts);
++  apps.push(app);
++  return app;
++};
++afterAll(() => Promise.all(apps.map((a) => a.close())));
++
++describe('обробник помилок', () => {
++  it('500: клієнт бачить лише INTERNAL_ERROR і requestId, без тексту винятку', async () => {
++    const res = await make().inject('/__boom/generic');
++    expect(res.statusCode).toBe(500);
++    const body = res.json();
++    expect(body).toEqual({ error: 'INTERNAL_ERROR', requestId: expect.any(String) });
++    expect(res.body).not.toContain('hunter2');
++    expect(res.body).not.toContain('prisma');
++    expect(res.headers['x-request-id']).toBe(body.requestId);
++  });
++
++  it.each([['/__boom/redis'], ['/__boom/db']])('недоступна залежність (%s) дає 503 TEMPORARILY_UNAVAILABLE', async (path) => {
++    const res = await make().inject(path);
++    expect(res.statusCode).toBe(503);
++    expect(res.json()).toEqual({ error: 'TEMPORARILY_UNAVAILABLE', requestId: expect.any(String) });
++    expect(res.body).not.toContain('5432');
++  });
++
++  it('інші помилки Prisma лишаються 500 (не плутаємо з тимчасовою недоступністю)', async () => {
++    const res = await make().inject('/__boom/prisma-other');
++    expect(res.statusCode).toBe(500);
++    expect(res.json().error).toBe('INTERNAL_ERROR');
++    expect(res.body).not.toContain('email');
++  });
++
++  it('зламаний JSON дає 400 BAD_REQUEST, невідомий маршрут 404 NOT_FOUND', async () => {
++    const app = make();
++    const bad = await app.inject({ method: 'POST', url: '/auth/refresh', headers: { 'content-type': 'application/json' }, payload: '{not json' });
++    expect(bad.statusCode).toBe(400);
++    expect(bad.json()).toEqual({ error: 'BAD_REQUEST' });
++
++    const missing = await app.inject('/нема-такого');
++    expect(missing.statusCode).toBe(404);
++    expect(missing.json()).toEqual({ error: 'NOT_FOUND' });
++  });
++
++  it('isDependencyUnavailable розпізнає мережеві помилки й не реагує на звичайні', () => {
++    expect(isDependencyUnavailable(Object.assign(new Error('x'), { code: 'ECONNREFUSED' }))).toBe(true);
++    expect(isDependencyUnavailable(new Error('Connection is closed.'))).toBe(true);
++    expect(isDependencyUnavailable(new Error('boom'))).toBe(false);
++    expect(isDependencyUnavailable(null)).toBe(false);
++  });
++});
++
++describe('ліміти запитів', () => {
++  const ns = () => `rl-test-${randomUUID()}:`;
++
++  it('вхід і refresh: після ліміту 429 RATE_LIMITED з Retry-After, а /health не лімітується', async () => {
++    const app = make({ rateLimit: { perMinute: 1000, authPerMinute: 3, nameSpace: ns() } });
++    const post = () => app.inject({ method: 'POST', url: '/auth/refresh', payload: {} });
++
++    for (let i = 0; i < 3; i++) expect((await post()).statusCode).toBe(400);
++    const limited = await post();
++    expect(limited.statusCode).toBe(429);
++    expect(limited.json()).toEqual({ error: 'RATE_LIMITED', retryAfterSeconds: expect.any(Number) });
++    expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
++
++    for (let i = 0; i < 5; i++) expect((await app.inject('/health')).statusCode).toBe(200);
++  });
++
++  it('вхід і звичайні запити мають окремі лічильники', async () => {
++    const app = make({ rateLimit: { perMinute: 1000, authPerMinute: 2, nameSpace: ns() } });
++    for (let i = 0; i < 3; i++) await app.inject({ method: 'POST', url: '/auth/refresh', payload: {} });
++    expect((await app.inject('/__ok')).statusCode).toBe(200);
++  });
++
++  it('звичайні запити рахуються на користувача, а не на спільний IP', async () => {
++    const app = make({ rateLimit: { perMinute: 3, authPerMinute: 100, nameSpace: ns() } });
++    const as = (userId: string) => ({ authorization: `Bearer ${signAccessToken(userId)}` });
++    const a = randomUUID();
++    const b = randomUUID();
++
++    for (let i = 0; i < 3; i++) expect((await app.inject({ url: '/__ok', headers: as(a) })).statusCode).toBe(200);
++    expect((await app.inject({ url: '/__ok', headers: as(a) })).statusCode).toBe(429);
++    // той самий IP, інший користувач: свій лічильник
++    expect((await app.inject({ url: '/__ok', headers: as(b) })).statusCode).toBe(200);
++  });
++
++  it('без токена, або з підробленим, ліміт рахується на IP', async () => {
++    const app = make({ rateLimit: { perMinute: 2, authPerMinute: 100, nameSpace: ns() } });
++    const fake = { authorization: 'Bearer not-a-real-token' };
++    expect((await app.inject('/__ok')).statusCode).toBe(200);
++    expect((await app.inject({ url: '/__ok', headers: fake })).statusCode).toBe(200);
++    expect((await app.inject('/__ok')).statusCode).toBe(429);
++  });
++});
+diff --git a/backend/test/unit/import.test.ts b/backend/test/unit/import.test.ts
+index 0bfd8c5..1c68ce0 100644
+--- a/backend/test/unit/import.test.ts
++++ b/backend/test/unit/import.test.ts
+@@ -23,11 +23,52 @@ describe('validateImport', () => {
+     ['підгрупа 5', { lessons: [{ ...lesson, subgroup: 5 }] }],
+     ['аудиторія без корпусу', { lessons: [{ ...lesson, room: '218' }] }],
+     ['дубль пари', { lessons: [lesson, lesson] }],
++    ['інший предмет у тому самому слоті', { lessons: [lesson, { ...lesson, subject: 'Інший предмет' }] }],
+     ['групи не масив', { groups: 'x', lessons: [lesson] }],
+   ])('відхиляє: %s', (_n, payload) => {
+     expect(validateImport(payload).ok).toBe(false);
+   });
+ 
++  describe('імпорт лише довідників', () => {
++    const building = { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Генерала Тарнавського, 107' };
++
++    it('приймає довідники без пар', () => {
++      const r = validateImport({ buildings: [building] });
++      expect(r.ok).toBe(true);
++      if (r.ok) {
++        expect(r.data.lessons).toEqual([]);
++        expect(r.data.buildings).toEqual([building]);
++      }
++    });
++
++    it('порожній запит і порожні lessons без довідників відхиляються', () => {
++      expect(validateImport({}).ok).toBe(false);
++      expect(validateImport({ lessons: [] }).ok).toBe(false);
++      expect(validateImport({ buildings: [] }).ok).toBe(false);
++    });
++
++    it('довідники з помилками все одно відхиляються', () => {
++      const r = validateImport({ buildings: [{ code: 'Т', name: '', address: '' }] });
++      expect(r.ok).toBe(false);
++    });
++
++    it('lessons не масив із довідниками теж помилка', () => {
++      expect(validateImport({ buildings: [building], lessons: 'x' }).ok).toBe(false);
++    });
++  });
++
++  it('підгрупи одного слота, різні дні й різні групи не є дублями', () => {
++    const r = validateImport({
++      lessons: [
++        { ...lesson, subgroup: 1 },
++        { ...lesson, subgroup: 2, subject: 'Лаб 2' },
++        { ...lesson, date: '2026-10-13' },
++        { ...lesson, group: 'ПМІ-32' },
++      ],
++    });
++    expect(r.ok).toBe(true);
++  });
++
+   it('зібрані помилки містять номер рядка', () => {
+     const r = validateImport({ lessons: [lesson, { ...lesson, pair: 'x' }] });
+     expect(!r.ok && r.errors[0]).toContain('lessons[1].pair');
+diff --git a/backend/test/unit/refresh-rotation.test.ts b/backend/test/unit/refresh-rotation.test.ts
+new file mode 100644
+index 0000000..1cd4395
+--- /dev/null
++++ b/backend/test/unit/refresh-rotation.test.ts
+@@ -0,0 +1,60 @@
++import { randomUUID } from 'node:crypto';
++import { afterAll, describe, expect, it, vi } from 'vitest';
++
++// config читає змінні при імпорті, тож вікно повторного refresh задаємо до нього (1 с, щоб перевірити спливання)
++vi.hoisted(() => {
++  process.env.REFRESH_REUSE_GRACE_SECONDS = '1';
++});
++
++import { redis } from '../../src/redis';
++import { issueRefreshToken, revokeRefreshToken, rotateRefreshToken } from '../../src/lib/tokens';
++
++afterAll(() => redis.disconnect());
++
++const DEVICE = 'unit-device';
++const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
++
++describe('rotateRefreshToken', () => {
++  it('обмін видає нову пару, а повтор у вікні віддає ту саму пару', async () => {
++    const userId = randomUUID();
++    const first = await issueRefreshToken(userId, DEVICE);
++
++    const a = await rotateRefreshToken(first, DEVICE);
++    expect(a?.userId).toBe(userId);
++    expect(a?.refreshToken).not.toBe(first);
++
++    const replay = await rotateRefreshToken(first, DEVICE);
++    expect(replay).toEqual(a);
++  });
++
++  it('повтор відхиляється: інший пристрій, після використання нової пари, після спливання вікна', async () => {
++    const userId = randomUUID();
++    const first = await issueRefreshToken(userId, DEVICE);
++    const a = (await rotateRefreshToken(first, DEVICE))!;
++
++    expect(await rotateRefreshToken(first, 'other-device')).toBeNull();
++
++    // нову пару використали: повтор першого токена вже не допускається
++    const b = await rotateRefreshToken(a.refreshToken, DEVICE);
++    expect(b).not.toBeNull();
++    expect(await rotateRefreshToken(first, DEVICE)).toBeNull();
++
++    // а без використання вікно спливає за секунду
++    const c = await issueRefreshToken(userId, DEVICE);
++    expect(await rotateRefreshToken(c, DEVICE)).not.toBeNull();
++    await sleep(1200);
++    expect(await rotateRefreshToken(c, DEVICE)).toBeNull();
++  });
++
++  it('відкликана нова пара не віддається повтором', async () => {
++    const userId = randomUUID();
++    const first = await issueRefreshToken(userId, DEVICE);
++    const a = (await rotateRefreshToken(first, DEVICE))!;
++    await revokeRefreshToken(a.refreshToken);
++    expect(await rotateRefreshToken(first, DEVICE)).toBeNull();
++  });
++
++  it('сміття і токен іншого типу дають null', async () => {
++    expect(await rotateRefreshToken('garbage', DEVICE)).toBeNull();
++  });
++});
+diff --git a/deploy/docker-compose.prod.yml b/deploy/docker-compose.prod.yml
+index 048d398..68123c4 100644
+--- a/deploy/docker-compose.prod.yml
++++ b/deploy/docker-compose.prod.yml
+@@ -49,6 +49,10 @@ services:
+       MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-lnu.edu.ua}
+       CORS_ORIGINS: ${CORS_ORIGINS:-}
++      REFRESH_REUSE_GRACE_SECONDS: ${REFRESH_REUSE_GRACE_SECONDS:-30}
++      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
++      RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-300}
++      RATE_LIMIT_IMPORT_PER_MINUTE: ${RATE_LIMIT_IMPORT_PER_MINUTE:-30}
+       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+     depends_on:
+       postgres:
+diff --git a/docs/deploy-vps.md b/docs/deploy-vps.md
+index ba46c16..1323fdb 100644
+--- a/docs/deploy-vps.md
++++ b/docs/deploy-vps.md
+@@ -139,6 +139,29 @@ curl -i https://<домен>/dev         # має бути 404 (фейковий
+ Далі: `ADMIN_EMAILS` у `.env` дає роль адміна при вході; розклад імпортується через `POST /admin/schedule/import`
+ (формат у README). Після зміни `.env` виконайте `./deploy/deploy.sh`, щоб контейнери перезапустились з новими значеннями.
+ 
++### Оновлення довідника корпусів на проді
++
++Адреси корпусів, які бачить мобільний застосунок («Прокласти маршрут» шукає за адресою), лежать у базі. Виправлення в
++`backend/prisma/seed/schedule.seed.json` на прод автоматично не потрапляють: seed на проді не запускається.
++
++Коли вхід через Microsoft працює, довідники можна імпортувати без пар (адмін-токен із відповіді `POST /auth/microsoft`):
++
++```bash
++jq '{buildings}' backend/prisma/seed/schedule.seed.json | curl -sS -X POST https://<домен>/admin/schedule/import \
++  -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' --data @-
++# {"imported":0,"groups":0,"warnings":[]}
++```
++
++Імпорт оновлює назву й адресу наявних корпусів за літерою і додає нові. До появи входу те саме робить SQL на сервері
++(значення беріть із seed-файлу):
++
++```bash
++docker compose -f deploy/docker-compose.prod.yml exec -T postgres psql -U depara -d depara <<'SQL'
++UPDATE building SET address = 'вул. Драгоманова, 50' WHERE code = 'Б';
++UPDATE building SET address = 'вул. Генерала Тарнавського, 107' WHERE code = 'Т';
++SQL
++```
++
+ ## 5. Автодеплой із GitHub
+ 
+ Після зеленого CI на `develop` воркфлоу `.github/workflows/deploy.yml` заходить на сервер по SSH і запускає `deploy.sh`.
+diff --git a/docs/deploy.md b/docs/deploy.md
+index e6118eb..b746baf 100644
+--- a/docs/deploy.md
++++ b/docs/deploy.md
+@@ -30,6 +30,10 @@ Docker або Node (Render, Railway, Fly.io тощо). Нижче загальн
+ | `MICROSOFT_CLIENT_ID` | для входу | Application (client) ID застосунку в Microsoft Entra, він же `aud` ID-токена. Без нього `POST /auth/microsoft` відповідає 503 |
+ | `MICROSOFT_TENANT_ID` | для входу | Directory (tenant) ID організації, з якої пускаємо (`tid` токена). Токени інших тенантів відхиляються |
+ | `ALLOWED_EMAIL_DOMAIN` | ні | Домен пошти, який пускаємо. За замовчуванням `lnu.edu.ua` |
++| `REFRESH_REUSE_GRACE_SECONDS` | ні | Вікно (секунди, за замовчуванням 30), у якому повтор refresh зі старим токеном з того ж пристрою віддає ту саму нову пару: клієнт не втрачає сесію, якщо відповідь загубилась. 0 вимикає |
++| `RATE_LIMIT_PER_MINUTE` | ні | Запитів на хвилину на користувача (за токеном), без токена на IP. За замовчуванням 600. Лічильники в Redis; якщо він недоступний, ліміт не діє |
++| `RATE_LIMIT_AUTH_PER_MINUTE` | ні | Вхід, refresh і вихід, на IP. За замовчуванням 300: студенти часто за спільним IP кампусу, тож ліміт щедрий |
++| `RATE_LIMIT_IMPORT_PER_MINUTE` | ні | Імпорт розкладу на адміна. За замовчуванням 30 |
+ | `CORS_ORIGINS` | для веб-адмінки | Origin веб-адмінки через кому, без слеша в кінці. Порожньо = CORS вимкнений (мобільному застосунку він не потрібен) |
+ | `ADMIN_EMAILS` | для першого адміна | Пошти через кому, які отримують роль ADMIN при вході |
+ 
+diff --git a/mobile/package-lock.json b/mobile/package-lock.json
+index 7a3bee1..2234a60 100644
+--- a/mobile/package-lock.json
++++ b/mobile/package-lock.json
+@@ -9,7 +9,10 @@
+       "version": "1.0.0",
+       "dependencies": {
+         "@expo/vector-icons": "^15.1.1",
++        "@react-native-async-storage/async-storage": "^2.2.0",
++        "@tanstack/query-async-storage-persister": "^5.105.3",
+         "@tanstack/react-query": "^5.104.3",
++        "@tanstack/react-query-persist-client": "^5.105.3",
+         "expo": "~58.0.22",
+         "expo-constants": "~58.0.14",
+         "expo-font": "~58.0.11",
+@@ -34,7 +37,8 @@
+         "@wdio/local-runner": "^10.0.2",
+         "@wdio/mocha-framework": "^10.0.1",
+         "@wdio/spec-reporter": "^10.0.1",
+-        "typescript": "~6.0.3"
++        "typescript": "~6.0.3",
++        "vitest": "^5.1.0"
+       }
+     },
+     "node_modules/@babel/code-frame": {
+@@ -3465,6 +3469,18 @@
+         }
+       }
+     },
++    "node_modules/@react-native-async-storage/async-storage": {
++      "version": "2.2.0",
++      "resolved": "https://registry.npmjs.org/@react-native-async-storage/async-storage/-/async-storage-2.2.0.tgz",
++      "integrity": "sha512-gvRvjR5JAaUZF8tv2Kcq/Gbt3JHwbKFYfmb445rhOj6NUMx3qPLixmDx5pZAyb9at1bYvJ4/eTUipU5aki45xw==",
++      "license": "MIT",
++      "dependencies": {
++        "merge-options": "^3.0.4"
++      },
++      "peerDependencies": {
++        "react-native": "^0.0.0-0 || >=0.65 <1.0"
++      }
++    },
+     "node_modules/@react-native-masked-view/masked-view": {
+       "version": "0.3.2",
+       "resolved": "https://registry.npmjs.org/@react-native-masked-view/masked-view/-/masked-view-0.3.2.tgz",
+@@ -3830,6 +3846,284 @@
+         }
+       }
+     },
++    "node_modules/@rolldown/binding-android-arm-eabi": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-android-arm-eabi/-/binding-android-arm-eabi-1.2.16.tgz",
++      "integrity": "sha512-ia3DwAs0OsMGS7+IConptSiyk9pEXkOx/AbJ2n/lAGxH3QkWQus1t8d7gnAT38FCU2sQu8lUbeR6AiZFv4JxaA==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-android-arm64": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-android-arm64/-/binding-android-arm64-1.2.16.tgz",
++      "integrity": "sha512-kx5wBiMB6E7TEvpl2B9gjLU004BkvEm2Dr941BFjx/SontPwSzNuQUIoVKxHHoSjpFIfHMmcguyLOtyn0hObRg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-darwin-arm64": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-darwin-arm64/-/binding-darwin-arm64-1.2.16.tgz",
++      "integrity": "sha512-qslZrXnKJU4cUpjoAmtAo/KQM9e2IRMlmpig6Zpwj+8KWxW8v+nkAf9216Bsek9lOC1jvg2yCjygCFo2f83msQ==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-darwin-x64": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-darwin-x64/-/binding-darwin-x64-1.2.16.tgz",
++      "integrity": "sha512-FdF+y48ND13eAyM2mQn+85kvAqNlvRWROy2rhgA463X/0Gv4vGtazZtfaF1mRBLscYvtOlh4QnLjOWiFzX69OQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-freebsd-x64": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-freebsd-x64/-/binding-freebsd-x64-1.2.16.tgz",
++      "integrity": "sha512-ddjqFM5e95AgLbUPtKIS7V1KTVlA0RUgCVr5mn+/IEhsdy3pr+Vuj/HZ7nlMN2FyxIwUktOH1LEPIQXO1v9y1Q==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-linux-arm-gnueabihf": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-linux-arm-gnueabihf/-/binding-linux-arm-gnueabihf-1.2.16.tgz",
++      "integrity": "sha512-tHdKWbFkFBI687iim3LIyIvyL7j66VvQYkDPss5Stn/qyE2tWkR1YD0dXmXPFKKqT/o5ZEJVsaRsWS2meQwGOA==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-linux-arm64-gnu": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-gnu/-/binding-linux-arm64-gnu-1.2.16.tgz",
++      "integrity": "sha512-FJiLGAblPBMlBEdbOqw6kW6QcXDWAf/oJu7gYs9ZJZwmg+K+/zjFLxPTIY9izJUzxzc24FHvmseyA0IvJSl17w==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-linux-arm64-musl": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-musl/-/binding-linux-arm64-musl-1.2.16.tgz",
++      "integrity": "sha512-hrJpblMsrQ58U9veWpbXzkhV5zStunds6HWLprqq1qauvgBr1E6P+24kLj6lSLI9vjRn/RYpjprhkHQPKGWpNg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-linux-ppc64-gnu": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-linux-ppc64-gnu/-/binding-linux-ppc64-gnu-1.2.16.tgz",
++      "integrity": "sha512-qJd/dC6j6CwLG9/s/RP2nb1RZ0GIgj7Ioj7x/SYa3RzjVrlzrmH0fhIOpfvqQDeIsdP0loi+kHaMhJzY1PBIaA==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-linux-s390x-gnu": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-linux-s390x-gnu/-/binding-linux-s390x-gnu-1.2.16.tgz",
++      "integrity": "sha512-Vx7Xg5uUJuNcujJjI70OICaH0EYj80BtOLZTSN7uOYg8QOLlyKnaG0IW7Fn/J0IpJsaKzmDKMhOQv1JBM9m9vg==",
++      "cpu": [
++        "s390x"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-linux-x64-gnu": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.16.tgz",
++      "integrity": "sha512-TNKhgE3uJTsTzatUSSYt0Kgo+Oa2uSlSjz4r1aEIea7HX6ULBym4fAlYUhG1i6pjNf2njfCUAfKwr6C3E9Xg1w==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-linux-x64-musl": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-linux-x64-musl/-/binding-linux-x64-musl-1.2.16.tgz",
++      "integrity": "sha512-7chXdpjXZ8qG0+mIxECN3cT9kvhZ3/oZhMX6Pp876P7CDrIy8nJswva6Mq357JR7eYXfuskwZxMeV1SzoZdHrA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-openharmony-arm64": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-openharmony-arm64/-/binding-openharmony-arm64-1.2.16.tgz",
++      "integrity": "sha512-Kwjt+7uNTJK5/MDkGWGVO2KQPnj8yAV75dMpfwyHZrJSXWHrniOB0aUEWlVYf3H1hOqFLIStLdM5QXq6bnKmOQ==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openharmony"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-win32-arm64-msvc": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-win32-arm64-msvc/-/binding-win32-arm64-msvc-1.2.16.tgz",
++      "integrity": "sha512-/LH6WfjDRXXJz/p5xl4TmU+jpcnwcxbKEQBW/GZE0JHfN0lGIyTtsUEGaQ/q/GikkGJ2yLKe6pwm7AnEWO8pdw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/binding-win32-x64-msvc": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/@rolldown/binding-win32-x64-msvc/-/binding-win32-x64-msvc-1.2.16.tgz",
++      "integrity": "sha512-1lv1KvX0Z871zfk7vw+dnXMMnHNyDwMzWG8Kv3HxDXMOhzCX4SHc7HK319fInP0i+0p9D8brkfzL7pJOaGl+tw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "peer": true,
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      }
++    },
++    "node_modules/@rolldown/pluginutils": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.0.1.tgz",
++      "integrity": "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==",
++      "dev": true,
++      "license": "MIT",
++      "peer": true
++    },
+     "node_modules/@sec-ant/readable-stream": {
+       "version": "0.4.1",
+       "resolved": "https://registry.npmjs.org/@sec-ant/readable-stream/-/readable-stream-0.4.1.tgz",
+@@ -3857,23 +4151,50 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
++    "node_modules/@tanstack/query-async-storage-persister": {
++      "version": "5.105.3",
++      "resolved": "https://registry.npmjs.org/@tanstack/query-async-storage-persister/-/query-async-storage-persister-5.105.3.tgz",
++      "integrity": "sha512-7GwtrKMOlstLV9D9UeAEEQa1tydlHvYgpJ1iaVnWZSsEl4nNZjGc+wij455csAsYk60McFU7ujaEI2+lkawzdw==",
++      "license": "MIT",
++      "dependencies": {
++        "@tanstack/query-core": "5.105.3",
++        "@tanstack/query-persist-client-core": "5.105.3"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/tannerlinsley"
++      }
++    },
+     "node_modules/@tanstack/query-core": {
+-      "version": "5.105.1",
+-      "resolved": "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.105.1.tgz",
+-      "integrity": "sha512-B/rNlZoZ54w1dlddiUt9oEe1SLM+37c00SKLJEg9YH+7as3Y54P81o9Fh+2ujZ36tXPnQJ5oVe7AcyEWkyFhPg==",
++      "version": "5.105.3",
++      "resolved": "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.105.3.tgz",
++      "integrity": "sha512-v1rbNy7MB/4Akth7CQH+CerV13K7Ok9hAusEsfz4sCjDdu3/kOSJPoWfoB+YjdEX1eBFBWKNAGE5nqZCgdlHDw==",
+       "license": "MIT",
+       "funding": {
+         "type": "github",
+         "url": "https://github.com/sponsors/tannerlinsley"
+       }
+     },
++    "node_modules/@tanstack/query-persist-client-core": {
++      "version": "5.105.3",
++      "resolved": "https://registry.npmjs.org/@tanstack/query-persist-client-core/-/query-persist-client-core-5.105.3.tgz",
++      "integrity": "sha512-VcK3dfkvYkEb1AsX/VK/LJAa9nGN0OE5x2SnFHKY5Rwzixg9zqXdcr7fCpyolEWj/cygOd8Nt1ZRTPzfB0lEaw==",
++      "license": "MIT",
++      "dependencies": {
++        "@tanstack/query-core": "5.105.3"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/tannerlinsley"
++      }
++    },
+     "node_modules/@tanstack/react-query": {
+-      "version": "5.105.1",
+-      "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.105.1.tgz",
+-      "integrity": "sha512-qcu+/+PtBOjW8qU4/0l47QVmNG7hPOWsCLzP0bTRhE1X7HYa757C4732wXTUH0QhCjTV1yedX8onsCiEwlNYrA==",
++      "version": "5.105.3",
++      "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.105.3.tgz",
++      "integrity": "sha512-dj5hGWZmwoc9NG4enoXuYbiYwb5FxgJYPVv06eUgicMTfEMTRXn08Xv9D/r1V8TfjAv+BpxdvZFzJ1h3hSWZcQ==",
+       "license": "MIT",
+       "dependencies": {
+-        "@tanstack/query-core": "5.105.1"
++        "@tanstack/query-core": "5.105.3"
+       },
+       "funding": {
+         "type": "github",
+@@ -3889,6 +4210,54 @@
+         }
+       }
+     },
++    "node_modules/@tanstack/react-query-persist-client": {
++      "version": "5.105.3",
++      "resolved": "https://registry.npmjs.org/@tanstack/react-query-persist-client/-/react-query-persist-client-5.105.3.tgz",
++      "integrity": "sha512-WOs2QBYHZAFAYFsCdJEVhmqxYpnTp5wHTRwGImEfo9Ykn6rYX4LsNlH7aIF239ObuRXF/lQ0VrwWHxvT4sikHQ==",
++      "license": "MIT",
++      "dependencies": {
++        "@tanstack/query-persist-client-core": "5.105.3"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/tannerlinsley"
++      },
++      "peerDependencies": {
++        "@tanstack/react-query": "^5.105.3",
++        "@types/react": "^18 || ^19",
++        "react": "^18 || ^19"
++      },
++      "peerDependenciesMeta": {
++        "@types/react": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/@types/chai": {
++      "version": "5.2.3",
++      "resolved": "https://registry.npmjs.org/@types/chai/-/chai-5.2.3.tgz",
++      "integrity": "sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@types/deep-eql": "*",
++        "assertion-error": "^2.0.1"
++      }
++    },
++    "node_modules/@types/deep-eql": {
++      "version": "4.0.2",
++      "resolved": "https://registry.npmjs.org/@types/deep-eql/-/deep-eql-4.0.2.tgz",
++      "integrity": "sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/@types/estree": {
++      "version": "1.0.10",
++      "resolved": "https://registry.npmjs.org/@types/estree/-/estree-1.0.10.tgz",
++      "integrity": "sha512-lTyOMnOcmRBzdCv6/4zUZCrEhV0xrqQiUZBZtVcbmLHBXKLnN8q89v/wKRF/Q0HbwVsqbIG3o5HDoFl9sduM+g==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/@types/istanbul-lib-coverage": {
+       "version": "2.0.6",
+       "resolved": "https://registry.npmjs.org/@types/istanbul-lib-coverage/-/istanbul-lib-coverage-2.0.6.tgz",
+@@ -4010,6 +4379,34 @@
+       "integrity": "sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==",
+       "license": "ISC"
+     },
++    "node_modules/@vitest/mocker": {
++      "version": "5.1.0",
++      "resolved": "https://registry.npmjs.org/@vitest/mocker/-/mocker-5.1.0.tgz",
++      "integrity": "sha512-5umB9/jlWcqVS6fsrFmv5Gdnpu6wAUio/lEOwAmvB7v+lFo/IW2B9FhAD0p19GCULTgMzLCdUmuCDCnAzWgppQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@jridgewell/trace-mapping": "0.3.31",
++        "@vitest/spy": "5.1.0",
++        "estree-walker": "^3.0.3",
++        "magic-string": "^1.4.3"
++      },
++      "funding": {
++        "url": "https://opencollective.com/vitest"
++      },
++      "peerDependencies": {
++        "msw": "^2.4.9 || ^3.0.0",
++        "vite": "^6.0.0 || ^7.0.0 || ^8.0.0"
++      },
++      "peerDependenciesMeta": {
++        "msw": {
++          "optional": true
++        },
++        "vite": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/@vitest/pretty-format": {
+       "version": "5.0.5",
+       "resolved": "https://registry.npmjs.org/@vitest/pretty-format/-/pretty-format-5.0.5.tgz",
+@@ -4039,6 +4436,16 @@
+         "url": "https://opencollective.com/vitest"
+       }
+     },
++    "node_modules/@vitest/spy": {
++      "version": "5.1.0",
++      "resolved": "https://registry.npmjs.org/@vitest/spy/-/spy-5.1.0.tgz",
++      "integrity": "sha512-2DPO5OMHWKrBngC+fCmTQqemNF0gidRhp3lxbBmRhW+M1XJrfgPpqNqWVevXtn2f2ufD5ZaR1B6B641aAlcX5A==",
++      "dev": true,
++      "license": "MIT",
++      "funding": {
++        "url": "https://opencollective.com/vitest"
++      }
++    },
+     "node_modules/@vitest/utils": {
+       "version": "5.0.5",
+       "resolved": "https://registry.npmjs.org/@vitest/utils/-/utils-5.0.5.tgz",
+@@ -4663,6 +5070,16 @@
+       "integrity": "sha512-BSHWgDSAiKs50o2Re8ppvp3seVHXSRM44cdSsT9FfNEUUZLOGWVCsiWaRPWM1Znn+mqZ1OfVZ3z3DWEzSp7hRA==",
+       "license": "MIT"
+     },
++    "node_modules/assertion-error": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/assertion-error/-/assertion-error-2.0.1.tgz",
++      "integrity": "sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=12"
++      }
++    },
+     "node_modules/async": {
+       "version": "3.2.6",
+       "resolved": "https://registry.npmjs.org/async/-/async-3.2.6.tgz",
+@@ -5170,6 +5587,16 @@
+       ],
+       "license": "CC-BY-4.0"
+     },
++    "node_modules/chai": {
++      "version": "6.3.0",
++      "resolved": "https://registry.npmjs.org/chai/-/chai-6.3.0.tgz",
++      "integrity": "sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/chalk": {
+       "version": "6.0.1",
+       "resolved": "https://registry.npmjs.org/chalk/-/chalk-6.0.1.tgz",
+@@ -6029,6 +6456,13 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/es-module-lexer": {
++      "version": "2.3.2",
++      "resolved": "https://registry.npmjs.org/es-module-lexer/-/es-module-lexer-2.3.2.tgz",
++      "integrity": "sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/esbuild": {
+       "version": "0.28.2",
+       "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.28.2.tgz",
+@@ -6096,6 +6530,16 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/estree-walker": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/estree-walker/-/estree-walker-3.0.3.tgz",
++      "integrity": "sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@types/estree": "^1.0.0"
++      }
++    },
+     "node_modules/etag": {
+       "version": "1.8.1",
+       "resolved": "https://registry.npmjs.org/etag/-/etag-1.8.1.tgz",
+@@ -6193,6 +6637,16 @@
+         "node": "^18.14.0 || ^20.0.0 || ^22.0.0 || >=24.0.0"
+       }
+     },
++    "node_modules/expect-type": {
++      "version": "1.4.0",
++      "resolved": "https://registry.npmjs.org/expect-type/-/expect-type-1.4.0.tgz",
++      "integrity": "sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "engines": {
++        "node": ">=12.0.0"
++      }
++    },
+     "node_modules/expect-webdriverio": {
+       "version": "8.0.0",
+       "resolved": "https://registry.npmjs.org/expect-webdriverio/-/expect-webdriverio-8.0.0.tgz",
+@@ -7015,34 +7469,6 @@
+         "url": "https://github.com/chalk/wrap-ansi?sponsor=1"
+       }
+     },
+-    "node_modules/expo/node_modules/react-native-worklets": {
+-      "version": "0.10.4",
+-      "resolved": "https://registry.npmjs.org/react-native-worklets/-/react-native-worklets-0.10.4.tgz",
+-      "integrity": "sha512-gbk0CxMrGywEp3SJAHO+2JVaCWtl4WyAYBIxLZy6Y113+mHHuq3FuT6iV+VcaBuJzuuN34mtdZ4j5JIlBDzmeA==",
+-      "license": "MIT",
+-      "optional": true,
+-      "peer": true,
+-      "dependencies": {
+-        "@babel/plugin-transform-arrow-functions": "^7.27.1",
+-        "@babel/plugin-transform-class-properties": "^7.28.6",
+-        "@babel/plugin-transform-classes": "^7.28.6",
+-        "@babel/plugin-transform-nullish-coalescing-operator": "^7.28.6",
+-        "@babel/plugin-transform-optional-chaining": "^7.28.6",
+-        "@babel/plugin-transform-shorthand-properties": "^7.27.1",
+-        "@babel/plugin-transform-template-literals": "^7.27.1",
+-        "@babel/plugin-transform-unicode-regex": "^7.27.1",
+-        "@babel/preset-typescript": "^7.28.5",
+-        "@babel/types": "^7.27.1",
+-        "convert-source-map": "^2.0.0",
+-        "semver": "^7.7.4"
+-      },
+-      "peerDependencies": {
+-        "@babel/core": "*",
+-        "@react-native/metro-config": "*",
+-        "react": "*",
+-        "react-native": "0.83 - 0.86"
+-      }
+-    },
+     "node_modules/expo/node_modules/ws": {
+       "version": "8.22.1",
+       "resolved": "https://registry.npmjs.org/ws/-/ws-8.22.1.tgz",
+@@ -9119,6 +9545,27 @@
+       "integrity": "sha512-zYiwtZUcYyXKo/np96AGZAckk+FWWsUdJ3cHGGmld7+AhvcWmQyGCYUh1hc4Q/pkOhb65dQR/pqCyK0cOaHz4Q==",
+       "license": "MIT"
+     },
++    "node_modules/merge-options": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/merge-options/-/merge-options-3.0.4.tgz",
++      "integrity": "sha512-2Sug1+knBjkaMsMgf1ctR1Ujx+Ayku4EdJN4Z+C2+JzoeF7A3OZ9KM2GY0CpQS51NR61LTurMJrRKPhSs3ZRTQ==",
++      "license": "MIT",
++      "dependencies": {
++        "is-plain-obj": "^2.1.0"
++      },
++      "engines": {
++        "node": ">=10"
++      }
++    },
++    "node_modules/merge-options/node_modules/is-plain-obj": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/is-plain-obj/-/is-plain-obj-2.1.0.tgz",
++      "integrity": "sha512-YWnfyRwxL/+SsrWYfOpUtz5b3YD+nyfkHvjbcanzk8zgyO4ASD67uVMRt8k5bM4lLMDnXfriRhOpemw+NfT1eA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/merge-stream": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/merge-stream/-/merge-stream-2.0.0.tgz",
+@@ -9963,6 +10410,20 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/obug": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/obug/-/obug-3.0.0.tgz",
++      "integrity": "sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==",
++      "dev": true,
++      "funding": [
++        "https://github.com/sponsors/sxzz",
++        "https://opencollective.com/debug"
++      ],
++      "license": "MIT",
++      "engines": {
++        "node": ">=12.20.0"
++      }
++    },
+     "node_modules/on-finished": {
+       "version": "2.3.0",
+       "resolved": "https://registry.npmjs.org/on-finished/-/on-finished-2.3.0.tgz",
+@@ -11112,6 +11573,52 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/rolldown": {
++      "version": "1.2.16",
++      "resolved": "https://registry.npmjs.org/rolldown/-/rolldown-1.2.16.tgz",
++      "integrity": "sha512-bWvlMpFKiTfDKfnK7FC2MPgPeWCf/Kpwsq49ApdW+FQaBZb6O6dZ4MAPbPUjp7hYQrw/RobqCzn64BRrQecGHw==",
++      "dev": true,
++      "license": "MIT",
++      "peer": true,
++      "dependencies": {
++        "@oxc-project/types": "=0.156.0",
++        "@rolldown/pluginutils": "^1.0.0"
++      },
++      "bin": {
++        "rolldown": "bin/cli.mjs"
++      },
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      },
++      "optionalDependencies": {
++        "@rolldown/binding-android-arm-eabi": "1.2.16",
++        "@rolldown/binding-android-arm64": "1.2.16",
++        "@rolldown/binding-darwin-arm64": "1.2.16",
++        "@rolldown/binding-darwin-x64": "1.2.16",
++        "@rolldown/binding-freebsd-x64": "1.2.16",
++        "@rolldown/binding-linux-arm-gnueabihf": "1.2.16",
++        "@rolldown/binding-linux-arm64-gnu": "1.2.16",
++        "@rolldown/binding-linux-arm64-musl": "1.2.16",
++        "@rolldown/binding-linux-ppc64-gnu": "1.2.16",
++        "@rolldown/binding-linux-s390x-gnu": "1.2.16",
++        "@rolldown/binding-linux-x64-gnu": "1.2.16",
++        "@rolldown/binding-linux-x64-musl": "1.2.16",
++        "@rolldown/binding-openharmony-arm64": "1.2.16",
++        "@rolldown/binding-win32-arm64-msvc": "1.2.16",
++        "@rolldown/binding-win32-x64-msvc": "1.2.16"
++      }
++    },
++    "node_modules/rolldown/node_modules/@oxc-project/types": {
++      "version": "0.156.0",
++      "resolved": "https://registry.npmjs.org/@oxc-project/types/-/types-0.156.0.tgz",
++      "integrity": "sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==",
++      "dev": true,
++      "license": "MIT",
++      "peer": true,
++      "funding": {
++        "url": "https://github.com/sponsors/oxc-project"
++      }
++    },
+     "node_modules/run-async": {
+       "version": "4.0.6",
+       "resolved": "https://registry.npmjs.org/run-async/-/run-async-4.0.6.tgz",
+@@ -11618,6 +12125,13 @@
+         "node": ">= 0.6"
+       }
+     },
++    "node_modules/std-env": {
++      "version": "4.3.0",
++      "resolved": "https://registry.npmjs.org/std-env/-/std-env-4.3.0.tgz",
++      "integrity": "sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/stream-buffers": {
+       "version": "3.0.3",
+       "resolved": "https://registry.npmjs.org/stream-buffers/-/stream-buffers-3.0.3.tgz",
+@@ -11878,6 +12392,26 @@
+       "integrity": "sha512-fcwX4mndzpLQKBS1DVYhGAcYaYt7vsHNIvQV+WXMvnow5cgjPphq5CaayLaGsjRdSCKZFNGt7/GYAuXaNOiYCA==",
+       "license": "MIT"
+     },
++    "node_modules/tinybench": {
++      "version": "6.2.3",
++      "resolved": "https://registry.npmjs.org/tinybench/-/tinybench-6.2.3.tgz",
++      "integrity": "sha512-Al01C2JIBnO2CXCAPbpAl6sUiOZHeThGtHYNTa51JRw9PyWOCdr+9Ong05R4qg/Sk3+H645E8ov1h2c58ityNw==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=20.0.0"
++      }
++    },
++    "node_modules/tinyexec": {
++      "version": "1.3.1",
++      "resolved": "https://registry.npmjs.org/tinyexec/-/tinyexec-1.3.1.tgz",
++      "integrity": "sha512-GCvB3aoys96IuDFBMcTB46JOR6mdMtAToqwiW8JlWhsoh1mhHi/xn9ss/Dg7N555GiJyEt2qzoG/NHCwM6h1EA==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/tinyglobby": {
+       "version": "0.2.17",
+       "resolved": "https://registry.npmjs.org/tinyglobby/-/tinyglobby-0.2.17.tgz",
+@@ -12207,6 +12741,168 @@
+         "node": ">= 0.8"
+       }
+     },
++    "node_modules/vite": {
++      "version": "8.3.5",
++      "resolved": "https://registry.npmjs.org/vite/-/vite-8.3.5.tgz",
++      "integrity": "sha512-z1YpjieJ9g0ebTmQpLBv/oq9E3F9EIlOe+7LahW8SrE3LTiG3udBRUXQOlYXP9b+IC2q2phHeVxj9xGlw34OEQ==",
++      "dev": true,
++      "license": "MIT",
++      "peer": true,
++      "dependencies": {
++        "lightningcss": "^1.33.0",
++        "picomatch": "^4.0.7",
++        "postcss": "^8.5.30",
++        "rolldown": "~1.2.14",
++        "tinyglobby": "^0.2.17"
++      },
++      "bin": {
++        "vite": "bin/vite.js"
++      },
++      "engines": {
++        "node": "^20.19.0 || >=22.12.0"
++      },
++      "funding": {
++        "url": "https://github.com/vitejs/vite?sponsor=1"
++      },
++      "optionalDependencies": {
++        "fsevents": "~2.3.3"
++      },
++      "peerDependencies": {
++        "@types/node": "^20.19.0 || >=22.12.0",
++        "@vitejs/devtools": "^0.7.1 || ^0.8.0",
++        "esbuild": "^0.27.0 || ^0.28.0",
++        "jiti": ">=1.21.0",
++        "less": "^4.0.0",
++        "sass": "^1.70.0",
++        "sass-embedded": "^1.70.0",
++        "stylus": ">=0.54.8",
++        "sugarss": "^5.0.0",
++        "terser": "^5.16.0",
++        "tsx": "^4.8.1",
++        "yaml": "^2.4.2"
++      },
++      "peerDependenciesMeta": {
++        "@types/node": {
++          "optional": true
++        },
++        "@vitejs/devtools": {
++          "optional": true
++        },
++        "esbuild": {
++          "optional": true
++        },
++        "jiti": {
++          "optional": true
++        },
++        "less": {
++          "optional": true
++        },
++        "sass": {
++          "optional": true
++        },
++        "sass-embedded": {
++          "optional": true
++        },
++        "stylus": {
++          "optional": true
++        },
++        "sugarss": {
++          "optional": true
++        },
++        "terser": {
++          "optional": true
++        },
++        "tsx": {
++          "optional": true
++        },
++        "yaml": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/vitest": {
++      "version": "5.1.0",
++      "resolved": "https://registry.npmjs.org/vitest/-/vitest-5.1.0.tgz",
++      "integrity": "sha512-MzmNFnrwa8v8lF1bLxw3UJ4EREwVOVb75VqJZmUDRjJ6EluK/x9th7qTbaeDk41WxE1GxWqmTXcdsfobfH5sOA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@types/chai": "^5.2.2",
++        "@vitest/mocker": "5.1.0",
++        "chai": "^6.3.0",
++        "es-module-lexer": "^2.3.2",
++        "expect-type": "^1.4.0",
++        "magic-string": "^1.4.3",
++        "obug": "^3.0.0",
++        "picomatch": "^4.0.7",
++        "std-env": "^4.3.0",
++        "tinybench": "^6.2.2",
++        "tinyexec": "^1.3.1",
++        "tinyglobby": "^0.2.17",
++        "why-is-node-running": "3.2.1"
++      },
++      "bin": {
++        "vitest": "vitest.mjs"
++      },
++      "engines": {
++        "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/vitest"
++      },
++      "peerDependencies": {
++        "@edge-runtime/vm": "*",
++        "@opentelemetry/api": "^1.9.0",
++        "@types/node": "^22.0.0 || >=24.0.0",
++        "@vitest/browser-playwright": "5.1.0",
++        "@vitest/browser-preview": "5.1.0",
++        "@vitest/browser-webdriverio": "^5.0.0-beta.5 || >=5.0.0",
++        "@vitest/coverage-istanbul": "5.1.0",
++        "@vitest/coverage-v8": "5.1.0",
++        "@vitest/ui": "5.1.0",
++        "happy-dom": "*",
++        "jsdom": "*",
++        "vite": "^6.4.0 || ^7.0.0 || ^8.0.0"
++      },
++      "peerDependenciesMeta": {
++        "@edge-runtime/vm": {
++          "optional": true
++        },
++        "@opentelemetry/api": {
++          "optional": true
++        },
++        "@types/node": {
++          "optional": true
++        },
++        "@vitest/browser-playwright": {
++          "optional": true
++        },
++        "@vitest/browser-preview": {
++          "optional": true
++        },
++        "@vitest/browser-webdriverio": {
++          "optional": true
++        },
++        "@vitest/coverage-istanbul": {
++          "optional": true
++        },
++        "@vitest/coverage-v8": {
++          "optional": true
++        },
++        "@vitest/ui": {
++          "optional": true
++        },
++        "happy-dom": {
++          "optional": true
++        },
++        "jsdom": {
++          "optional": true
++        },
++        "vite": {
++          "optional": false
++        }
++      }
++    },
+     "node_modules/vlq": {
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/vlq/-/vlq-1.0.1.tgz",
+@@ -12537,6 +13233,19 @@
+         "url": "https://github.com/sindresorhus/which-command?sponsor=1"
+       }
+     },
++    "node_modules/why-is-node-running": {
++      "version": "3.2.1",
++      "resolved": "https://registry.npmjs.org/why-is-node-running/-/why-is-node-running-3.2.1.tgz",
++      "integrity": "sha512-Tb2FUhB4vUsGQlfSquQLYkApkuPAFQXGFzxWKHHumVz2dK+X1RUm/HnID4+TfIGYJ1kTcwOaCk/buYCEJr6YjQ==",
++      "dev": true,
++      "license": "MIT",
++      "bin": {
++        "why-is-node-running": "cli.js"
++      },
++      "engines": {
++        "node": ">=20.11"
++      }
++    },
+     "node_modules/workerpool": {
+       "version": "10.0.3",
+       "resolved": "https://registry.npmjs.org/workerpool/-/workerpool-10.0.3.tgz",
+diff --git a/mobile/package.json b/mobile/package.json
+index 61249f6..c966792 100644
+--- a/mobile/package.json
++++ b/mobile/package.json
+@@ -4,7 +4,10 @@
+   "main": "expo-router/entry",
+   "dependencies": {
+     "@expo/vector-icons": "^15.1.1",
++    "@react-native-async-storage/async-storage": "^2.2.0",
++    "@tanstack/query-async-storage-persister": "^5.105.3",
+     "@tanstack/react-query": "^5.104.3",
++    "@tanstack/react-query-persist-client": "^5.105.3",
+     "expo": "~58.0.22",
+     "expo-constants": "~58.0.14",
+     "expo-font": "~58.0.11",
+@@ -29,7 +32,8 @@
+     "@wdio/local-runner": "^10.0.2",
+     "@wdio/mocha-framework": "^10.0.1",
+     "@wdio/spec-reporter": "^10.0.1",
+-    "typescript": "~6.0.3"
++    "typescript": "~6.0.3",
++    "vitest": "^5.1.0"
+   },
+   "scripts": {
+     "start": "expo start",
+@@ -37,7 +41,8 @@
+     "ios": "expo run:ios",
+     "web": "expo start --web",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
+-    "e2e": "wdio run e2e/wdio.conf.ts"
++    "e2e": "wdio run e2e/wdio.conf.ts",
++    "test": "vitest run"
+   },
+   "private": true
+ }
+diff --git a/mobile/src/api.test.ts b/mobile/src/api.test.ts
+new file mode 100644
+index 0000000..eeef6a4
+--- /dev/null
++++ b/mobile/src/api.test.ts
+@@ -0,0 +1,140 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++vi.mock('./config', () => ({ config: { apiUrl: 'http://api.test', mock: false, e2e: false } }));
++vi.mock('./lib/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
++vi.mock('./mock/mockFetch', () => ({ mockFetch: vi.fn() }));
++
++import { api, ApiError, setSessionBridge, type SessionBridge } from './api';
++
++const json = (status: number, body: unknown) =>
++  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
++const expired = () => json(401, { error: 'TOKEN_EXPIRED' });
++
++let fetchMock: ReturnType<typeof vi.fn>;
++let bridge: SessionBridge;
++let session: { accessToken: string; refreshToken: string; needsOnboarding: boolean } | null;
++
++beforeEach(() => {
++  session = { accessToken: 'old-access', refreshToken: 'old-refresh', needsOnboarding: false };
++  bridge = {
++    getSession: vi.fn(() => session),
++    getDeviceId: vi.fn(async () => 'device-1'),
++    onRefreshed: vi.fn(async (t) => {
++      session = { ...session!, ...t };
++    }),
++    onRefreshFailed: vi.fn(async () => {
++      session = null;
++    }),
++  };
++  setSessionBridge(bridge);
++  fetchMock = vi.fn();
++  vi.stubGlobal('fetch', fetchMock);
++});
++
++const routeOf = (call: unknown[]) => String(call[0]).replace('http://api.test', '');
++const callsTo = (route: string) => fetchMock.mock.calls.filter((c) => routeOf(c) === route);
++
++describe('авто-refresh при TOKEN_EXPIRED', () => {
++  it('оновлює токен і повторює запит з новим access', async () => {
++    fetchMock
++      .mockResolvedValueOnce(expired())
++      .mockResolvedValueOnce(json(200, { accessToken: 'new-access', refreshToken: 'new-refresh' }))
++      .mockResolvedValueOnce(json(200, { id: 'u1' }));
++
++    await expect(api.me('old-access')).resolves.toEqual({ id: 'u1' });
++
++    expect(bridge.onRefreshed).toHaveBeenCalledWith({ accessToken: 'new-access', refreshToken: 'new-refresh' });
++    expect(bridge.onRefreshFailed).not.toHaveBeenCalled();
++    const retry = fetchMock.mock.calls[2];
++    expect((retry[1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer new-access' });
++  });
++
++  it('кілька запитів із простроченим токеном роблять один refresh', async () => {
++    fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
++      if (String(url).endsWith('/auth/refresh')) {
++        await new Promise((r) => setTimeout(r, 10));
++        return json(200, { accessToken: 'new-access', refreshToken: 'new-refresh' });
++      }
++      const auth = (init.headers as Record<string, string>).Authorization;
++      return auth === 'Bearer new-access' ? json(200, { ok: true }) : expired();
++    });
++
++    await Promise.all([api.me('old-access'), api.groups('old-access'), api.buildings('old-access')]);
++
++    expect(callsTo('/auth/refresh')).toHaveLength(1);
++  });
++
++  it('помилка мережі під час refresh НЕ скидає сесію і віддається як NETWORK_ERROR', async () => {
++    fetchMock.mockResolvedValueOnce(expired()).mockRejectedValueOnce(new TypeError('Network request failed'));
++
++    const err = await api.me('old-access').catch((e) => e);
++
++    expect(err).toBeInstanceOf(ApiError);
++    expect(err.code).toBe('NETWORK_ERROR');
++    expect(bridge.onRefreshFailed).not.toHaveBeenCalled();
++    expect(session?.refreshToken).toBe('old-refresh');
++  });
++
++  it.each([500, 503, 429])('відповідь %i на refresh не скидає сесію', async (status) => {
++    fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(json(status, { error: 'SERVER' }));
++
++    const err = await api.me('old-access').catch((e) => e);
++
++    expect(err).toBeInstanceOf(ApiError);
++    expect(err.status).toBe(status);
++    expect(bridge.onRefreshFailed).not.toHaveBeenCalled();
++    expect(session).not.toBeNull();
++  });
++
++  it('після тимчасової помилки наступний запит знову пробує refresh', async () => {
++    fetchMock
++      .mockResolvedValueOnce(expired())
++      .mockRejectedValueOnce(new TypeError('Network request failed'))
++      .mockResolvedValueOnce(expired())
++      .mockResolvedValueOnce(json(200, { accessToken: 'new-access', refreshToken: 'new-refresh' }))
++      .mockResolvedValueOnce(json(200, { id: 'u1' }));
++
++    await expect(api.me('old-access')).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
++    await expect(api.me('old-access')).resolves.toEqual({ id: 'u1' });
++    expect(callsTo('/auth/refresh')).toHaveLength(2);
++  });
++
++  it.each([401, 400])('відхилений сервером refresh (%i) скидає сесію', async (status) => {
++    fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(json(status, { error: 'INVALID_REFRESH_TOKEN' }));
++
++    const err = await api.me('old-access').catch((e) => e);
++
++    expect(err).toBeInstanceOf(ApiError);
++    expect(err.code).toBe('TOKEN_EXPIRED');
++    expect(bridge.onRefreshFailed).toHaveBeenCalledTimes(1);
++    expect(session).toBeNull();
++  });
++
++  it('без refresh-токена в сесії скидає сесію без запиту', async () => {
++    session = { accessToken: 'a', refreshToken: '', needsOnboarding: false };
++    fetchMock.mockResolvedValueOnce(expired());
++
++    await expect(api.me('a')).rejects.toMatchObject({ code: 'TOKEN_EXPIRED' });
++
++    expect(callsTo('/auth/refresh')).toHaveLength(0);
++    expect(bridge.onRefreshFailed).toHaveBeenCalledTimes(1);
++  });
++
++  it('401 з іншим кодом (UNAUTHORIZED) refresh не запускає', async () => {
++    fetchMock.mockResolvedValueOnce(json(401, { error: 'UNAUTHORIZED' }));
++
++    await expect(api.me('x')).rejects.toMatchObject({ code: 'UNAUTHORIZED', status: 401 });
++
++    expect(callsTo('/auth/refresh')).toHaveLength(0);
++  });
++
++  it('повторний 401 після успішного refresh не зациклюється', async () => {
++    fetchMock
++      .mockResolvedValueOnce(expired())
++      .mockResolvedValueOnce(json(200, { accessToken: 'new-access', refreshToken: 'new-refresh' }))
++      .mockResolvedValueOnce(expired());
++
++    await expect(api.me('old-access')).rejects.toMatchObject({ code: 'TOKEN_EXPIRED' });
++    expect(callsTo('/auth/refresh')).toHaveLength(1);
++  });
++});
+diff --git a/mobile/src/api.ts b/mobile/src/api.ts
+index 55dd732..2d8bbbb 100644
+--- a/mobile/src/api.ts
++++ b/mobile/src/api.ts
+@@ -87,27 +87,44 @@ export function setSessionBridge(bridge: SessionBridge) {
+   sessionBridge = bridge;
+ }
+ 
+-let refreshPromise: Promise<string | null> | null = null;
++// Результат оновлення токена. Сесію скидаємо лише при `rejected` (сервер визнав refresh недійсним).
++// `transient` (немає мережі, 5xx, ліміт запитів) сесію зберігає: токен ще може бути дійсним, і розлогін через
++// слабкий зв'язок змусив би студента проходити вхід заново.
++type RefreshResult =
++  | { kind: 'ok'; accessToken: string }
++  | { kind: 'transient'; error: ApiError }
++  | { kind: 'rejected' };
+ 
+-async function handleTokenRefresh(): Promise<string | null> {
++let refreshPromise: Promise<RefreshResult> | null = null;
++
++// 400/401 від /auth/refresh: refresh недійсний чи відхилений. Усе інше вважаємо тимчасовим.
++const isRefreshRejected = (e: unknown): boolean => e instanceof ApiError && (e.status === 401 || e.status === 400);
++
++async function handleTokenRefresh(): Promise<RefreshResult> {
+   if (refreshPromise) return refreshPromise;
+-  if (!sessionBridge) return null;
++  const bridge = sessionBridge;
++  if (!bridge) return { kind: 'rejected' };
+ 
+-  refreshPromise = (async () => {
++  refreshPromise = (async (): Promise<RefreshResult> => {
+     try {
+-      const current = sessionBridge.getSession();
++      const current = bridge.getSession();
+       if (!current?.refreshToken) {
+-        await sessionBridge.onRefreshFailed();
+-        return null;
++        await bridge.onRefreshFailed();
++        return { kind: 'rejected' };
+       }
+-      const deviceId = await sessionBridge.getDeviceId();
++      const deviceId = await bridge.getDeviceId();
+       const res = await api.refresh(current.refreshToken, deviceId);
+-      await sessionBridge.onRefreshed(res);
+-      return res.accessToken;
++      await bridge.onRefreshed(res);
++      return { kind: 'ok', accessToken: res.accessToken };
+     } catch (e) {
+-      log.warn('auth', 'помилка оновлення токена, скидаємо сесію', { error: e });
+-      await sessionBridge.onRefreshFailed();
+-      return null;
++      if (isRefreshRejected(e)) {
++        log.warn('auth', 'сервер відхилив refresh-токен, скидаємо сесію', { error: e });
++        await bridge.onRefreshFailed();
++        return { kind: 'rejected' };
++      }
++      log.warn('auth', 'не вдалось оновити токен (тимчасово), сесію зберігаємо', { error: e });
++      const error = e instanceof ApiError ? e : new ApiError('NETWORK_ERROR');
++      return { kind: 'transient', error };
+     } finally {
+       refreshPromise = null;
+     }
+@@ -152,10 +169,11 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string,
+       sessionBridge
+     ) {
+       log.info('auth', 'access токен прострочено, виконуємо авто-refresh');
+-      const newToken = await handleTokenRefresh();
+-      if (newToken) {
+-        return request<T>(path, init, newToken, true);
+-      }
++      const refreshed = await handleTokenRefresh();
++      if (refreshed.kind === 'ok') return request<T>(path, init, refreshed.accessToken, true);
++      // Тимчасова помилка refresh: віддаємо її (наприклад NETWORK_ERROR) замість 401, щоб екран показав
++      // «Офлайн» і збережений розклад, а загальний обробник не скинув сесію
++      if (refreshed.kind === 'transient') throw refreshed.error;
+     }
+     log.warn('api', `${method} ${route} → ${res.status} ${code}`, { ms, requestId });
+     throw new ApiError(code, res.status, requestId);
+diff --git a/mobile/src/app/_layout.tsx b/mobile/src/app/_layout.tsx
+index f8c7b30..199a15d 100644
+--- a/mobile/src/app/_layout.tsx
++++ b/mobile/src/app/_layout.tsx
+@@ -1,17 +1,26 @@
+ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
++import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+ import { Stack } from 'expo-router';
+ import { StatusBar } from 'expo-status-bar';
+ import { useEffect, useState } from 'react';
+ import { SafeAreaProvider } from 'react-native-safe-area-context';
+ import { ApiError } from '../api';
+ import { AppErrorBoundary } from '../components/AppErrorBoundary';
++import { config } from '../config';
+ import { useSession } from '../features/auth/session';
++import { registerCacheReset } from '../lib/cacheReset';
+ import { log } from '../lib/logger';
++import { clearPersistedQueries, queryPersister } from '../lib/queryPersist';
++import { PERSIST_CACHE_VERSION, PERSIST_MAX_AGE_MS, shouldPersistQuery } from '../lib/queryPersistPolicy';
++
++// Кеш розкладу на диску, щоб «Офлайн» працював і після перезапуску застосунку. У збірках MOCK і E2E дані вбудовані
++// чи тестові, а кеш між запусками лише порушував би їх передбачуваність.
++const persistCache = !config.mock && !config.e2e;
+ 
+ // Глобальний обробник помилок запитів. Помилки API (мережа, 4xx/5xx) очікувані: рівень warn.
+ // Усе інше це баг: рівень error зі стеком.
+-// 401 від сервера = сесія недійсна. Оновлення токена через /auth/refresh додамо окремою задачею,
+-// а поки повертаємо на екран входу. Мережеві помилки не вилогінюють.
++// 401 від сервера, що дійшов сюди = сесія недійсна (прострочений access api.ts уже пробував оновити через
++// /auth/refresh): повертаємо на екран входу. Мережеві й тимчасові помилки не вилогінюють.
+ const onError = (error: unknown, source: string) => {
+   if (error instanceof ApiError) {
+     log.warn('query', `${source} не вдався: ${error.code}`, { status: error.status, requestId: error.requestId });
+@@ -41,9 +50,19 @@ export default function RootLayout() {
+           onError: (e, _variables, _result, mutation) =>
+             onError(e, `мутація ${String(mutation.options.mutationKey?.[0] ?? 'без ключа')}`),
+         }),
+-        defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
++        // gcTime не менший за maxAge збереженого кешу (інакше записи зникають із пам'яті раніше, ніж із диска)
++        defaultOptions: { queries: { retry: 1, staleTime: 30_000, ...(persistCache ? { gcTime: PERSIST_MAX_AGE_MS } : {}) } },
+       }),
+   );
++
++  // Вихід (у сховищі сесії, поза деревом) очищає і кеш у пам'яті, і кеш на диску: там розклад і профіль користувача
++  useEffect(() => {
++    registerCacheReset(async () => {
++      queryClient.clear();
++      await clearPersistedQueries();
++    });
++    return () => registerCacheReset(null);
++  }, [queryClient]);
+   const session = useSession((s) => s.session);
+   const signedIn = !!session;
+   const onboarding = signedIn && session.needsOnboarding;
+@@ -52,24 +71,42 @@ export default function RootLayout() {
+     return null;
+   }
+ 
++  const content = (
++    <>
++      <StatusBar style="auto" />
++      <AppErrorBoundary>
++        <Stack screenOptions={{ headerShown: false }}>
++          <Stack.Protected guard={!signedIn}>
++            <Stack.Screen name="sign-in" />
++          </Stack.Protected>
++          <Stack.Protected guard={onboarding}>
++            <Stack.Screen name="onboarding" />
++          </Stack.Protected>
++          <Stack.Protected guard={signedIn && !onboarding}>
++            <Stack.Screen name="(tabs)" />
++          </Stack.Protected>
++        </Stack>
++      </AppErrorBoundary>
++    </>
++  );
++
+   return (
+     <SafeAreaProvider>
+-      <QueryClientProvider client={queryClient}>
+-        <StatusBar style="auto" />
+-        <AppErrorBoundary>
+-          <Stack screenOptions={{ headerShown: false }}>
+-            <Stack.Protected guard={!signedIn}>
+-              <Stack.Screen name="sign-in" />
+-            </Stack.Protected>
+-            <Stack.Protected guard={onboarding}>
+-              <Stack.Screen name="onboarding" />
+-            </Stack.Protected>
+-            <Stack.Protected guard={signedIn && !onboarding}>
+-              <Stack.Screen name="(tabs)" />
+-            </Stack.Protected>
+-          </Stack>
+-        </AppErrorBoundary>
+-      </QueryClientProvider>
++      {persistCache ? (
++        <PersistQueryClientProvider
++          client={queryClient}
++          persistOptions={{
++            persister: queryPersister,
++            maxAge: PERSIST_MAX_AGE_MS,
++            buster: PERSIST_CACHE_VERSION,
++            dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
++          }}
++        >
++          {content}
++        </PersistQueryClientProvider>
++      ) : (
++        <QueryClientProvider client={queryClient}>{content}</QueryClientProvider>
++      )}
+     </SafeAreaProvider>
+   );
+ }
+diff --git a/mobile/src/features/auth/session.ts b/mobile/src/features/auth/session.ts
+index 707647f..5df65f0 100644
+--- a/mobile/src/features/auth/session.ts
++++ b/mobile/src/features/auth/session.ts
+@@ -1,5 +1,7 @@
+ import { create } from 'zustand';
+ import { api, setSessionBridge, type Session } from '../../api';
++import { resetCaches } from '../../lib/cacheReset';
++import { clearPersistedQueries } from '../../lib/queryPersist';
+ import { getOrCreateDeviceId, loadStoredSession, saveStoredSession } from './storage';
+ 
+ // A1: стан сесії зі збереженням токенів у expo-secure-store та авто-рефрешем
+@@ -21,6 +23,9 @@ export const useSession = create<SessionState>((set, get) => ({
+   initSession: async () => {
+     try {
+       const [deviceId, session] = await Promise.all([getOrCreateDeviceId(), loadStoredSession()]);
++      // Без сесії кешу даних на диску бути не може (лишився б після збою при виході): прибираємо його до того,
++      // як дерево застосунку стане відновлювати кеш, інакше новий користувач побачив би чужий розклад
++      if (!session) await clearPersistedQueries().catch(() => {});
+       set({ deviceId, session, isHydrated: true });
+     } catch {
+       set({ isHydrated: true });
+@@ -48,6 +53,7 @@ export const useSession = create<SessionState>((set, get) => ({
+     }
+     set({ session: null });
+     void saveStoredSession(null);
++    void resetCaches().catch(() => {});
+   },
+ }));
+ 
+diff --git a/mobile/src/lib/cacheReset.ts b/mobile/src/lib/cacheReset.ts
+new file mode 100644
+index 0000000..cba8296
+--- /dev/null
++++ b/mobile/src/lib/cacheReset.ts
+@@ -0,0 +1,11 @@
++// Скидання кешу даних користувача при виході. Кеш запитів живе в React-дереві, а вихід відбувається в сховищі
++// сесії поза ним, тому корінь застосунку реєструє тут свій обробник.
++let reset: (() => Promise<void> | void) | null = null;
++
++export const registerCacheReset = (fn: (() => Promise<void> | void) | null) => {
++  reset = fn;
++};
++
++export const resetCaches = async (): Promise<void> => {
++  await reset?.();
++};
+diff --git a/mobile/src/lib/queryPersist.ts b/mobile/src/lib/queryPersist.ts
+new file mode 100644
+index 0000000..caa8f6a
+--- /dev/null
++++ b/mobile/src/lib/queryPersist.ts
+@@ -0,0 +1,12 @@
++import AsyncStorage from '@react-native-async-storage/async-storage';
++import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
++
++// Кеш розкладу на диску (AsyncStorage): без нього «Офлайн» працює лише поки живий процес застосунку.
++// Містить розклад і профіль користувача, тому при виході його обов'язково прибираємо (resetCaches).
++export const queryPersister = createAsyncStoragePersister({
++  storage: AsyncStorage,
++  key: 'depara_query_cache',
++  throttleTime: 1000,
++});
++
++export const clearPersistedQueries = (): Promise<void> => Promise.resolve(queryPersister.removeClient());
+diff --git a/mobile/src/lib/queryPersistPolicy.test.ts b/mobile/src/lib/queryPersistPolicy.test.ts
+new file mode 100644
+index 0000000..35f983a
+--- /dev/null
++++ b/mobile/src/lib/queryPersistPolicy.test.ts
+@@ -0,0 +1,24 @@
++import { describe, expect, it } from 'vitest';
++import { PERSIST_MAX_AGE_MS, shouldPersistQuery } from './queryPersistPolicy';
++
++const q = (key: unknown[], status = 'success') => ({ queryKey: key, state: { status } });
++
++describe('shouldPersistQuery', () => {
++  it.each([['week'], ['me'], ['groups'], ['buildings']])('зберігає успішний запит %s', (name) => {
++    expect(shouldPersistQuery(q([name, '2026-11-02']))).toBe(true);
++  });
++
++  it('не зберігає пошук аудиторій та невідомі запити', () => {
++    expect(shouldPersistQuery(q(['classrooms', 'N1', '']))).toBe(false);
++    expect(shouldPersistQuery(q(['щось']))).toBe(false);
++  });
++
++  it('не зберігає запити без успіху (помилка, завантаження)', () => {
++    expect(shouldPersistQuery(q(['week', 'd'], 'error'))).toBe(false);
++    expect(shouldPersistQuery(q(['week', 'd'], 'pending'))).toBe(false);
++  });
++
++  it('строк збереження 14 днів', () => {
++    expect(PERSIST_MAX_AGE_MS).toBe(14 * 24 * 3600 * 1000);
++  });
++});
+diff --git a/mobile/src/lib/queryPersistPolicy.ts b/mobile/src/lib/queryPersistPolicy.ts
+new file mode 100644
+index 0000000..63ded54
+--- /dev/null
++++ b/mobile/src/lib/queryPersistPolicy.ts
+@@ -0,0 +1,16 @@
++// Що з кешу запитів переживає перезапуск застосунку. Чиста логіка без нативних модулів: її перевіряють юніт-тести,
++// а саме сховище (AsyncStorage) підключено в queryPersist.ts.
++
++/** Скільки зберігаємо кеш на диску. Розклад старший за цей строк уже не показуємо як «збережений». */
++export const PERSIST_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
++
++/** Змінюйте при зміні форми відповідей API: старий кеш на диску тоді відкидається, а не ламає екрани. */
++export const PERSIST_CACHE_VERSION = '1';
++
++// Лише те, що потрібно, щоб відкрити розклад без мережі. Пошук аудиторій навмисно не зберігаємо.
++const PERSISTED_KEYS = new Set(['week', 'me', 'groups', 'buildings']);
++
++type QueryLike = { queryKey: readonly unknown[]; state: { status: string } };
++
++export const shouldPersistQuery = (query: QueryLike): boolean =>
++  query.state.status === 'success' && PERSISTED_KEYS.has(String(query.queryKey[0]));
+diff --git a/mobile/src/theme.ts b/mobile/src/theme.ts
+index 0462607..c559348 100644
+--- a/mobile/src/theme.ts
++++ b/mobile/src/theme.ts
+@@ -35,6 +35,9 @@ export const errorMessages: Record<string, string> = {
+   INVALID_TOKEN: 'Не вдалося підтвердити вхід через Microsoft.',
+   AUTH_NOT_CONFIGURED: 'Вхід тимчасово недоступний.',
+   GROUP_NOT_SET: 'Спершу оберіть свою групу.',
++  TEMPORARILY_UNAVAILABLE: 'Сервер тимчасово недоступний. Спробуйте за хвилину.',
++  RATE_LIMITED: 'Забагато запитів. Зачекайте хвилину і спробуйте ще раз.',
++  ACCOUNT_CONFLICT: 'Цей акаунт уже пов’язано з іншим входом. Зверніться до підтримки.',
+ };
+ 
+ export const errorText = (code: string) => errorMessages[code] ?? 'Щось пішло не так. Спробуйте ще раз.';
+diff --git a/mobile/vitest.config.mts b/mobile/vitest.config.mts
+new file mode 100644
+index 0000000..b35d166
+--- /dev/null
++++ b/mobile/vitest.config.mts
+@@ -0,0 +1,7 @@
++import { defineConfig } from 'vitest/config';
++
++// Юніт-тести чистої логіки (api.ts, політика кешу) у Node. Екрани перевіряють E2E (e2e/), нативні модулі тут мокаються.
++export default defineConfig({
++  define: { __DEV__: false },
++  test: { include: ['src/**/*.test.ts'] },
++});
+diff --git a/specs/f1-login.md b/specs/f1-login.md
+index 0db748b..d4ddfa8 100644
+--- a/specs/f1-login.md
++++ b/specs/f1-login.md
+@@ -13,7 +13,7 @@
+ 2. Відкривається вхід провайдера (Microsoft Entra, Outlook), пароль застосунок не бачить.
+ 3. Застосунок отримує токен провайдера і відправляє його на бекенд.
+ 4. Бекенд перевіряє підпис (ключі JWKS Entra), `aud` (наш застосунок), термін дії, issuer v2.0, організацію (`tid` має збігатися з `MICROSOFT_TENANT_ID`) і домен пошти. Домен береться зі змінної `ALLOWED_EMAIL_DOMAIN` (за замовчуванням `lnu.edu.ua`), а не зашитий у коді. Токен чужого тенанта відхиляється, навіть якщо пошта виглядає як пошта ЛНУ.
+-5. Бекенд видає наші токени: access (15 хв) і refresh (30 днів, одноразовий).
++5. Бекенд видає наші токени: access (15 хв) і refresh (30 днів, одноразовий). Якщо відповідь на refresh загубилась по дорозі, повторний запит зі старим токеном протягом 30 с (`REFRESH_REUSE_GRACE_SECONDS`, 0 вимикає) віддає ту саму нову пару, але лише тому самому пристрою й доки нова пара не використана.
+ 6. Застосунок зберігає токени в захищеному сховищі. Новий користувач (без групи) йде на онбординг, інакше на розклад.
+ 
+ > Вхід через Google прибрано (за рішенням техліда використовуємо Microsoft Outlook). Користувача
+@@ -50,7 +50,7 @@
+ - [ ] Той самий `oid` зі зміненою поштою входить в той самий акаунт; інший `oid` з поштою прив'язаного акаунта отримує 409 і не отримує токенів.
+ - [ ] Запис без `oid` прив'язується до першого входу за поштою зі збереженням ролі; два одночасні входи з різними `oid` дають один 200 і один 409.
+ - [ ] Прострочений access оновлюється через refresh без дій користувача.
+-- [ ] Повторне використання refresh відхиляється.
++- [ ] Повторне використання refresh відхиляється: інший пристрій, а також старий токен після того, як нову пару вже використали. Єдиний виняток: повтор із того ж пристрою протягом вікна (30 с) до використання нової пари віддає ту саму пару (втрачена відповідь).
+ - [ ] Вихід знищує сесію.
+ - [ ] У проді вхід у фейковому режимі (`AUTH_MODE=fake`) неможливий.
+ 
+diff --git a/specs/f7-admin.md b/specs/f7-admin.md
+index 8c163db..21e3704 100644
+--- a/specs/f7-admin.md
++++ b/specs/f7-admin.md
+@@ -12,6 +12,7 @@
+ - **Ролі:** адмін бачить користувачів (пошук) і змінює роль: студент, староста, адмін. Змінити власну роль не можна.
+ - **Група користувача:** адмін призначає групу й підгрупу будь-якому користувачу (наприклад, старості, який ще не пройшов онбординг). Без підгрупи ставиться `0` (бачити всі).
+ - **Імпорт розкладу:** завантаження JSON або CSV. Імпорт «все або нічого»: якщо в файлі є помилки, не зберігається нічого, а відповідь містить список помилок.
++- **Ключ пари** це слот: група, дата, номер пари і підгрупа. Повторний імпорт оновлює пару цього слота (предмет, викладача, аудиторію, тип), а не додає другу; id пари і заміна старости лишаються. Дві різні пари в одному слоті одного файлу це помилка, лабораторні по підгрупах розрізняються через `subgroup`. Імпорт лише додає й оновлює: пара, якої немає в новому файлі, не видаляється. Можна імпортувати лише довідники без пар (наприклад, `{ "buildings": [...] }` для виправлення адрес корпусів); порожній запит чи порожні `lessons` без довідників це помилка.
+ - **Вхід адміна:** окрема веб-сторінка з тим самим провайдером входу (Microsoft). Для неї бекенд вмикає CORS для origin зі змінної `CORS_ORIGINS` (через кому); порожня змінна = CORS вимкнений. Дозволені методи GET/POST/PATCH/DELETE, заголовки `Authorization`, `Content-Type`; cookie не використовуються.
+ - На макеті мобільного застосунку адмін-панель позначена як V1.1: в MVP імпорт іде через CLI і захищений API.
+ 
+@@ -32,7 +33,9 @@
+ - [ ] Preflight `OPTIONS` з дозволеного origin проходить (PATCH, `Authorization`), з чужого origin відповідь не містить `Access-Control-Allow-Origin`.
+ - [ ] Некоректний файл імпорту дає 422 зі списком помилок і нічого не змінює.
+ - [ ] Коректний файл додає пари; повторний імпорт оновлює їх, а не дублює.
+-- [ ] Дубль пари всередині файлу дає 422 з поясненням.
++- [ ] Виправлена назва предмета в тій самій парі оновлює її (одна пара в слоті), заміна старости лишається.
++- [ ] Імпорт лише `buildings` без пар оновлює адресу корпусу, і студенти бачать нову в `GET /buildings`; `{}` і `{ "lessons": [] }` дають 422.
++- [ ] Дубль слота всередині файлу (навіть з іншим предметом) дає 422 з поясненням; підгрупи одного слота не є дублем.
+ 
+ ## Відкриті питання
+ - Адмін-панель в застосунку чи тільки у вебі (рішення за техлідом).

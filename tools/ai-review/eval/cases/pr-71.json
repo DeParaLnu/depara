@@ -1,0 +1,145 @@
+{
+  "pr": 71,
+  "title": "fix: імпорт за слотом, refresh без розлогіну, офлайн-кеш, помилки й ліміти, CI мобільного",
+  "body": "## Що і навіщо\n\nВиправлення знахідок огляду проєкту (після #48–#70). Усі проблеми відтворено на живому сервері або в тестах, а не припущено: імпорт розкладу плодив дублі пар, збій мережі під час refresh розлогінював студента, офлайн-кеш не переживав перезапуск, API віддавав внутрішні тексти помилок і відповідав 25 секунд без Redis, мобільний код не перевірявся в CI.\n\nЗадача: окремої issue немає (пункти 1–4 огляду проєкту).\n\n## Що змінилось\n\n**1. Імпорт розкладу: ключ пари це слот**\n- Ключ пари: група, дата, номер пари, підгрупа (раніше ще й предмет). Виправлена назва предмета оновлює пару, а не додає другу в той самий слот. `id` пари, а з ним і заміна старости, зберігаються.\n- Міграція `lesson_slot_key` зводить наявні дублі до однієї пари: лишається пара з найсвіжішою заміною (за `substitution.updated_at`), інакше найсвіжіша пара, а її поля (предмет, тип, викладач, аудиторія) беруться з найсвіжішої версії слота, тож виправлена назва не губиться. Якщо замін було кілька, лишається одна, про слот міграція пише `NOTICE`.\n- Дві різні пари в одному слоті одного файлу це 422, у тому числі коли групу вказано то з `faculty`, то без нього. Підгрупи не дублі.\n\n**2. Сесія і офлайн**\n- Backend: повтор `POST /auth/refresh` зі старим токеном протягом 30 с (`REFRESH_REUSE_GRACE_SECONDS`, 0 вимикає) віддає ту саму нову пару, але лише з того ж пристрою і лише поки нова пара не використана. Обмін робиться одним атомарним кроком Redis (Lua), тож збій між командами не залишає клієнта без сесії, а паралельні повтори отримують одну пару.\n- Мобільний: будь-яка помилка refresh раніше скидала сесію, навіть мережева. Тепер сесію скидає лише 400/401 від сервера, мережа і 5xx дають «Офлайн».\n- Мобільний: кеш розкладу на диску (AsyncStorage): тиждень, профіль, групи, корпуси. Вік рахується за кожним запитом (14 днів), при збереженні й відновленні. При виході кеш чиститься з пам'яті й диска, екрани з'являються після відновлення кешу. У збірках MOCK і E2E вимкнено.\n- Перші юніт-тести мобільного (vitest): логіка refresh і політика кешу.\n\n**3. Бекенд: помилки, Redis, ліміти**\n- Глобальний обробник: усі помилки `{ error: КОД }`. 500 і 503 мають `requestId` і не містять тексту винятку. Недоступні Redis чи база (включно з таймаутом команди) це 503.\n- Redis: короткі таймаути. Без нього розклад відповідає за ~5 мс (було +1 с), вхід 503 за ~1 с (було 25 с і 500).\n- Ліміти запитів (`@fastify/rate-limit`, лічильники в Redis, 429 з `Retry-After`): звичайні запити на користувача за токеном (без токена на IP), вхід/refresh/вихід на IP (і з токеном теж), імпорт на адміна. `/health` не лімітується. Без Redis ліміт не діє. Змінні `RATE_LIMIT_*`.\n- Видалено мертвий `lib/cache.ts`: ніхто не писав ключі `schedule:*`, а виклики інвалідації падали з 500 при збої Redis уже після збереження даних.\n\n**4. CI і довідники**\n- Job `mobile-typecheck-test` (typecheck разом з e2e, vitest). Раніше типи мобільного перевірялись лише в `mobile-e2e`, який вимкнений для PR.\n- Імпорт приймає запит лише з довідниками (наприклад `{ \"buildings\": [...] }`) без пар. Порожній запит, порожні `lessons` без довідників і явний `lessons: null` це 422. Інструкція для прод-адрес корпусів у `docs/deploy-vps.md`.\n\n## Спека\n[specs/f1-login.md](https://github.com/DeParaLnu/depara/blob/claude/funny-darwin-hau5x4/specs/f1-login.md) (вікно повтору refresh), [specs/f7-admin.md](https://github.com/DeParaLnu/depara/blob/claude/funny-darwin-hau5x4/specs/f7-admin.md) (ключ пари, імпорт довідників). Помилки API і ліміти: розділ «Помилки API і ліміти запитів» у `README.md`.\n\n## Як перевірити\n1. Backend, як у CI (потрібні Postgres і Redis):\n   ```bash\n   cd backend\n   export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=e2e.admin@lnu.edu.ua CORS_ORIGINS=http://localhost:5173\n   export RATE_LIMIT_IMPORT_PER_MINUTE=1000 RATE_LIMIT_AUTH_PER_MINUTE=5000\n   npx prisma migrate deploy && npm run seed -- --shift-to-current-week && npm run test:e2e   # 152 тести\n   ```\n2. Мобільний: `cd mobile && npm ci && npm run typecheck && npm test` (23 тести).\n3. Дублі: імпортувати пару, потім ту саму пару з виправленою назвою предмета, тиждень студента має містити одну пару.\n4. Без Redis: зупинити Redis, `POST /auth/microsoft` дає 503 `TEMPORARILY_UNAVAILABLE`, `GET /schedule/week` і `/health` відповідають одразу.\n\n## Скріншоти або приклад відповіді API\n```jsonc\n// 503, Redis чи база недоступні\n{ \"error\": \"TEMPORARILY_UNAVAILABLE\", \"requestId\": \"23c813d5-a3b2-424f-9aa8-f82908da800d\" }\n// 429, ліміт запитів (заголовок Retry-After теж є)\n{ \"error\": \"RATE_LIMITED\", \"retryAfterSeconds\": 42 }\n// 200, імпорт лише довідників\n{ \"imported\": 0, \"groups\": 0, \"warnings\": [] }\n```\n\n## Чеклист\n- [x] CI зелений (`backend-lint-typecheck`, `backend-e2e`): усі перевірки зелені на `44156a1` (`backend-docker`, `deploy-config`, `mobile-typecheck-test` теж; `mobile-e2e` пропущено, бо вимкнений для PR змінною)\n- [x] E2E-сценарій додано або оновлено\n- [x] Немає секретів і `.env` у коміті (diff просканований на ключі, токени й `.env`)\n- [x] Документація API оновлена (specs, README, docs/deploy.md, docs/deploy-vps.md)\n\n## На що звернути увагу ревʼюеру\n- **Міграція `lesson_slot_key` видаляє дублі пар** у проді. Вона перевірена на базі з дублями (виправлена назва на старій парі із заміною, заміни на обох версіях у різному порядку, підгрупи), але перед деплоєм потрібен бекап (`deploy.sh` робить його сам). Якщо автодеплой увімкнено, міграція застосується одразу після мерджу. Якщо замін на дублях було кілька, зберігається одна (з найсвіжішою заміною), решта каскадно видаляється, міграція пише `NOTICE` по кожному такому слоту. Зупиняти міграцію для ручного розбору не варто: це заблокувало б деплой.\n- **Свідомо послаблено критерій F1** «повторне використання refresh відхиляється» на 30 с для того самого пристрою, поки нова пара не використана. Це спека-рішення, не випадковість. Без цього втрачена відповідь (слабка мережа) розлогінює студента.\n- **Значення лімітів** (600/хв на користувача, 300/хв на IP для входу, 30/хв на імпорт) обрані без даних про реальне навантаження. Вони змінюються через змінні без коду.\n- **Не перевірено:** нативна збірка з новим модулем `@react-native-async-storage/async-storage` (версія з `bundledNativeModules` Expo SDK 58; документація Expo з середовища автора була недоступна). Її збере мобільний E2E CI.\n- **Не робилось:** імпорт, як і раніше, лише додає й оновлює, пари, яких нема в новому файлі, не видаляються (видалення пари каскадно зніме заміну, потрібне окреме рішення). Щоб `mobile-typecheck-test` блокував злиття, його треба додати в ruleset вручну.\n- **Адреси корпусів на проді** самі не оновляться (seed на проді не запускається), див. `docs/deploy-vps.md`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01RZELjRPTu8AZz6ni2Wv1Xs",
+  "base": "f12ce91ecdfddbb61020ef0709aa9a151948c48d",
+  "head": "67d0a0520cb060cb2d235b0b3a45a1e69faa5a7e",
+  "head_ref": "claude/funny-darwin-hau5x4",
+  "base_ref": "develop",
+  "set": "dev",
+  "smoke": false,
+  "note": "коміт, на якому CodeRabbit знайшов проблеми; їх виправлено в 21be560",
+  "issues": [
+    {
+      "id": "r71-1",
+      "real": true,
+      "file": "backend/prisma/migrations/20261103000000_lesson_slot_key/migration.sql",
+      "lines": [
+        11,
+        11
+      ],
+      "severity": "important",
+      "summary": "Major",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    },
+    {
+      "id": "r71-2",
+      "real": true,
+      "file": "backend/src/app.ts",
+      "lines": [
+        48,
+        48
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    },
+    {
+      "id": "r71-3",
+      "real": true,
+      "file": "backend/src/config.ts",
+      "lines": [
+        24,
+        24
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    },
+    {
+      "id": "r71-4",
+      "real": true,
+      "file": "backend/src/lib/scheduleImport.ts",
+      "lines": [
+        92,
+        92
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    },
+    {
+      "id": "r71-5",
+      "real": true,
+      "file": "backend/src/lib/scheduleImport.ts",
+      "lines": [
+        139,
+        139
+      ],
+      "severity": "important",
+      "summary": "Major",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    },
+    {
+      "id": "r71-6",
+      "real": true,
+      "file": "backend/src/lib/tokens.ts",
+      "lines": [
+        77,
+        77
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    },
+    {
+      "id": "r71-7",
+      "real": true,
+      "file": "mobile/src/app/_layout.tsx",
+      "lines": [
+        61,
+        61
+      ],
+      "severity": "important",
+      "summary": "Major",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    },
+    {
+      "id": "r71-8",
+      "real": true,
+      "file": "mobile/src/app/_layout.tsx",
+      "lines": [
+        110,
+        110
+      ],
+      "severity": "important",
+      "summary": "Major",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    }
+  ],
+  "known_false": [
+    {
+      "id": "f71-1",
+      "file": "backend/src/routes/admin.ts",
+      "keywords": [
+        "інвалідац"
+      ],
+      "why": "Кеш розкладу ніхто не пише, виклик прибрано навмисно"
+    },
+    {
+      "id": "f71-2",
+      "file": "backend/src/routes/substitutions.ts",
+      "keywords": [
+        "інвалідац"
+      ],
+      "why": "Те саме: кешу schedule:* немає"
+    },
+    {
+      "id": "f71-3",
+      "file": "mobile/src/app/_layout.tsx",
+      "keywords": [
+        "при помилці",
+        "навіть при"
+      ],
+      "why": "Бібліотека сама викликає removeClient у гілці catch"
+    }
+  ]
+}

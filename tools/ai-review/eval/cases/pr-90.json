@@ -1,0 +1,80 @@
+{
+  "pr": 90,
+  "title": "feat(mobile): нагадування перед парою (F8, локальні сповіщення)",
+  "body": "## Що і навіщо\r\nСтудент не пропускає пару: за 10 або 15 хвилин до початку телефон показує сповіщення з предметом, часом, аудиторією й викладачем. Нагадування локальні (без сервера), тому працюють і без пушів F8. Налаштування в профілі за макетом 19.\r\n\r\nЗадача: closes #89\r\n\r\n## Що змінилось\r\n- **Профіль:** секція «Сповіщення» з «Нагадування перед парою: Вимк / 10 хв / 15 хв». Дозвіл на сповіщення питаємо лише тоді, коли користувач вмикає нагадування. Відмова показує підказку і «Відкрити налаштування». Профіль тепер прокручується.\r\n- **`features/reminders/plan.ts`** (чиста логіка, юніт-тести): пари цього й наступного тижня, для яких час нагадування ще попереду, не більше 40 (iOS тримає до 64). Скасовані й перенесені пари пропускаються, нова аудиторія й викладач із заміни потрапляють у текст.\r\n- **`notifications.ts`:** `expo-notifications` 58.1 (через `expo install`, працює в Expo Go), канал Android «Нагадування про пари», планування за датою, скасування лише своїх (`lesson-*`).\r\n- **`useReminderSync`** у вкладках: переплановує, коли змінюється розклад (заміни, група), час нагадування або застосунок повертається на передній план. Переплановує лише тоді, коли план справді змінився.\r\n- **`settings.ts`:** вибір зберігається на пристрої (AsyncStorage) і в профілі на сервері (`api.updateSettings`, `PATCH /me` лише з переданими полями). Початкове значення на новому пристрої береться з `GET /me`.\r\n- **Вихід:** нагадування й вибір видаляються.\r\n- Спеки F8, F9 і таблиця стану.\r\n\r\n## Спека\r\n[specs/f8-notifications.md](specs/f8-notifications.md), критерій «Нагадування спрацьовує за обраний час перед парою». F9: «час нагадування зберігається між запусками».\r\n\r\n## Як перевірити\r\n1. `cd mobile && npm ci && npm test`: 66 тестів (+10 у `plan.test.ts`, +2 у `api.profile.test.ts`).\r\n2. На телефоні (Expo Go або APK): Профіль → «10 хв» → дозволити сповіщення. Найближча пара нагадає за 10 хв до початку. Швидко перевірити можна в `MOCK=1`: тимчасово поставити в `src/mock/fixtures.ts` пару на найближчі хвилини.\r\n3. Вимкнути («Вимк»): заплановані нагадування зникають. Вийти з акаунта: теж.\r\n\r\nПеревірено: `npm test`, `npm run typecheck`, `expo export -p android`, `npm ci` з новим lock на npm 10. Гілка містить свіжий `develop` разом із #86. **На телефоні не перевіряв**: сповіщення треба побачити на пристрої.\r\n\r\n## Чеклист\r\n- [ ] CI зелений\r\n- [x] Юніт-тести додано\r\n- [ ] E2E-сценарій: ні (сповіщення в E2E потребують дозволу й очікування часу)\r\n- [x] Немає секретів і `.env` у коміті\r\n- [x] Контракт API не змінювався\r\n\r\n## На що звернути увагу ревʼюеру\r\n- **Сервер (#86 уже злитий):** вибір діє одразу на пристрої і копією йде в `PATCH /me { reminderMinutes }`. Невдача запиту (офлайн) лише логується, нагадування працюють. На новому пристрої час береться з сервера; без дозволу профіль показує «Дозволити».\r\n- **Android:** доставка приблизна (`delivery: bestEffort`, без `SCHEDULE_EXACT_ALARM`), можливе запізнення на кілька хвилин у режимі енергозбереження. Точні будильники Google Play дозволяє лише застосункам-будильникам і календарям.\r\n- **Час** пари рахується як місцевий час телефона. Для телефонів в Україні це збігається з часом університету.\r\n- Перемикач «Зміни та скасування» з макета не додано: він має сенс разом із пушами F8 і полем з #86.\r\n\r\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\r\n<!-- coderabbit-ai-generated:v1 -->\r\n\r\n## Summary by CodeRabbit\r\n\r\n* **New Features**\r\n  * Added on-device reminders for upcoming classes, with 10- and 15-minute options. Canceled or rescheduled classes are excluded, and reminders include replacement room or teacher details when available.\r\n  * Added reminder controls to the profile. Permission is requested when reminders are enabled; reminders can be turned off without granting permission.\r\n  * Reminder preferences are saved to the account when signed in and cleared from the device on sign-out. Android notifications may arrive several minutes late.\r\n\r\n* **Documentation**\r\n  * Clarified that substitution push notifications, including the “Changes and cancellations” switch, are not yet available.\r\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "a6807f52d188e03a8c66880fcbb3099f8b4f54f9",
+  "head": "fd1479d747147c68d13cbb43196d969792cfc5f9",
+  "head_ref": "feat/mobile-lesson-reminders",
+  "base_ref": "develop",
+  "set": "holdout",
+  "smoke": false,
+  "note": "",
+  "issues": [
+    {
+      "id": "r90-1",
+      "real": null,
+      "file": "mobile/src/api.ts",
+      "lines": [
+        242,
+        242
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    },
+    {
+      "id": "r90-2",
+      "real": null,
+      "file": "mobile/src/features/reminders/ReminderSetting.tsx",
+      "lines": [
+        47,
+        47
+      ],
+      "severity": "important",
+      "summary": "Major",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    },
+    {
+      "id": "r90-3",
+      "real": null,
+      "file": "mobile/src/features/reminders/settings.ts",
+      "lines": [
+        32,
+        32
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    },
+    {
+      "id": "r90-4",
+      "real": null,
+      "file": "mobile/src/features/reminders/useReminderSync.ts",
+      "lines": [
+        60,
+        60
+      ],
+      "severity": "important",
+      "summary": "Major",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    },
+    {
+      "id": "r90-5",
+      "real": null,
+      "file": "specs/f9-profile.md",
+      "lines": [
+        3,
+        3
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    }
+  ],
+  "known_false": []
+}

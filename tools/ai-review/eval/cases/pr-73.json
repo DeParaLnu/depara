@@ -1,0 +1,28 @@
+{
+  "pr": 73,
+  "title": "docs(specs): актуальний стан фіч у таблиці specs/README",
+  "body": "## Що і навіщо\r\nТаблиця стану фіч у `specs/README.md` застаріла: F3 і F5 позначені як «UI в плані», хоча екрани вже в `develop`. Оновив стан за поточним кодом.\r\n\r\n## Що змінилось\r\n- F1: екран входу, secure-store і авто-refresh готові, реальний вхід чекає на тенант (#36, #37)\r\n- F2: бекенд і UI готові\r\n- F3: «Сьогодні», «Тиждень», деталі пари і стани готові; кеш не зберігається між запусками, `ETag` у застосунку не використовується\r\n- F5: аудиторії й корпуси готові, пошуку викладачів у UI немає\r\n- F6: заміни видно в розкладі, форми старости і пушів немає\r\n- F9: дані користувача, група і вихід; зміни групи з профілю, теми й нагадувань немає\r\n- F7 і F8 без змін\r\n\r\n## Спека\r\n`specs/README.md`\r\n\r\n## Як перевірити\r\n1. Звірити таблицю з `mobile/src/app/` і `mobile/src/features/`.\r\n\r\n## Чеклист\r\n- [ ] CI зелений\r\n- [x] Немає секретів і `.env` у коміті\r\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n\n<!-- coderabbit-ai-generated:v1 -->\n\n## Summary by CodeRabbit\n\n* **Documentation**\n  * Updated the feature-status table for login, onboarding, schedules, search, substitutions, and profiles. It now reflects mobile login awaiting a tenant; completed onboarding and schedule interfaces with cache and ETag limitations; room search availability without teacher search; visible substitutions without representative forms or push notifications; and profile features with group changes, themes, and reminders unavailable. Admin and notification entries are unchanged.\n\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "82739ca2e0f8c009e483101d3275e6a93991fd3b",
+  "head": "0c306aa5b901c87064e917e8ee1c36c851cf1174",
+  "head_ref": "docs/specs-status",
+  "base_ref": "develop",
+  "set": "holdout",
+  "smoke": true,
+  "note": "майже чистий PR: міряє хибні пункти",
+  "issues": [
+    {
+      "id": "r73-1",
+      "real": null,
+      "file": "specs/README.md",
+      "lines": [
+        19,
+        19
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    }
+  ],
+  "known_false": []
+}

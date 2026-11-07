@@ -1,0 +1,38 @@
+{
+  "pr": 86,
+  "title": "feat(backend): PATCH /me змінює лише передані поля, нагадування й перемикач сповіщень (F9)",
+  "body": "## Що і навіщо\r\n`PATCH /me` змінював лише групу й підгрупу, і `groupId` був обовʼязковий. Тепер він змінює лише передані поля і зберігає час нагадування та перемикач «Зміни та скасування» (знадобиться для пушів F8). Закриває відкриті питання специфікації F9.\r\n\r\nЗадача: бекенд для #84 (мобільна частина лишається в #84)\r\n\r\n## Що змінилось\r\n- `PATCH /me`: поля `groupId`, `subgroup`, `reminderMinutes` (0, 10, 15), `notifySubstitutions` необовʼязкові, змінюється лише передане (`backend/src/routes/profile.ts`, розбір і правила в `backend/src/lib/profilePatch.ts`).\r\n- Підгрупу можна змінити без групи. Без вибраної групи це `400 GROUP_REQUIRED`. Нова група без підгрупи, як і раніше, скидає підгрупу на `0`.\r\n- Правило з #83 збережено: староста з групою не переходить в іншу групу сам (`403 HEADMAN_GROUP_LOCKED`), підгрупу й налаштування змінює.\r\n- Підгрупа скидається на `0` лише коли група справді інша: повторно надіслана поточна група підгрупу не чіпає.\n- Перевірки атомарні: оновлення йде лише якщо роль і група в базі ті самі, що при перевірці. Якщо адмін змінив їх між читанням і записом, рішення приймається заново (до 3 спроб, далі `409 PROFILE_CHANGED`).\r\n- `GET /me` і відповідь `PATCH /me` повертають повний профіль разом із `notifySubstitutions`.\r\n- Міграція `20261104000000_user_notify_substitutions`: `app_user.notify_substitutions BOOLEAN NOT NULL DEFAULT true`.\r\n- Нові помилки 400: `NOTHING_TO_UPDATE`, `INVALID_REMINDER_MINUTES`, `INVALID_NOTIFY_SUBSTITUTIONS`.\r\n- E2E «зміна групи» з #83 більше не залежать від групи ТЕСТ-32, яку створює `f6`: при іншому порядку файлів вони падали.\r\n\r\n## Спека\r\n`specs/f9-profile.md` (API, правила полів, помилки, критерії), `specs/f8-notifications.md`, `specs/README.md`.\r\n\r\n## Як перевірити\r\n1. `cd backend && npx prisma migrate deploy && npm run seed -- --shift-to-current-week`\r\n2. `npm run test:e2e`: `f9-profile` (налаштування, лише підгрупа, нова група, некоректні значення, староста) і unit `profile-patch`.\r\n\r\n## Приклад відповіді API\r\n`PATCH /me` з `{ \"reminderMinutes\": 10, \"notifySubstitutions\": false }` → 200:\r\n```json\r\n{ \"id\": \"…\", \"email\": \"s@lnu.edu.ua\", \"fullName\": \"…\", \"role\": \"STUDENT\", \"groupId\": \"…\", \"subgroup\": 2, \"reminderMinutes\": 10, \"notifySubstitutions\": false }\r\n```\r\n\r\n## Чеклист\r\n- [x] CI зелений локально: 190 тестів (unit і E2E), `typecheck`, `lint`\r\n- [x] E2E-сценарій додано або оновлено\r\n- [x] Немає секретів і `.env` у коміті\r\n- [x] Документація API оновлена\r\n\r\n## На що звернути увагу ревʼюеру\r\n- Відповідь `PATCH /me` тепер повний профіль замість `{ id, groupId, subgroup }`. Це надмножина: мобілка читає лише ці поля.\r\n- Після злиття: `npx prisma migrate deploy` на локальних базах (на проді це робить `start:prod`). Мобілці додати `notifySubstitutions` у тип `Me` і оновити мок `PATCH /me` разом з #84.\r\n\r\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n<!-- coderabbit-ai-generated:v1 -->\n\n## Summary by CodeRabbit\n\n* **New Features**\n  * Profile settings can be updated individually, including reminder timing and preferences for substitution and cancellation notifications.\n  * Group and subgroup selections can be updated independently. Changing groups without specifying a subgroup resets it to the default.\n  * Substitution and cancellation notifications are enabled by default.\n* **Improvements**\n  * Invalid or empty profile updates are rejected with clear errors, without changing saved settings.\n  * Group and subgroup updates follow profile permissions and selection rules.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "04d44ce9f3aec0de55a1dc018460e05e092ab939",
+  "head": "d94689cdd3dbbd51145128ce3e65d6a60c460b02",
+  "head_ref": "feat/profile-settings",
+  "base_ref": "develop",
+  "set": "dev",
+  "smoke": true,
+  "note": "проблема з регістром groupId дійшла до develop і виправлена в #91",
+  "issues": [
+    {
+      "id": "r86-1",
+      "real": true,
+      "file": "backend/src/lib/profilePatch.ts",
+      "lines": [
+        26,
+        26
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, автор виправив"
+    }
+  ],
+  "known_false": [
+    {
+      "id": "f86-1",
+      "file": "backend/prisma/migrations/20261104000000_user_notify_substitutions/migration.sql",
+      "keywords": [
+        "NOT NULL",
+        "наявних рядк"
+      ],
+      "why": "ADD COLUMN ... NOT NULL DEFAULT заповнює наявні рядки"
+    }
+  ]
+}

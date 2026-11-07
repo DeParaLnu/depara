@@ -1,0 +1,1607 @@
+diff --git a/README.md b/README.md
+index 9d3f508..1dc2df9 100644
+--- a/README.md
++++ b/README.md
+@@ -46,7 +46,7 @@ E2E=1 API_URL=http://localhost:3000 npx expo start     # локальний бе
+ ```
+ 
+ Режим `MOCK=1` обслуговує запити з `mobile/src/mock/` (розклад групи `ТЕСТ-31` повторюється в кожному тижні, є заміна і скасування).
+-Вхід у ньому один дотик, групу обирають зі списку, стан живе до перезапуску. Він потрібен для розробки екранів і демо без SSO.
++Вхід у ньому один дотик, групу обирають зі списку, стан живе до перезапуску. Мок-користувач є старостою, тож видно й форму заміни (F6): заміни створюються й скасовуються в памʼяті. Він потрібен для розробки екранів і демо без SSO.
+ Після зміни прапорців перезапустіть сервер із `--clear`, інакше Metro може віддати збірку зі старим значенням.
+ 
+ ### APK для команди (EAS Build)
+diff --git a/mobile/src/api.substitutions.test.ts b/mobile/src/api.substitutions.test.ts
+new file mode 100644
+index 0000000..c172a48
+--- /dev/null
++++ b/mobile/src/api.substitutions.test.ts
+@@ -0,0 +1,52 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++vi.mock('./config', () => ({ config: { apiUrl: 'http://api.test', mock: false, e2e: false } }));
++vi.mock('./lib/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
++vi.mock('./mock/mockFetch', () => ({ mockFetch: vi.fn() }));
++
++import { api } from './api';
++
++// Виклики API для замін (F6). Логіка запиту й авто-refresh перевіряється в api.test.ts
++const json = (status: number, body: unknown) =>
++  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
++
++let fetchMock: ReturnType<typeof vi.fn>;
++beforeEach(() => {
++  fetchMock = vi.fn();
++  vi.stubGlobal('fetch', fetchMock);
++});
++
++const routeOf = (call: unknown[]) => String(call[0]).replace('http://api.test', '');
++
++describe('заміни (F6)', () => {
++  it('createSubstitution шле POST /substitutions з тілом і токеном', async () => {
++    fetchMock.mockResolvedValueOnce(json(201, { id: 's1' }));
++    await expect(api.createSubstitution('tok', { lessonId: 'l1', kind: 'CANCELLED' })).resolves.toEqual({ id: 's1' });
++    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++    expect(url).toBe('http://api.test/substitutions');
++    expect(init.method).toBe('POST');
++    expect(JSON.parse(String(init.body))).toEqual({ lessonId: 'l1', kind: 'CANCELLED' });
++  });
++
++  it('помилку бекенда віддає кодом (SUBSTITUTION_EXISTS)', async () => {
++    fetchMock.mockResolvedValueOnce(json(409, { error: 'SUBSTITUTION_EXISTS' }));
++    await expect(api.createSubstitution('tok', { lessonId: 'l1', kind: 'CANCELLED' })).rejects.toMatchObject({
++      code: 'SUBSTITUTION_EXISTS',
++      status: 409,
++    });
++  });
++
++  it('deleteSubstitution шле DELETE і приймає 204', async () => {
++    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
++    await api.deleteSubstitution('tok', 's1');
++    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++    expect(url).toBe('http://api.test/substitutions/s1');
++    expect(init.method).toBe('DELETE');
++  });
++
++  it('teachers кодує пошуковий запит', async () => {
++    fetchMock.mockResolvedValueOnce(json(200, []));
++    await api.teachers('tok', 'Бойко Я');
++    expect(routeOf(fetchMock.mock.calls[0])).toBe(`/teachers?q=${encodeURIComponent('Бойко Я')}`);
++  });
++});
+diff --git a/mobile/src/api.ts b/mobile/src/api.ts
+index 16194bf..114880e 100644
+--- a/mobile/src/api.ts
++++ b/mobile/src/api.ts
+@@ -43,6 +43,18 @@ export type Substitution = {
+   newDate: string | null;
+   newPairNumber: number | null;
+ };
++export type Teacher = { id: string; fullName: string; position: string | null };
++
++// F6: тіло POST /substitutions. Які поля потрібні, залежить від kind (див. features/substitutions/form.ts)
++export type NewSubstitution = {
++  lessonId: string;
++  kind: SubstitutionKind;
++  newTeacherId?: string;
++  newClassroomId?: string;
++  newDate?: string;
++  newPairNumber?: number;
++  comment?: string;
++};
+ 
+ export type Lesson = {
+   id: string;
+@@ -236,4 +248,11 @@ export const api = {
+     const qs = params.toString();
+     return request<Classroom[]>(`/classrooms${qs ? `?${qs}` : ''}`, {}, token);
+   },
++  teachers: (token: string, q?: string) =>
++    request<Teacher[]>(`/teachers${q ? `?q=${encodeURIComponent(q)}` : ''}`, {}, token),
++  createSubstitution: (token: string, body: NewSubstitution) =>
++    request<{ id: string }>('/substitutions', { method: 'POST', body: JSON.stringify(body) }, token),
++  // Скасування заміни: 204 без тіла, пара повертається до звичайного вигляду
++  deleteSubstitution: (token: string, id: string) =>
++    request<void>(`/substitutions/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+ };
+diff --git a/mobile/src/app/(tabs)/index.tsx b/mobile/src/app/(tabs)/index.tsx
+index db4cdd4..ac2c9d9 100644
+--- a/mobile/src/app/(tabs)/index.tsx
++++ b/mobile/src/app/(tabs)/index.tsx
+@@ -1,8 +1,10 @@
++import { router } from 'expo-router';
+ import { useState } from 'react';
+ import { mondayOf, toIsoDate } from '../../lib/date';
+ import { errorCode, isNetworkError } from '../../lib/errors';
+ import { useGroups, useMe, useNow, useWeek } from '../../features/schedule/hooks';
+ import { TodayView, type TodayState } from '../../features/schedule/TodayView';
++import { useCanManageSubstitutions } from '../../features/substitutions/hooks';
+ 
+ // Контейнер екрана «Сьогодні»: бере дані з API і віддає їх у TodayView
+ export default function TodayRoute() {
+@@ -12,6 +14,7 @@ export default function TodayRoute() {
+   const week = useWeek(toIsoDate(mondayOf(now)));
+   const me = useMe();
+   const groups = useGroups();
++  const canManageSubstitutions = useCanManageSubstitutions();
+ 
+   let state: TodayState;
+   if (week.data) {
+@@ -46,6 +49,11 @@ export default function TodayRoute() {
+         void week.refetch();
+         void me.refetch();
+       }}
++      onAddSubstitution={
++        canManageSubstitutions
++          ? () => router.push({ pathname: '/substitution', params: { date: toIsoDate(selected) } })
++          : undefined
++      }
+     />
+   );
+ }
+diff --git a/mobile/src/app/_layout.tsx b/mobile/src/app/_layout.tsx
+index ddba905..de3b236 100644
+--- a/mobile/src/app/_layout.tsx
++++ b/mobile/src/app/_layout.tsx
+@@ -94,6 +94,7 @@ export default function RootLayout() {
+           </Stack.Protected>
+           <Stack.Protected guard={signedIn && !onboarding}>
+             <Stack.Screen name="(tabs)" />
++            <Stack.Screen name="substitution" />
+           </Stack.Protected>
+         </Stack>
+       </AppErrorBoundary>
+diff --git a/mobile/src/app/substitution.tsx b/mobile/src/app/substitution.tsx
+new file mode 100644
+index 0000000..dbea06f
+--- /dev/null
++++ b/mobile/src/app/substitution.tsx
+@@ -0,0 +1,11 @@
++import { router, useLocalSearchParams } from 'expo-router';
++import { SubstitutionScreen } from '../features/substitutions/SubstitutionScreen';
++import { toIsoDate } from '../lib/date';
++
++// F6: «Нова заміна». Параметри: date (день, з якого відкрили), lessonId (пара з деталей пари)
++export default function SubstitutionRoute() {
++  const params = useLocalSearchParams<{ date?: string; lessonId?: string }>();
++  const date = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : toIsoDate(new Date());
++  const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
++  return <SubstitutionScreen date={date} lessonId={params.lessonId} onClose={close} />;
++}
+diff --git a/mobile/src/features/rooms/hooks.ts b/mobile/src/features/rooms/hooks.ts
+index 02c7eb0..ef152aa 100644
+--- a/mobile/src/features/rooms/hooks.ts
++++ b/mobile/src/features/rooms/hooks.ts
+@@ -29,7 +29,7 @@ export function useBuildings() {
+   });
+ }
+ 
+-export function useClassrooms(q?: string, building?: string) {
++export function useClassrooms(q?: string, building?: string, enabled = true) {
+   const token = useToken();
+   const trimmedQ = q?.trim() || undefined;
+   const trimmedBuilding = building?.trim() || undefined;
+@@ -40,7 +40,7 @@ export function useClassrooms(q?: string, building?: string) {
+       if (!token) throw new Error('UNAUTHORIZED');
+       return api.classrooms(token, trimmedQ, trimmedBuilding);
+     },
+-    enabled: !!token,
++    enabled: !!token && enabled,
+     staleTime: 60_000,
+   });
+ }
+diff --git a/mobile/src/features/schedule/TodayView.tsx b/mobile/src/features/schedule/TodayView.tsx
+index 14ee625..8efd23b 100644
+--- a/mobile/src/features/schedule/TodayView.tsx
++++ b/mobile/src/features/schedule/TodayView.tsx
+@@ -25,10 +25,22 @@ type Props = {
+   state: TodayState;
+   refreshing: boolean;
+   onRefresh: () => void;
++  /** F6: кнопка «Додати заміну» (лише для старости й адміна) */
++  onAddSubstitution?: () => void;
+ };
+ 
+ // Екран «Сьогодні»: чисто презентаційний, дані й стан отримує ззовні (див. src/app/(tabs)/index.tsx)
+-export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state, refreshing, onRefresh }: Props) {
++export function TodayView({
++  now,
++  selected,
++  onSelect,
++  subtitle,
++  isHeadman,
++  state,
++  refreshing,
++  onRefresh,
++  onAddSubstitution,
++}: Props) {
+   const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
+   const insets = useSafeAreaInsets();
+   const days = useMemo(() => weekDays(mondayOf(now)), [now]);
+@@ -113,7 +125,7 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
+         <FlatList
+           data={dayLessons}
+           keyExtractor={(item) => item.lesson.id}
+-          contentContainerStyle={styles.list}
++          contentContainerStyle={[styles.list, onAddSubstitution && styles.listWithFab]}
+           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+           renderItem={({ item }) => (
+             <LessonCard lesson={item.lesson} status={item.status} onPress={() => setOpenLesson(item.lesson)} />
+@@ -127,6 +139,18 @@ export function TodayView({ now, selected, onSelect, subtitle, isHeadman, state,
+           }
+         />
+       )}
++      {onAddSubstitution && state.kind === 'ready' && state.published ? (
++        <Pressable
++          testID="add-substitution-fab"
++          accessibilityRole="button"
++          accessibilityLabel="Додати заміну"
++          onPress={onAddSubstitution}
++          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
++        >
++          <Ionicons name="add" size={24} color="#FFFFFF" />
++          <Text style={styles.fabText}>Додати заміну</Text>
++        </Pressable>
++      ) : null}
+       <LessonDetailsSheet lesson={openLesson} onClose={() => setOpenLesson(null)} />
+     </View>
+   );
+@@ -168,4 +192,24 @@ const styles = StyleSheet.create({
+   offlineBold: { fontWeight: '700' },
+   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+   list: { paddingHorizontal: 21, paddingBottom: 24, gap: 11, flexGrow: 1 },
++  listWithFab: { paddingBottom: 96 },
++  fab: {
++    position: 'absolute',
++    right: 21,
++    bottom: 20,
++    minHeight: 54,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 6,
++    borderRadius: 27,
++    paddingHorizontal: 22,
++    backgroundColor: colors.primary,
++    elevation: 4,
++    shadowColor: '#000000',
++    shadowOpacity: 0.18,
++    shadowRadius: 10,
++    shadowOffset: { width: 0, height: 4 },
++  },
++  fabPressed: { backgroundColor: colors.primaryDark },
++  fabText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+ });
+diff --git a/mobile/src/features/schedule/components/LessonDetailsSheet.tsx b/mobile/src/features/schedule/components/LessonDetailsSheet.tsx
+index 0df4486..acfba1b 100644
+--- a/mobile/src/features/schedule/components/LessonDetailsSheet.tsx
++++ b/mobile/src/features/schedule/components/LessonDetailsSheet.tsx
+@@ -6,6 +6,7 @@ import type { Lesson } from '../../../api';
+ import { dayMonth, fromIsoDate, weekdayShort } from '../../../lib/date';
+ import { openRoute } from '../../../lib/maps';
+ import { colors } from '../../../theme';
++import { SubstitutionActions } from '../../substitutions/SubstitutionActions';
+ import { audienceLabel, lessonDetails, lessonTypeLabel, substitutionBadge } from '../lesson';
+ 
+ type Props = { lesson: Lesson | null; onClose: () => void };
+@@ -20,6 +21,7 @@ function Row({ icon, text, testID }: { icon: ComponentProps<typeof Ionicons>['na
+ }
+ 
+ // Деталі пари (макет «Деталі пари»): тип, підгрупа, час, викладач, корпус з адресою і «Прокласти маршрут».
++// Староста бачить тут ще «Додати заміну» або «Скасувати заміну» (F6, SubstitutionActions).
+ // «Нагадати за 10 хв» зʼявиться разом із сповіщеннями (F8): без них кнопка нічого б не робила.
+ export function LessonDetailsSheet({ lesson, onClose }: Props) {
+   const insets = useSafeAreaInsets();
+@@ -100,6 +102,7 @@ export function LessonDetailsSheet({ lesson, onClose }: Props) {
+                 <Text style={styles.primaryText}>Прокласти маршрут</Text>
+               </Pressable>
+             ) : null}
++            <SubstitutionActions lesson={lesson} onClose={onClose} />
+           </View>
+         ) : null}
+       </View>
+diff --git a/mobile/src/features/substitutions/PickerSheet.tsx b/mobile/src/features/substitutions/PickerSheet.tsx
+new file mode 100644
+index 0000000..cd2c57a
+--- /dev/null
++++ b/mobile/src/features/substitutions/PickerSheet.tsx
+@@ -0,0 +1,141 @@
++import { Ionicons } from '@expo/vector-icons';
++import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { colors, errorText } from '../../theme';
++
++export type PickerItem = { key: string; title: string; subtitle?: string };
++
++type Props = {
++  visible: boolean;
++  title: string;
++  items: PickerItem[];
++  selectedKey?: string | null;
++  onSelect: (key: string) => void;
++  onClose: () => void;
++  testID: string;
++  /** Пошук: якщо задано, зверху поле вводу */
++  search?: { value: string; onChange: (q: string) => void; placeholder: string };
++  loading?: boolean;
++  errorCode?: string | null;
++  emptyText?: string;
++};
++
++// Нижній лист вибору (пара, викладач, аудиторія) для форми «Нова заміна»
++export function PickerSheet({
++  visible,
++  title,
++  items,
++  selectedKey,
++  onSelect,
++  onClose,
++  testID,
++  search,
++  loading,
++  errorCode,
++  emptyText = 'Нічого не знайдено',
++}: Props) {
++  const insets = useSafeAreaInsets();
++  return (
++    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
++      <View style={styles.root}>
++        <Pressable
++          style={StyleSheet.absoluteFill}
++          onPress={onClose}
++          accessibilityRole="button"
++          accessibilityLabel="Закрити вибір"
++        />
++        <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} testID={testID}>
++          <View style={styles.handle} />
++          <Text style={styles.title} accessibilityRole="header">
++            {title}
++          </Text>
++          {search ? (
++            <TextInput
++              testID={`${testID}-search`}
++              value={search.value}
++              onChangeText={search.onChange}
++              placeholder={search.placeholder}
++              placeholderTextColor={colors.textMuted}
++              style={styles.search}
++              autoCorrect={false}
++              autoFocus
++            />
++          ) : null}
++          {loading ? (
++            <ActivityIndicator style={styles.state} color={colors.primary} accessibilityLabel="Завантаження" />
++          ) : errorCode ? (
++            <Text style={[styles.state, styles.error]}>{errorText(errorCode)}</Text>
++          ) : (
++            <FlatList
++              data={items}
++              keyExtractor={(item) => item.key}
++              keyboardShouldPersistTaps="handled"
++              style={styles.list}
++              ListEmptyComponent={<Text style={[styles.state, styles.empty]}>{emptyText}</Text>}
++              renderItem={({ item }) => {
++                const selected = item.key === selectedKey;
++                return (
++                  <Pressable
++                    testID={`${testID}-item-${item.key}`}
++                    accessibilityRole="button"
++                    accessibilityState={{ selected }}
++                    accessibilityLabel={item.subtitle ? `${item.title}, ${item.subtitle}` : item.title}
++                    onPress={() => onSelect(item.key)}
++                    style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
++                  >
++                    <View style={styles.itemText}>
++                      <Text style={styles.itemTitle}>{item.title}</Text>
++                      {item.subtitle ? <Text style={styles.itemSubtitle}>{item.subtitle}</Text> : null}
++                    </View>
++                    {selected ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
++                  </Pressable>
++                );
++              }}
++            />
++          )}
++        </View>
++      </View>
++    </Modal>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.45)' },
++  sheet: {
++    maxHeight: '80%',
++    backgroundColor: colors.surface,
++    borderTopLeftRadius: 28,
++    borderTopRightRadius: 28,
++    paddingHorizontal: 21,
++    paddingTop: 12,
++  },
++  handle: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: colors.border, marginBottom: 12 },
++  title: { fontSize: 20, lineHeight: 26, fontWeight: '700', color: colors.text, marginBottom: 12 },
++  search: {
++    height: 48,
++    borderRadius: 14,
++    borderWidth: 1,
++    borderColor: colors.border,
++    paddingHorizontal: 14,
++    fontSize: 16,
++    color: colors.text,
++    marginBottom: 8,
++  },
++  list: { flexGrow: 0 },
++  item: {
++    minHeight: 56,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++    paddingVertical: 10,
++    borderBottomWidth: 1,
++    borderBottomColor: colors.border,
++  },
++  itemPressed: { backgroundColor: colors.chip },
++  itemText: { flex: 1, gap: 2 },
++  itemTitle: { fontSize: 16, lineHeight: 21, fontWeight: '600', color: colors.text },
++  itemSubtitle: { fontSize: 14, lineHeight: 18, color: colors.textMuted },
++  state: { paddingVertical: 24 },
++  error: { color: colors.error, fontSize: 15, textAlign: 'center' },
++  empty: { color: colors.textMuted, fontSize: 15, textAlign: 'center' },
++});
+diff --git a/mobile/src/features/substitutions/SubstitutionActions.tsx b/mobile/src/features/substitutions/SubstitutionActions.tsx
+new file mode 100644
+index 0000000..ad847dc
+--- /dev/null
++++ b/mobile/src/features/substitutions/SubstitutionActions.tsx
+@@ -0,0 +1,89 @@
++import { router } from 'expo-router';
++import { useState } from 'react';
++import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
++import type { Lesson } from '../../api';
++import { reportError } from '../../lib/errors';
++import { colors, errorText } from '../../theme';
++import { useCanManageSubstitutions, useDeleteSubstitution } from './hooks';
++
++type Props = { lesson: Lesson; onClose: () => void };
++
++// Кнопки старости в деталях пари: «Додати заміну» або «Скасувати заміну». Студент їх не бачить
++export function SubstitutionActions({ lesson, onClose }: Props) {
++  const canManage = useCanManageSubstitutions();
++  const remove = useDeleteSubstitution();
++  const [error, setError] = useState<string | null>(null);
++  if (!canManage) return null;
++
++  const sub = lesson.substitution;
++  if (!sub) {
++    return (
++      <Pressable
++        testID="add-substitution-button"
++        accessibilityRole="button"
++        onPress={() => {
++          onClose();
++          router.push({ pathname: '/substitution', params: { date: lesson.date, lessonId: lesson.id } });
++        }}
++        style={({ pressed }) => [styles.button, pressed && styles.pressed]}
++      >
++        <Text style={styles.addText}>Додати заміну</Text>
++      </Pressable>
++    );
++  }
++
++  const cancel = async () => {
++    setError(null);
++    try {
++      await remove.mutateAsync(sub.id);
++      onClose();
++    } catch (e) {
++      setError(errorText(reportError('substitution', e)));
++    }
++  };
++  const confirm = () =>
++    Alert.alert('Скасувати заміну?', 'Пара повернеться до звичайного вигляду в розкладі групи.', [
++      { text: 'Ні', style: 'cancel' },
++      { text: 'Скасувати заміну', style: 'destructive', onPress: () => void cancel() },
++    ]);
++
++  return (
++    <>
++      {error ? (
++        <Text style={styles.error} accessibilityRole="alert">
++          {error}
++        </Text>
++      ) : null}
++      <Pressable
++        testID="cancel-substitution-button"
++        accessibilityRole="button"
++        accessibilityState={{ disabled: remove.isPending, busy: remove.isPending }}
++        disabled={remove.isPending}
++        onPress={confirm}
++        style={({ pressed }) => [styles.button, pressed && styles.pressed]}
++      >
++        {remove.isPending ? (
++          <ActivityIndicator color={colors.danger} />
++        ) : (
++          <Text style={styles.cancelText}>Скасувати заміну</Text>
++        )}
++      </Pressable>
++    </>
++  );
++}
++
++const styles = StyleSheet.create({
++  button: {
++    height: 56,
++    borderRadius: 14,
++    borderWidth: 1,
++    borderColor: colors.border,
++    alignItems: 'center',
++    justifyContent: 'center',
++    marginTop: 12,
++  },
++  pressed: { backgroundColor: colors.chip },
++  addText: { fontSize: 17, fontWeight: '700', color: colors.primary },
++  cancelText: { fontSize: 17, fontWeight: '700', color: colors.danger },
++  error: { color: colors.error, fontSize: 15, lineHeight: 20, marginTop: 12, textAlign: 'center' },
++});
+diff --git a/mobile/src/features/substitutions/SubstitutionScreen.tsx b/mobile/src/features/substitutions/SubstitutionScreen.tsx
+new file mode 100644
+index 0000000..ec0e9f9
+--- /dev/null
++++ b/mobile/src/features/substitutions/SubstitutionScreen.tsx
+@@ -0,0 +1,495 @@
++import { Ionicons } from '@expo/vector-icons';
++import { useMemo, useState } from 'react';
++import {
++  ActivityIndicator,
++  KeyboardAvoidingView,
++  Platform,
++  Pressable,
++  ScrollView,
++  StyleSheet,
++  Text,
++  TextInput,
++  View,
++} from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import type { Lesson, SubstitutionKind } from '../../api';
++import { StateView } from '../../components/StateView';
++import { addDays, dayMonth, fromIsoDate, mondayOf, toIsoDate, weekdayShort, weekdayShortCap } from '../../lib/date';
++import { errorCode, reportError } from '../../lib/errors';
++import { colors, errorText } from '../../theme';
++import { useClassrooms, useDebounce } from '../rooms/hooks';
++import { useGroups, useMe, useWeek } from '../schedule/hooks';
++import { lessonTypeLabel } from '../schedule/lesson';
++import {
++  buildSubstitution,
++  emptyForm,
++  KIND_OPTIONS,
++  MAX_COMMENT,
++  PAIR_NUMBERS,
++  selectableLessons,
++  type SubstitutionForm,
++} from './form';
++import { useCanManageSubstitutions, useCreateSubstitution, useTeachers } from './hooks';
++import { PickerSheet, type PickerItem } from './PickerSheet';
++
++type Props = {
++  /** День, з якого відкрили форму (YYYY-MM-DD): з його тижня береться список пар */
++  date: string;
++  /** Пара, для якої відкрили форму з деталей пари */
++  lessonId?: string;
++  onClose: () => void;
++};
++
++type Picker = 'lesson' | 'teacher' | 'classroom' | null;
++
++const lessonSubtitle = (l: Lesson) => {
++  const d = fromIsoDate(l.date);
++  return [`${weekdayShort(d)} ${dayMonth(d)}`, l.start, lessonTypeLabel[l.type], l.subgroup > 0 ? `підгрупа ${l.subgroup}` : null]
++    .filter(Boolean)
++    .join(' · ');
++};
++
++// F6: форма «Нова заміна» (макет docs/design/15-new-substitution.png) і екран «Заміну збережено» (16)
++export function SubstitutionScreen({ date, lessonId, onClose }: Props) {
++  const insets = useSafeAreaInsets();
++  const canManage = useCanManageSubstitutions();
++  const me = useMe();
++  const groups = useGroups();
++  const groupCode = groups.data?.find((g) => g.id === me.data?.groupId)?.code;
++
++  const monday = mondayOf(fromIsoDate(date));
++  const week = useWeek(toIsoDate(monday));
++  const lessons = useMemo(() => selectableLessons(week.data?.lessons ?? []), [week.data]);
++
++  // Пара за замовчуванням: та, з якої відкрили форму, або перша пара обраного дня
++  const [form, setForm] = useState<SubstitutionForm>(() => emptyForm());
++  const [touchedLesson, setTouchedLesson] = useState(false);
++  const defaultLesson = lessons.find((l) => l.id === lessonId) ?? lessons.find((l) => l.date === date) ?? null;
++  const lesson = touchedLesson ? form.lesson : (form.lesson ?? defaultLesson);
++  const current: SubstitutionForm = { ...form, lesson };
++
++  const [picker, setPicker] = useState<Picker>(null);
++  const [teacherQuery, setTeacherQuery] = useState('');
++  const [roomQuery, setRoomQuery] = useState('');
++  const teachers = useTeachers(useDebounce(teacherQuery, 250), picker === 'teacher');
++  const classrooms = useClassrooms(useDebounce(roomQuery, 250), undefined, picker === 'classroom');
++
++  const [formError, setFormError] = useState<string | null>(null);
++  const create = useCreateSubstitution();
++  const [saved, setSaved] = useState(false);
++
++  const update = (patch: Partial<SubstitutionForm>) => {
++    setFormError(null);
++    setForm((f) => ({ ...f, lesson, ...patch }));
++  };
++
++  const submit = async () => {
++    const built = buildSubstitution(current);
++    if (!built.ok) {
++      setFormError(built.error);
++      return;
++    }
++    setFormError(null);
++    try {
++      await create.mutateAsync(built.body);
++      setSaved(true);
++    } catch (e) {
++      setFormError(reportError('substitution', e));
++    }
++  };
++
++  if (!canManage) {
++    return (
++      <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
++        <Header onBack={onClose} />
++        <StateView
++          icon="lock-closed-outline"
++          title="Недостатньо прав"
++          description="Додавати заміни може лише староста групи."
++          actionLabel="До розкладу"
++          onAction={onClose}
++        />
++      </View>
++    );
++  }
++
++  if (saved) {
++    return (
++      <View style={[styles.screen, styles.savedScreen, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 }]}>
++        <View style={styles.savedBody} testID="substitution-saved">
++          <View style={styles.savedIcon}>
++            <Ionicons name="checkmark" size={64} color="#166534" />
++          </View>
++          <Text style={styles.savedTitle} accessibilityRole="header">
++            Заміну збережено
++          </Text>
++          <Text style={styles.savedSubtitle}>
++            {groupCode ? `Група ${groupCode} побачить її в розкладі` : 'Група побачить її в розкладі'}
++          </Text>
++        </View>
++        <Pressable
++          testID="substitution-done"
++          accessibilityRole="button"
++          onPress={onClose}
++          style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
++        >
++          <Text style={styles.secondaryText}>До розкладу</Text>
++        </Pressable>
++      </View>
++    );
++  }
++
++  const kind = current.kind;
++  const moveDays = Array.from({ length: 13 }, (_, i) => addDays(monday, i)).filter((d) => d.getDay() !== 0);
++
++  const lessonItems: PickerItem[] = lessons.map((l) => ({ key: l.id, title: l.subject, subtitle: lessonSubtitle(l) }));
++  const teacherItems: PickerItem[] = (teachers.data ?? []).map((t) => ({
++    key: t.id,
++    title: t.fullName,
++    subtitle: t.position ?? undefined,
++  }));
++  const roomItems: PickerItem[] = (classrooms.data ?? []).map((r) => ({
++    key: r.id,
++    title: `Корпус ${r.building.code} · ${r.number}`,
++    subtitle: r.building.address,
++  }));
++
++  return (
++    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
++      <View style={[styles.flex, { paddingTop: insets.top + 12 }]}>
++        <Header onBack={onClose} />
++        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
++          <Label text="Пара" />
++          {week.isPending ? (
++            <ActivityIndicator color={colors.primary} accessibilityLabel="Завантаження пар" />
++          ) : week.isError && !week.data ? (
++            <Text style={styles.error}>{errorText(errorCode(week.error))}</Text>
++          ) : (
++            <Select
++              testID="substitution-lesson"
++              placeholder={lessons.length ? 'Оберіть пару' : 'Цього тижня немає пар без заміни'}
++              title={lesson?.subject}
++              subtitle={lesson ? lessonSubtitle(lesson) : undefined}
++              onPress={() => setPicker('lesson')}
++              disabled={!lessons.length}
++            />
++          )}
++
++          <Label text="Тип зміни" />
++          <View style={styles.chips}>
++            {KIND_OPTIONS.map((o) => (
++              <Chip
++                key={o.kind}
++                testID={`substitution-kind-${o.kind}`}
++                label={o.label}
++                selected={kind === o.kind}
++                onPress={() => update({ kind: o.kind as SubstitutionKind })}
++              />
++            ))}
++          </View>
++
++          {kind === 'REPLACED' ? (
++            <>
++              <Label text="Новий викладач" />
++              <Select
++                testID="substitution-teacher"
++                placeholder="Оберіть викладача"
++                title={current.teacher?.fullName}
++                onPress={() => setPicker('teacher')}
++              />
++            </>
++          ) : null}
++
++          {kind === 'MOVED' ? (
++            <>
++              <Label text="Нова дата" />
++              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayRow}>
++                {moveDays.map((d) => {
++                  const iso = toIsoDate(d);
++                  return (
++                    <Chip
++                      key={iso}
++                      testID={`substitution-date-${iso}`}
++                      label={`${weekdayShortCap(d)} ${d.getDate()}`}
++                      accessibilityLabel={`${weekdayShort(d)} ${dayMonth(d)}`}
++                      selected={current.newDate === iso}
++                      onPress={() => update({ newDate: current.newDate === iso ? null : iso })}
++                    />
++                  );
++                })}
++              </ScrollView>
++              <Label text="Нова пара" />
++              <View style={styles.chips}>
++                {PAIR_NUMBERS.map((n) => (
++                  <Chip
++                    key={n}
++                    testID={`substitution-pair-${n}`}
++                    label={String(n)}
++                    accessibilityLabel={`${n}-а пара`}
++                    selected={current.newPairNumber === n}
++                    onPress={() => update({ newPairNumber: current.newPairNumber === n ? null : n })}
++                  />
++                ))}
++              </View>
++            </>
++          ) : null}
++
++          {kind === 'ROOM_CHANGED' || kind === 'MOVED' ? (
++            <>
++              <Label text={kind === 'MOVED' ? 'Аудиторія (необовʼязково)' : 'Нова аудиторія'} />
++              <Select
++                testID="substitution-classroom"
++                placeholder="Оберіть аудиторію"
++                title={current.classroom ? `Корпус ${current.classroom.building.code} · ${current.classroom.number}` : undefined}
++                onPress={() => setPicker('classroom')}
++              />
++            </>
++          ) : null}
++
++          <Label text="Коментар" />
++          <TextInput
++            testID="substitution-comment"
++            value={current.comment}
++            onChangeText={(comment) => update({ comment })}
++            placeholder="Що змінилось (необовʼязково)"
++            placeholderTextColor={colors.textMuted}
++            multiline
++            maxLength={MAX_COMMENT}
++            style={styles.comment}
++            accessibilityLabel="Коментар"
++          />
++
++          {formError ? (
++            <Text style={styles.error} accessibilityRole="alert" testID="substitution-error">
++              {errorText(formError)}
++            </Text>
++          ) : null}
++        </ScrollView>
++
++        <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
++          <Pressable
++            testID="substitution-submit"
++            accessibilityRole="button"
++            accessibilityState={{ disabled: create.isPending, busy: create.isPending }}
++            disabled={create.isPending}
++            onPress={() => void submit()}
++            style={({ pressed }) => [styles.primary, pressed && styles.primaryPressed]}
++          >
++            {create.isPending ? (
++              <ActivityIndicator color="#FFFFFF" />
++            ) : (
++              <Text style={styles.primaryText}>{groupCode ? `Надіслати групі ${groupCode}` : 'Зберегти заміну'}</Text>
++            )}
++          </Pressable>
++        </View>
++      </View>
++
++      <PickerSheet
++        visible={picker === 'lesson'}
++        testID="lesson-picker"
++        title="Пара"
++        items={lessonItems}
++        selectedKey={lesson?.id}
++        onSelect={(key) => {
++          setTouchedLesson(true);
++          setFormError(null);
++          setForm((f) => ({ ...f, lesson: lessons.find((l) => l.id === key) ?? null }));
++          setPicker(null);
++        }}
++        onClose={() => setPicker(null)}
++        emptyText="Цього тижня немає пар без заміни"
++      />
++      <PickerSheet
++        visible={picker === 'teacher'}
++        testID="teacher-picker"
++        title="Новий викладач"
++        items={teacherItems}
++        selectedKey={current.teacher?.id}
++        search={{ value: teacherQuery, onChange: setTeacherQuery, placeholder: 'Прізвище викладача' }}
++        loading={teachers.isPending}
++        errorCode={teachers.isError ? errorCode(teachers.error) : null}
++        onSelect={(key) => {
++          update({ teacher: teachers.data?.find((t) => t.id === key) ?? null });
++          setPicker(null);
++        }}
++        onClose={() => setPicker(null)}
++      />
++      <PickerSheet
++        visible={picker === 'classroom'}
++        testID="classroom-picker"
++        title="Аудиторія"
++        items={roomItems}
++        selectedKey={current.classroom?.id}
++        search={{ value: roomQuery, onChange: setRoomQuery, placeholder: 'Номер аудиторії' }}
++        loading={classrooms.isPending}
++        errorCode={classrooms.isError ? errorCode(classrooms.error) : null}
++        onSelect={(key) => {
++          update({ classroom: classrooms.data?.find((r) => r.id === key) ?? null });
++          setPicker(null);
++        }}
++        onClose={() => setPicker(null)}
++      />
++    </KeyboardAvoidingView>
++  );
++}
++
++function Header({ onBack }: { onBack: () => void }) {
++  return (
++    <View style={styles.header}>
++      <Pressable testID="substitution-back" accessibilityRole="button" accessibilityLabel="Назад" onPress={onBack} hitSlop={12}>
++        <Ionicons name="chevron-back" size={28} color={colors.primary} />
++      </Pressable>
++      <Text style={styles.title} accessibilityRole="header">
++        Нова заміна
++      </Text>
++    </View>
++  );
++}
++
++const Label = ({ text }: { text: string }) => <Text style={styles.label}>{text.toUpperCase()}</Text>;
++
++function Select({
++  testID,
++  placeholder,
++  title,
++  subtitle,
++  onPress,
++  disabled,
++}: {
++  testID: string;
++  placeholder: string;
++  title?: string;
++  subtitle?: string;
++  onPress: () => void;
++  disabled?: boolean;
++}) {
++  return (
++    <Pressable
++      testID={testID}
++      accessibilityRole="button"
++      accessibilityLabel={title ? [title, subtitle].filter(Boolean).join(', ') : placeholder}
++      accessibilityHint="Відкриває список для вибору"
++      accessibilityState={{ disabled }}
++      disabled={disabled}
++      onPress={onPress}
++      style={({ pressed }) => [styles.select, pressed && styles.selectPressed]}
++    >
++      <View style={styles.selectText}>
++        <Text style={title ? styles.selectTitle : styles.selectPlaceholder}>{title ?? placeholder}</Text>
++        {subtitle ? <Text style={styles.selectSubtitle}>{subtitle}</Text> : null}
++      </View>
++      <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
++    </Pressable>
++  );
++}
++
++function Chip({
++  testID,
++  label,
++  selected,
++  onPress,
++  accessibilityLabel,
++}: {
++  testID: string;
++  label: string;
++  selected: boolean;
++  onPress: () => void;
++  accessibilityLabel?: string;
++}) {
++  return (
++    <Pressable
++      testID={testID}
++      accessibilityRole="button"
++      accessibilityLabel={accessibilityLabel ?? label}
++      accessibilityState={{ selected }}
++      onPress={onPress}
++      style={[styles.chip, selected && styles.chipSelected]}
++    >
++      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
++    </Pressable>
++  );
++}
++
++const styles = StyleSheet.create({
++  flex: { flex: 1 },
++  screen: { flex: 1, backgroundColor: colors.background },
++  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 8 },
++  title: { fontSize: 24, lineHeight: 30, fontWeight: '700', color: colors.text },
++  content: { paddingHorizontal: 21, paddingBottom: 24, gap: 10 },
++  label: { fontSize: 12, lineHeight: 16, fontWeight: '700', color: colors.textSecondary, marginTop: 14, letterSpacing: 0.3 },
++  select: {
++    minHeight: 56,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++    borderRadius: 14,
++    borderWidth: 1,
++    borderColor: colors.border,
++    paddingHorizontal: 14,
++    paddingVertical: 10,
++  },
++  selectPressed: { backgroundColor: colors.chip },
++  selectText: { flex: 1, gap: 2 },
++  selectTitle: { fontSize: 16, lineHeight: 21, fontWeight: '700', color: colors.text },
++  selectPlaceholder: { fontSize: 16, lineHeight: 21, color: colors.textMuted },
++  selectSubtitle: { fontSize: 14, lineHeight: 18, color: colors.textMuted },
++  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
++  dayRow: { gap: 9 },
++  chip: {
++    minHeight: 44,
++    justifyContent: 'center',
++    borderRadius: 12,
++    paddingHorizontal: 14,
++    backgroundColor: colors.chip,
++  },
++  chipSelected: { backgroundColor: colors.primary },
++  chipText: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: colors.textSecondary },
++  chipTextSelected: { color: '#FFFFFF' },
++  comment: {
++    minHeight: 100,
++    borderRadius: 14,
++    borderWidth: 1,
++    borderColor: colors.border,
++    paddingHorizontal: 14,
++    paddingTop: 12,
++    paddingBottom: 12,
++    fontSize: 16,
++    lineHeight: 21,
++    color: colors.text,
++    textAlignVertical: 'top',
++  },
++  error: { color: colors.error, fontSize: 15, lineHeight: 20, marginTop: 8 },
++  footer: { paddingHorizontal: 21, paddingTop: 8 },
++  primary: {
++    height: 56,
++    borderRadius: 14,
++    backgroundColor: colors.primary,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  primaryPressed: { backgroundColor: colors.primaryDark },
++  primaryText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
++  savedScreen: { paddingHorizontal: 21 },
++  savedBody: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
++  savedIcon: {
++    width: 128,
++    height: 128,
++    borderRadius: 64,
++    backgroundColor: '#DCFCE7',
++    alignItems: 'center',
++    justifyContent: 'center',
++    marginBottom: 18,
++  },
++  savedTitle: { fontSize: 28, lineHeight: 34, fontWeight: '800', color: colors.text, textAlign: 'center' },
++  savedSubtitle: { fontSize: 16, lineHeight: 21, color: colors.textMuted, textAlign: 'center' },
++  secondary: {
++    height: 56,
++    borderRadius: 14,
++    borderWidth: 1,
++    borderColor: colors.border,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  secondaryPressed: { backgroundColor: colors.chip },
++  secondaryText: { fontSize: 17, fontWeight: '700', color: colors.primary },
++});
+diff --git a/mobile/src/features/substitutions/form.test.ts b/mobile/src/features/substitutions/form.test.ts
+new file mode 100644
+index 0000000..bfe79fc
+--- /dev/null
++++ b/mobile/src/features/substitutions/form.test.ts
+@@ -0,0 +1,111 @@
++import { describe, expect, it } from 'vitest';
++import type { Classroom, Lesson, Teacher } from '../../api';
++import { buildSubstitution, canManageSubstitutions, emptyForm, MAX_COMMENT, selectableLessons } from './form';
++
++const lesson = (over: Partial<Lesson> = {}): Lesson => ({
++  id: 'l1',
++  date: '2026-11-04',
++  pairNumber: 3,
++  start: '11:50',
++  end: '13:10',
++  subject: 'Веб-програмування',
++  type: 'LAB',
++  audience: 'GROUP',
++  subgroup: 0,
++  teacher: 'доц. Горон Б. І.',
++  room: '218/Т',
++  building: null,
++  substitution: null,
++  ...over,
++});
++const teacher: Teacher = { id: 't1', fullName: 'Корчак Ю. М.', position: null };
++const classroom = { id: 'c1', number: 'N10', label: 'N10/Б' } as Classroom;
++const form = (over: Partial<ReturnType<typeof emptyForm>>) => ({ ...emptyForm(lesson()), ...over });
++
++describe('buildSubstitution', () => {
++  it('без пари або типу повертає помилку', () => {
++    expect(buildSubstitution(emptyForm())).toEqual({ ok: false, error: 'LESSON_REQUIRED' });
++    expect(buildSubstitution(form({}))).toEqual({ ok: false, error: 'KIND_REQUIRED' });
++  });
++
++  it('пара, що вже має заміну, відхиляється до відправки', () => {
++    const withSub = lesson({ substitution: { id: 's' } as Lesson['substitution'] });
++    expect(buildSubstitution({ ...emptyForm(withSub), kind: 'CANCELLED' })).toEqual({
++      ok: false,
++      error: 'SUBSTITUTION_EXISTS',
++    });
++  });
++
++  it('скасування: лише пара і тип, коментар обрізається, порожній не відправляється', () => {
++    expect(buildSubstitution(form({ kind: 'CANCELLED', comment: '   ' }))).toEqual({
++      ok: true,
++      body: { lessonId: 'l1', kind: 'CANCELLED' },
++    });
++    expect(buildSubstitution(form({ kind: 'CANCELLED', comment: ' Хворіє ', teacher }))).toEqual({
++      ok: true,
++      body: { lessonId: 'l1', kind: 'CANCELLED', comment: 'Хворіє' },
++    });
++  });
++
++  it('інший викладач потребує викладача, зайву аудиторію не шле', () => {
++    expect(buildSubstitution(form({ kind: 'REPLACED' }))).toEqual({ ok: false, error: 'NEW_TEACHER_REQUIRED' });
++    expect(buildSubstitution(form({ kind: 'REPLACED', teacher, classroom }))).toEqual({
++      ok: true,
++      body: { lessonId: 'l1', kind: 'REPLACED', newTeacherId: 't1' },
++    });
++  });
++
++  it('інша аудиторія потребує аудиторії', () => {
++    expect(buildSubstitution(form({ kind: 'ROOM_CHANGED' }))).toEqual({ ok: false, error: 'NEW_CLASSROOM_REQUIRED' });
++    expect(buildSubstitution(form({ kind: 'ROOM_CHANGED', classroom, teacher }))).toEqual({
++      ok: true,
++      body: { lessonId: 'l1', kind: 'ROOM_CHANGED', newClassroomId: 'c1' },
++    });
++  });
++
++  it('перенесення: потрібні нова дата або пара, і хоч щось має відрізнятися', () => {
++    expect(buildSubstitution(form({ kind: 'MOVED' }))).toEqual({ ok: false, error: 'NEW_DATE_OR_PAIR_REQUIRED' });
++    expect(buildSubstitution(form({ kind: 'MOVED', newDate: '2026-11-04', newPairNumber: 3 }))).toEqual({
++      ok: false,
++      error: 'MOVE_TARGET_SAME_AS_ORIGINAL',
++    });
++    expect(buildSubstitution(form({ kind: 'MOVED', newPairNumber: 5 }))).toEqual({
++      ok: true,
++      body: { lessonId: 'l1', kind: 'MOVED', newPairNumber: 5 },
++    });
++    expect(buildSubstitution(form({ kind: 'MOVED', newDate: '2026-11-06', classroom, teacher }))).toEqual({
++      ok: true,
++      body: { lessonId: 'l1', kind: 'MOVED', newDate: '2026-11-06', newClassroomId: 'c1' },
++    });
++  });
++
++  it('коментар довший за 500 символів відхиляється', () => {
++    expect(buildSubstitution(form({ kind: 'CANCELLED', comment: 'а'.repeat(MAX_COMMENT) })).ok).toBe(true);
++    expect(buildSubstitution(form({ kind: 'CANCELLED', comment: 'а'.repeat(MAX_COMMENT + 1) }))).toEqual({
++      ok: false,
++      error: 'INVALID_COMMENT',
++    });
++  });
++});
++
++describe('canManageSubstitutions', () => {
++  it('староста з групою і адмін можуть, студент і староста без групи ні', () => {
++    expect(canManageSubstitutions({ role: 'HEADMAN', groupId: 'g' })).toBe(true);
++    expect(canManageSubstitutions({ role: 'ADMIN', groupId: null })).toBe(true);
++    expect(canManageSubstitutions({ role: 'HEADMAN', groupId: null })).toBe(false);
++    expect(canManageSubstitutions({ role: 'STUDENT', groupId: 'g' })).toBe(false);
++    expect(canManageSubstitutions(undefined)).toBe(false);
++  });
++});
++
++describe('selectableLessons', () => {
++  it('прибирає пари із заміною і сортує за днем і номером', () => {
++    const list = selectableLessons([
++      lesson({ id: 'b', date: '2026-11-05', pairNumber: 1 }),
++      lesson({ id: 'sub', substitution: { id: 's' } as Lesson['substitution'] }),
++      lesson({ id: 'a2', date: '2026-11-04', pairNumber: 4 }),
++      lesson({ id: 'a1', date: '2026-11-04', pairNumber: 2 }),
++    ]);
++    expect(list.map((l) => l.id)).toEqual(['a1', 'a2', 'b']);
++  });
++});
+diff --git a/mobile/src/features/substitutions/form.ts b/mobile/src/features/substitutions/form.ts
+new file mode 100644
+index 0000000..7052a7e
+--- /dev/null
++++ b/mobile/src/features/substitutions/form.ts
+@@ -0,0 +1,88 @@
++import type { Classroom, Lesson, Me, NewSubstitution, SubstitutionKind, Teacher } from '../../api';
++
++// F6: логіка форми «Нова заміна» без React і нативних модулів (її перевіряють юніт-тести).
++// Правила повторюють перевірки бекенда (backend/src/routes/substitutions.ts), щоб помилку було видно
++// до відправки, а не після. Бекенд однаково перевіряє все сам.
++
++export const KIND_OPTIONS: { kind: SubstitutionKind; label: string }[] = [
++  { kind: 'CANCELLED', label: 'Скасовано' },
++  { kind: 'REPLACED', label: 'Інший викладач' },
++  { kind: 'MOVED', label: 'Перенесено' },
++  { kind: 'ROOM_CHANGED', label: 'Інша аудиторія' },
++];
++
++/** Номери пар для перенесення. Якщо такої пари немає в розкладі дзвінків, бекенд відповість PAIR_NOT_FOUND. */
++export const PAIR_NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8];
++
++export const MAX_COMMENT = 500;
++
++export type SubstitutionForm = {
++  lesson: Lesson | null;
++  kind: SubstitutionKind | null;
++  teacher: Teacher | null;
++  classroom: Classroom | null;
++  newDate: string | null; // YYYY-MM-DD
++  newPairNumber: number | null;
++  comment: string;
++};
++
++export const emptyForm = (lesson: Lesson | null = null): SubstitutionForm => ({
++  lesson,
++  kind: null,
++  teacher: null,
++  classroom: null,
++  newDate: null,
++  newPairNumber: null,
++  comment: '',
++});
++
++export type BuildResult = { ok: true; body: NewSubstitution } | { ok: false; error: string };
++
++/** Тіло POST /substitutions з форми або код помилки (тексти в theme.ts). Зайві для типу поля не відправляються. */
++export function buildSubstitution(form: SubstitutionForm): BuildResult {
++  const { lesson, kind } = form;
++  if (!lesson) return { ok: false, error: 'LESSON_REQUIRED' };
++  if (lesson.substitution) return { ok: false, error: 'SUBSTITUTION_EXISTS' };
++  if (!kind) return { ok: false, error: 'KIND_REQUIRED' };
++
++  const comment = form.comment.trim();
++  if (comment.length > MAX_COMMENT) return { ok: false, error: 'INVALID_COMMENT' };
++
++  const body: NewSubstitution = { lessonId: lesson.id, kind, ...(comment ? { comment } : {}) };
++  switch (kind) {
++    case 'CANCELLED':
++      return { ok: true, body };
++    case 'REPLACED':
++      if (!form.teacher) return { ok: false, error: 'NEW_TEACHER_REQUIRED' };
++      return { ok: true, body: { ...body, newTeacherId: form.teacher.id } };
++    case 'ROOM_CHANGED':
++      if (!form.classroom) return { ok: false, error: 'NEW_CLASSROOM_REQUIRED' };
++      return { ok: true, body: { ...body, newClassroomId: form.classroom.id } };
++    case 'MOVED': {
++      if (!form.newDate && !form.newPairNumber) return { ok: false, error: 'NEW_DATE_OR_PAIR_REQUIRED' };
++      const sameDate = !form.newDate || form.newDate === lesson.date;
++      const samePair = !form.newPairNumber || form.newPairNumber === lesson.pairNumber;
++      if (sameDate && samePair) return { ok: false, error: 'MOVE_TARGET_SAME_AS_ORIGINAL' };
++      return {
++        ok: true,
++        body: {
++          ...body,
++          ...(form.newDate ? { newDate: form.newDate } : {}),
++          ...(form.newPairNumber ? { newPairNumber: form.newPairNumber } : {}),
++          // Перенесена пара може бути й в іншій аудиторії (необовʼязково)
++          ...(form.classroom ? { newClassroomId: form.classroom.id } : {}),
++        },
++      };
++    }
++  }
++}
++
++/** Хто може додавати й скасовувати заміни: староста своєї групи або адмін (як requireRole на бекенді). */
++export const canManageSubstitutions = (me: Pick<Me, 'role' | 'groupId'> | undefined): boolean =>
++  !!me && (me.role === 'ADMIN' || (me.role === 'HEADMAN' && !!me.groupId));
++
++/** Пари, для яких можна створити заміну: без наявної заміни, за днем і номером. */
++export const selectableLessons = (lessons: Lesson[]): Lesson[] =>
++  lessons
++    .filter((l) => !l.substitution)
++    .sort((a, b) => a.date.localeCompare(b.date) || a.pairNumber - b.pairNumber || a.subgroup - b.subgroup);
+diff --git a/mobile/src/features/substitutions/hooks.ts b/mobile/src/features/substitutions/hooks.ts
+new file mode 100644
+index 0000000..bf81dfb
+--- /dev/null
++++ b/mobile/src/features/substitutions/hooks.ts
+@@ -0,0 +1,50 @@
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
++import { api, type NewSubstitution } from '../../api';
++import { useSession } from '../auth/session';
++import { useMe } from '../schedule/hooks';
++import { canManageSubstitutions } from './form';
++
++const useToken = () => useSession((s) => s.session?.accessToken);
++
++/** Чи показувати «Додати заміну» і «Скасувати заміну» (староста своєї групи або адмін). */
++export function useCanManageSubstitutions(): boolean {
++  return canManageSubstitutions(useMe().data);
++}
++
++/** Пошук викладача для заміни «Інший викладач» (GET /teachers, до 20 результатів). */
++export function useTeachers(q: string, enabled: boolean) {
++  const token = useToken();
++  const query = q.trim();
++  return useQuery({
++    queryKey: ['teachers', query],
++    queryFn: () => api.teachers(token!, query || undefined),
++    enabled: !!token && enabled,
++    staleTime: 10 * 60_000,
++  });
++}
++
++// Після створення чи скасування заміни перезавантажуємо всі тижні: заміна могла перенести пару в інший тиждень
++const useRefreshWeeks = () => {
++  const queryClient = useQueryClient();
++  return () => queryClient.invalidateQueries({ queryKey: ['week'] });
++};
++
++export function useCreateSubstitution() {
++  const token = useToken();
++  const refreshWeeks = useRefreshWeeks();
++  return useMutation({
++    mutationKey: ['createSubstitution'],
++    mutationFn: (body: NewSubstitution) => api.createSubstitution(token!, body),
++    onSuccess: () => refreshWeeks(),
++  });
++}
++
++export function useDeleteSubstitution() {
++  const token = useToken();
++  const refreshWeeks = useRefreshWeeks();
++  return useMutation({
++    mutationKey: ['deleteSubstitution'],
++    mutationFn: (id: string) => api.deleteSubstitution(token!, id),
++    onSuccess: () => refreshWeeks(),
++  });
++}
+diff --git a/mobile/src/mock/fixtures.ts b/mobile/src/mock/fixtures.ts
+index ab9ca6a..2f77ab4 100644
+--- a/mobile/src/mock/fixtures.ts
++++ b/mobile/src/mock/fixtures.ts
+@@ -4,11 +4,13 @@ import type { Building, Classroom, Group, LessonType, Substitution } from '../ap
+ // backend/prisma/seed/schedule.seed.json (група ТЕСТ-31), а дати не фіксовані: у кожному тижні
+ // пари повторюються з понеділка по пʼятницю, тож екрани «Сьогодні» і «Тиждень» не порожні.
+ 
++// Мок-користувач староста: так у MOCK=1 видно й форму заміни (F6). Студентський вигляд відрізняється лише
++// відсутністю бейджа «Староста» і кнопок заміни
+ export const MOCK_ME = {
+   id: 'mock-user',
+   email: 'student@lnu.edu.ua',
+   fullName: 'Тестовий Студент',
+-  role: 'STUDENT' as const,
++  role: 'HEADMAN' as const,
+   reminderMinutes: 15,
+ };
+ 
+diff --git a/mobile/src/mock/mockFetch.test.ts b/mobile/src/mock/mockFetch.test.ts
+new file mode 100644
+index 0000000..781b74f
+--- /dev/null
++++ b/mobile/src/mock/mockFetch.test.ts
+@@ -0,0 +1,67 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import type { WeekSchedule } from '../api';
++import { mockFetch } from './mockFetch';
++
++// Мок-бекенд MOCK=1 для F6: заміна створюється, видна в розкладі і скасовується
++const auth = { headers: { Authorization: 'Bearer mock-access' } };
++const call = async (path: string, init: RequestInit = {}) => {
++  const p = mockFetch(path, { ...auth, ...init });
++  await vi.runAllTimersAsync();
++  const res = await p;
++  return { status: res.status, body: res.status === 204 ? null : await res.json() };
++};
++const week = async () => (await call('/schedule/week?date=2026-11-04')).body as WeekSchedule;
++
++beforeEach(async () => {
++  vi.useFakeTimers();
++  await call('/auth/microsoft', { method: 'POST', body: '{}' });
++  await call('/me', { method: 'PATCH', body: JSON.stringify({ groupId: 'mock-g-test-31', subgroup: 0 }) });
++});
++
++describe('мок: заміни (F6)', () => {
++  it('скасування пари видно в розкладі, повторна заміна дає 409, після DELETE пара звичайна', async () => {
++    const lesson = (await week()).lessons.find((l) => !l.substitution)!;
++
++    const created = await call('/substitutions', {
++      method: 'POST',
++      body: JSON.stringify({ lessonId: lesson.id, kind: 'CANCELLED', comment: 'Хворіє' }),
++    });
++    expect(created.status).toBe(201);
++    const after = (await week()).lessons.find((l) => l.id === lesson.id)!;
++    expect(after.substitution).toMatchObject({ kind: 'CANCELLED', comment: 'Хворіє' });
++
++    const again = await call('/substitutions', { method: 'POST', body: JSON.stringify({ lessonId: lesson.id, kind: 'CANCELLED' }) });
++    expect(again).toMatchObject({ status: 409, body: { error: 'SUBSTITUTION_EXISTS' } });
++
++    expect((await call(`/substitutions/${after.substitution!.id}`, { method: 'DELETE' })).status).toBe(204);
++    expect((await week()).lessons.find((l) => l.id === lesson.id)!.substitution).toBeNull();
++  });
++
++  it('інший викладач і аудиторія беруться з довідників мока', async () => {
++    const lesson = (await week()).lessons.find((l) => !l.substitution)!;
++    const teachers = (await call('/teachers?q=бойко')).body as { id: string; fullName: string }[];
++    expect(teachers.map((t) => t.fullName)).toEqual(['Бойко Ярослав Васильович']);
++
++    await call('/substitutions', {
++      method: 'POST',
++      body: JSON.stringify({ lessonId: lesson.id, kind: 'REPLACED', newTeacherId: teachers[0].id }),
++    });
++    expect((await week()).lessons.find((l) => l.id === lesson.id)!.substitution).toMatchObject({
++      kind: 'REPLACED',
++      newTeacher: 'Бойко Ярослав Васильович',
++    });
++  });
++
++  it('заміну з фікстур можна скасувати', async () => {
++    const withSub = (await week()).lessons.find((l) => l.substitution)!;
++    expect((await call(`/substitutions/${withSub.substitution!.id}`, { method: 'DELETE' })).status).toBe(204);
++    expect((await week()).lessons.find((l) => l.id === withSub.id)!.substitution).toBeNull();
++  });
++
++  it('невідома пара дає 404, обовʼязкові поля перевіряються', async () => {
++    expect((await call('/substitutions', { method: 'POST', body: JSON.stringify({ lessonId: 'x', kind: 'CANCELLED' }) })).status).toBe(404);
++    const lesson = (await week()).lessons.find((l) => !l.substitution)!;
++    const res = await call('/substitutions', { method: 'POST', body: JSON.stringify({ lessonId: lesson.id, kind: 'ROOM_CHANGED' }) });
++    expect(res).toMatchObject({ status: 400, body: { error: 'NEW_CLASSROOM_REQUIRED' } });
++  });
++});
+diff --git a/mobile/src/mock/mockFetch.ts b/mobile/src/mock/mockFetch.ts
+index 7bf279a..92fd8ed 100644
+--- a/mobile/src/mock/mockFetch.ts
++++ b/mobile/src/mock/mockFetch.ts
+@@ -1,4 +1,4 @@
+-import type { Building, Lesson, Me, Session, WeekSchedule } from '../api';
++import type { Building, Lesson, Me, Session, Substitution, Teacher, WeekSchedule } from '../api';
+ import { addDays, fromIsoDate, mondayOf, toIsoDate } from '../lib/date';
+ import { MOCK_BUILDINGS, MOCK_CLASSROOMS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MOCK_SCHEDULE_GROUP_ID, PAIR_TIMES } from './fixtures';
+ 
+@@ -9,6 +9,16 @@ const LATENCY_MS = 250;
+ 
+ let state: { groupId: string | null; subgroup: number } = { groupId: null, subgroup: 0 };
+ 
++// F6: заміни, створені й скасовані в цьому запуску (за id пари). Пара мока має id mock-<понеділок>-<номер>
++const createdSubs = new Map<string, Substitution>();
++const removedSubs = new Set<string>();
++let subCounter = 0;
++
++// Викладачі для «Інший викладач»: усі, хто є в мок-розкладі
++const MOCK_TEACHERS: Teacher[] = [...new Set(MOCK_LESSONS.map((l) => l.teacher).filter((t): t is string => !!t))]
++  .sort((a, b) => a.localeCompare(b, 'uk'))
++  .map((fullName, i) => ({ id: `mock-t-${i}`, fullName, position: null }));
++
+ const reply = (status: number, body: unknown) =>
+   new Response(JSON.stringify(body), {
+     status,
+@@ -45,7 +55,14 @@ function weekOf(dateParam: string | null): WeekSchedule {
+       substitution: l.substitution
+         ? { id: `mock-sub-${weekStart}-${i}`, ...l.substitution, newBuilding: buildingOf(l.substitution.newRoom) }
+         : null,
+-    }));
++    }))
++    .map((l) =>
++      createdSubs.has(l.id)
++        ? { ...l, substitution: createdSubs.get(l.id)! }
++        : removedSubs.has(l.id)
++          ? { ...l, substitution: null }
++          : l,
++    );
+   return { weekStart, published: true, lessons };
+ }
+ 
+@@ -58,6 +75,8 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
+ 
+   if (method === 'POST' && route === '/auth/microsoft') {
+     state = { groupId: null, subgroup: 0 };
++    createdSubs.clear();
++    removedSubs.clear();
+     const session: Session = { accessToken: 'mock-access', refreshToken: 'mock-refresh', needsOnboarding: true };
+     return reply(200, session);
+   }
+@@ -103,6 +122,30 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
+ 
+   if (method === 'GET' && route === '/buildings') return reply(200, Object.values(MOCK_BUILDINGS));
+ 
++  if (method === 'GET' && route === '/teachers') {
++    const q = new URLSearchParams(query).get('q')?.trim().toLowerCase();
++    return reply(200, MOCK_TEACHERS.filter((t) => !q || t.fullName.toLowerCase().includes(q)).slice(0, 20));
++  }
++
++  if (method === 'POST' && route === '/substitutions') return createSubstitution(body);
++
++  if (method === 'DELETE' && route.startsWith('/substitutions/')) {
++    const id = decodeURIComponent(route.slice('/substitutions/'.length));
++    for (const [lessonId, sub] of createdSubs) {
++      if (sub.id === id) {
++        createdSubs.delete(lessonId);
++        removedSubs.add(lessonId);
++        return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
++      }
++    }
++    // Заміна з фікстур: id mock-sub-<понеділок>-<номер>, пара має id mock-<понеділок>-<номер>
++    const lessonId = id.replace(/^mock-sub-/, 'mock-');
++    const lesson = weekOf(lessonWeek(lessonId)).lessons.find((l) => l.id === lessonId);
++    if (!lesson?.substitution || lesson.substitution.id !== id) return reply(404, { error: 'SUBSTITUTION_NOT_FOUND' });
++    removedSubs.add(lessonId);
++    return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
++  }
++
+   if (method === 'GET' && route === '/classrooms') {
+     const params = new URLSearchParams(query);
+     const q = params.get('q')?.trim().toLowerCase();
+@@ -120,3 +163,38 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
+ 
+   return reply(404, { error: 'NOT_FOUND' });
+ }
++
++// Понеділок тижня з id пари мока (mock-YYYY-MM-DD-N)
++const lessonWeek = (lessonId: string) => lessonId.slice('mock-'.length, 'mock-'.length + 10);
++
++// POST /substitutions у моку: ті самі перевірки, що й на бекенді (у скороченому вигляді)
++function createSubstitution(body: Record<string, unknown>): Response {
++  const lessonId = String(body.lessonId ?? '');
++  const lesson = /^mock-\d{4}-\d{2}-\d{2}-\d+$/.test(lessonId)
++    ? weekOf(lessonWeek(lessonId)).lessons.find((l) => l.id === lessonId)
++    : undefined;
++  if (!lesson) return reply(404, { error: 'LESSON_NOT_FOUND' });
++  if (lesson.substitution) return reply(409, { error: 'SUBSTITUTION_EXISTS' });
++
++  const kind = body.kind as Substitution['kind'];
++  const teacher = MOCK_TEACHERS.find((t) => t.id === body.newTeacherId) ?? null;
++  const room = MOCK_CLASSROOMS.find((r) => r.id === body.newClassroomId) ?? null;
++  if (kind === 'REPLACED' && !teacher) return reply(400, { error: 'NEW_TEACHER_REQUIRED' });
++  if (kind === 'ROOM_CHANGED' && !room) return reply(400, { error: 'NEW_CLASSROOM_REQUIRED' });
++  if (kind === 'MOVED' && !body.newDate && !body.newPairNumber) return reply(400, { error: 'NEW_DATE_OR_PAIR_REQUIRED' });
++  if (!['CANCELLED', 'REPLACED', 'MOVED', 'ROOM_CHANGED'].includes(kind)) return reply(400, { error: 'INVALID_KIND' });
++
++  const sub: Substitution = {
++    id: `mock-sub-new-${++subCounter}`,
++    kind,
++    comment: typeof body.comment === 'string' ? body.comment : null,
++    newTeacher: kind === 'REPLACED' ? teacher!.fullName : null,
++    newRoom: kind === 'ROOM_CHANGED' || kind === 'MOVED' ? (room?.label ?? null) : null,
++    newBuilding: kind === 'ROOM_CHANGED' || kind === 'MOVED' ? (room?.building ?? null) : null,
++    newDate: kind === 'MOVED' && typeof body.newDate === 'string' ? body.newDate : null,
++    newPairNumber: kind === 'MOVED' && typeof body.newPairNumber === 'number' ? body.newPairNumber : null,
++  };
++  createdSubs.set(lesson.id, sub);
++  removedSubs.delete(lesson.id);
++  return reply(201, { id: sub.id, lessonId: lesson.id, kind: sub.kind });
++}
+diff --git a/mobile/src/theme.ts b/mobile/src/theme.ts
+index 1ef9b2b..51f33e6 100644
+--- a/mobile/src/theme.ts
++++ b/mobile/src/theme.ts
+@@ -39,6 +39,22 @@ export const errorMessages: Record<string, string> = {
+   RATE_LIMITED: 'Забагато запитів. Зачекайте хвилину і спробуйте ще раз.',
+   LAST_ADMIN: 'Ви останній адміністратор: спершу призначте іншого.',
+   ACCOUNT_CONFLICT: 'Цей акаунт уже пов’язано з іншим входом. Зверніться до підтримки.',
++  // F6: заміни (коди з форми і з POST /substitutions)
++  LESSON_REQUIRED: 'Оберіть пару.',
++  KIND_REQUIRED: 'Оберіть тип зміни.',
++  NEW_TEACHER_REQUIRED: 'Оберіть нового викладача.',
++  NEW_CLASSROOM_REQUIRED: 'Оберіть нову аудиторію.',
++  NEW_DATE_OR_PAIR_REQUIRED: 'Оберіть нову дату або номер пари.',
++  MOVE_TARGET_SAME_AS_ORIGINAL: 'Нова дата й пара збігаються з поточними.',
++  INVALID_COMMENT: 'Коментар задовгий: до 500 символів.',
++  SUBSTITUTION_EXISTS: 'Для цієї пари вже є заміна. Спершу скасуйте її.',
++  FORBIDDEN_GROUP: 'Можна змінювати лише пари своєї групи.',
++  FORBIDDEN: 'Недостатньо прав для цієї дії.',
++  LESSON_NOT_FOUND: 'Пару не знайдено. Оновіть розклад.',
++  SUBSTITUTION_NOT_FOUND: 'Заміну вже скасовано. Оновіть розклад.',
++  TEACHER_NOT_FOUND: 'Викладача не знайдено.',
++  CLASSROOM_NOT_FOUND: 'Аудиторію не знайдено.',
++  PAIR_NOT_FOUND: 'Такої пари немає в розкладі дзвінків.',
+ };
+ 
+ export const errorText = (code: string) => errorMessages[code] ?? 'Щось пішло не так. Спробуйте ще раз.';
+diff --git a/specs/README.md b/specs/README.md
+index e6e41a2..370ef6c 100644
+--- a/specs/README.md
++++ b/specs/README.md
+@@ -16,9 +16,9 @@
+ |---|---|---|
+ | [f1-login.md](f1-login.md) | Вхід через корпоративну пошту | Бекенд готовий до Microsoft Entra; у мобілці екран входу, токени в secure-store та авто-refresh. Реальний вхід чекає на тенант (#36, #37) |
+ | [f2-onboarding.md](f2-onboarding.md) | Вибір факультету, групи, підгрупи | Бекенд і UI готові (факультет, група, підгрупа) |
+-| [f3-schedule.md](f3-schedule.md) | Розклад: сьогодні, тиждень, деталі, офлайн | Бекенд і UI готові: «Сьогодні», «Тиждень», деталі пари, стан «не опубліковано», позначка «Офлайн», кеш розкладу на пристрої до 14 днів (переживає перезапуск). `ETag` у застосунку не використовується |
++| [f3-schedule.md](f3-schedule.md) | Розклад: сьогодні, тиждень, деталі, офлайн | Бекенд і UI готові: «Сьогодні», «Тиждень», деталі пари, стан «не опубліковано», позначка «Офлайн», кеш розкладу на пристрої до 14 днів (переживає перезапуск), `ETag`/`304` |
+ | [f5-search.md](f5-search.md) | Пошук аудиторій і викладачів | Аудиторії й корпуси готові (бекенд і UI, фільтр, маршрут). Пошуку викладачів у UI немає |
+-| [f6-substitutions.md](f6-substitutions.md) | Заміни пар (староста) | Бекенд є; заміни видно в розкладі. Форми старости в UI та пушів немає |
++| [f6-substitutions.md](f6-substitutions.md) | Заміни пар (староста) | Бекенд і UI готові: староста додає й скасовує заміну, група бачить її в розкладі. Пушів немає (F8) |
+ | [f7-admin.md](f7-admin.md) | Адмінка: ролі, імпорт розкладу | Бекенд є (група, CORS), веб-сторінка в плані |
+ | [f8-notifications.md](f8-notifications.md) | Сповіщення і нагадування | Не реалізовано |
+ | [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, група, вихід, видалення акаунта, посилання на політику конфіденційності. Зміни групи з профілю, теми й нагадувань немає |
+diff --git a/specs/f3-schedule.md b/specs/f3-schedule.md
+index 4eff8b0..1bd1512 100644
+--- a/specs/f3-schedule.md
++++ b/specs/f3-schedule.md
+@@ -1,6 +1,6 @@
+ # F3. Розклад: сьогодні, тиждень, деталі, офлайн
+ 
+-**Стан:** бекенд і UI готові (офлайн-кеш на пристрої); `ETag` у застосунку ще не використовується · **Відповідальні:** мобільний, бекенд, дизайн
++**Стан:** бекенд і UI готові (офлайн-кеш на пристрої, `ETag`/`304`) · **Відповідальні:** мобільний, бекенд, дизайн
+ 
+ ## Навіщо
+ Показати студенту, що, де і коли в нього зараз, наступне і на тиждень.
+diff --git a/specs/f6-substitutions.md b/specs/f6-substitutions.md
+index 3cffa4a..a2c98aa 100644
+--- a/specs/f6-substitutions.md
++++ b/specs/f6-substitutions.md
+@@ -1,6 +1,6 @@
+ # F6. Заміни пар
+ 
+-**Стан:** бекенд є, заміни видно в розкладі; форми старости в UI та пушів немає · **Відповідальні:** бекенд, мобільний, дизайн
++**Стан:** бекенд і UI готові (додавання й скасування заміни старостою); пушів немає (F8) · **Відповідальні:** бекенд, мобільний, дизайн
+ 
+ ## Навіщо
+ Староста швидко вносить зміну, і група бачить її в розкладі та отримує сповіщення. Це головна відмінність від конкурентів.
+@@ -9,10 +9,12 @@
+ Староста (лише своя група) і адмін (будь-яка). Студенти бачать результат.
+ 
+ ## Як це працює
+-1. Староста відкриває пару і натискає «Додати заміну».
++1. Староста натискає «Додати заміну» на екрані «Сьогодні» (пара обраного дня) або в деталях пари (ця пара). Форма «Нова заміна» дає вибрати будь-яку пару тижня без заміни.
+ 2. Обирає тип: **Скасовано** (`CANCELLED`), **Інший викладач** (`REPLACED`), **Перенесено** (`MOVED`), **Інша аудиторія** (`ROOM_CHANGED`).
+ 3. Заповнює поля, потрібні для типу (новий викладач, аудиторія, дата і номер пари), додає коментар (до 500 символів).
+-4. Після збереження кеш розкладу групи скидається, група отримує пуш (див. F8).
++4. Після збереження застосунок перезавантажує розклад і показує «Заміну збережено». Група бачить заміну з наступним оновленням розкладу; пуш групі буде разом із F8.
++
++У деталях пари із заміною староста бачить «Скасувати заміну» (з підтвердженням). Студент цих кнопок не бачить. Перенесення: нова дата (поточний і наступний тиждень, крім неділі) та/або номер пари 1–8, аудиторія необовʼязкова. Помилки бекенда показуються текстом під формою.
+ 
+ Для однієї пари можлива лише одна заміна. Видалити (скасувати) заміну може староста своєї групи або адмін, пара повертається до звичайного вигляду.
+ 

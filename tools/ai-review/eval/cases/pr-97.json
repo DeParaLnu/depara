@@ -1,0 +1,41 @@
+{
+  "pr": 97,
+  "title": "test(mobile): E2E для замін старостою (F6) і профілю (F9)",
+  "body": "## Що і навіщо\r\nДля замін старостою (#80) і профілю (#87) не було мобільних E2E: тестова збірка вміла входити лише студентом. Тепер вона входить і старостою, а сценарії покривають критерії F6 і F9.\r\n\r\nЗадача: closes #96\r\n\r\n## Що змінилось\r\n- **E2E-збірка (`E2E=1`):** друга кнопка «Увійти як староста (E2E)» (`login-headman-button`, токен `test:headman@lnu.edu.ua`). У звичайних збірках її немає.\r\n- **`e2e/api.ts` → `ensureHeadman()`:** перед сценарієм через API бекенда (з машини з Appium, `E2E_API_URL`, за замовчуванням `localhost:3000`) створює старосту, обирає йому ТЕСТ-31 і призначає роль від адміна з `ADMIN_EMAILS`. Повторний запуск на тій самій базі нічого не ламає.\r\n- **`f6-substitutions.e2e.ts`:** староста бачить «Додати заміну», скасовує пару через форму, бачить «Заміну збережено», заміну видно в «Тижні» без перезапуску, «Скасувати заміну» повертає пару до звичайного вигляду.\r\n- **`f6-student.e2e.ts`:** студент не бачить «Додати заміну».\r\n- **`f9-profile.e2e.ts`:** підгрупа змінюється з профілю і повертається назад; «Група» відкриває вибір з поточною групою, «Зберегти» без змін неактивна, «Назад» повертає в профіль. У seed лише одна група, тож зміну групи E2E не перевіряють, її покривають backend E2E.\r\n- **Хелпери:** `loginAsHeadman`, `scrollToTestIdSuffix`, `alertConfirm`. Документація `docs/mobile-e2e-runner.md`.\r\n\r\n## Спека\r\n[specs/f6-substitutions.md](specs/f6-substitutions.md), [specs/f9-profile.md](specs/f9-profile.md)\r\n\r\n## Як перевірити\r\nВручну: Actions → mobile-e2e → Run workflow на цій гілці.\r\n\r\n**Результати:**\r\n- До злиття з #93/#95 усі 7 файлів сценаріїв пройшли, 20 тестів: https://github.com/DeParaLnu/depara/actions/runs/41909763149 (друга спроба; перша впала на завантаженні образу емулятора, до тестів не дійшла).\r\n- Після злиття свіжого `develop` (новий крок онбордингу і привітання) прогін запущено: https://github.com/DeParaLnu/depara/actions/runs/41918933407. Результат допишу коментарем.\r\n\r\n## Чеклист\r\n- [ ] CI зелений\r\n- [x] E2E-сценарії додано\r\n- [x] Немає секретів і `.env` у коміті\r\n- [x] Контракт API не змінювався\r\n\r\n## На що звернути увагу ревʼюеру\r\n- Мобільні E2E на PR досі вимкнені (`MOBILE_E2E_ON_PR`), тож цей PR CI їх сам не запускає. Прогони вище запускав вручну.\r\n- Ці ж прогони підтвердили, що #41 і #42 зроблені, тому їх закрито.\r\n- \r\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\r\n\r\n<!-- coderabbit-ai-generated:v1 -->\r\n\r\n## Summary by CodeRabbit\r\n\r\n* **Tests**\r\n  * Added end-to-end coverage for student schedule access, headman cancellation and restoration of a lesson, and profile settings such as subgroup selection and group details.\r\n  * Added test setup for headman sign-in and group assignment.\r\n* **Documentation**\r\n  * Expanded mobile end-to-end test guidance with F6 and F9 scenarios, sign-in details, and API configuration.\r\n\r\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "5a0f1e19fadecd3930a9b20f1234dccb358bb8c6",
+  "head": "264add557b18a9f18cdca1782770d80c5b9a6b14",
+  "head_ref": "test/mobile-e2e-headman-profile",
+  "base_ref": "develop",
+  "set": "holdout",
+  "smoke": false,
+  "note": "",
+  "issues": [
+    {
+      "id": "r97-1",
+      "real": null,
+      "file": "docs/mobile-e2e-runner.md",
+      "lines": [
+        11,
+        11
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    },
+    {
+      "id": "r97-2",
+      "real": null,
+      "file": "mobile/e2e/specs/f9-profile.e2e.ts",
+      "lines": [
+        11,
+        11
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    }
+  ],
+  "known_false": []
+}

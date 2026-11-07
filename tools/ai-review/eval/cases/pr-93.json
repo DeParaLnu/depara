@@ -1,0 +1,41 @@
+{
+  "pr": 93,
+  "title": "feat(mobile): крок онбордингу «Не пропустіть заміну» (F2/F8)",
+  "body": "## Що і навіщо\r\nМакет 07 і спека F2 (крок 5) передбачають в онбордингу крок із дозволом на сповіщення. Тепер новий користувач одразу вмикає нагадування перед парою, і шукати їх у профілі не треба.\r\n\r\nЗадача: closes #92\r\n\r\n## Що змінилось\r\n- `NotificationsStep`: «Не пропустіть заміну», вибір «Вимк / 10 хв / 15 хв» (за замовчуванням 10), «Дозволити сповіщення» і «Пізніше». Відмова в дозволі онбординг не зупиняє.\r\n- В онбордингу після збереження групи йде цей крок, а не одразу розклад. Якщо застосунок закрили на кроці, наступний запуск відкриває саме його (група вже збережена).\r\n- `useApplyReminder` і `ReminderPicker` винесено з профілю: онбординг і профіль зберігають вибір однаково (на пристрої і копією в `PATCH /me`).\r\n- E2E: `loginAsStudent` на новому кроці тисне «Пізніше».\r\n- Спеки F2 і F8.\r\n\r\n## Спека\r\n[specs/f2-onboarding.md](specs/f2-onboarding.md), [specs/f8-notifications.md](specs/f8-notifications.md)\r\n\r\n## Як перевірити\r\n1. `MOCK=1 npx expo start --clear`: увійти, обрати групу, «Продовжити». Відкриється «Не пропустіть заміну». «Дозволити сповіщення» питає дозвіл, після чого профіль показує 10 хв. «Пізніше» веде на розклад без нагадувань.\r\n2. `npm test`, `npm run typecheck`.\r\n\r\nПеревірено: `npm test` (66), `npm run typecheck`, `expo export -p android`. На пристрої не запускав. Мобільні E2E на PR вимкнені, хелпер оновлено під новий крок.\r\n\r\n## Чеклист\r\n- [ ] CI зелений\r\n- [x] E2E-хелпер оновлено\r\n- [x] Немає секретів і `.env` у коміті\r\n- [x] Контракт API не змінювався\r\n\r\n## На що звернути увагу ревʼюеру\r\n- Текст «Повідомимо про заміни й скасування» з макета лишив: дозвіл той самий, і пуші F8 ним скористаються.\r\n- Хук `showNotifications` в онбордингу спирається на `me.groupId`: `needsOnboarding` буває лише в користувача без групи на момент входу.\r\n\r\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\r\n\r\n<!-- coderabbit-ai-generated:v1 -->\r\n\r\n## Summary by CodeRabbit\r\n\r\n* **New Features**\r\n  * Added a notification and reminder setup step to onboarding. Choose to turn reminders off, select a 10- or 15-minute interval, enable notifications, or continue without enabling them.\r\n  * Added reminder interval selection in reminder settings.\r\n\r\n* **Bug Fixes**\r\n  * Onboarding now proceeds correctly to the schedule when a group is already selected or notification setup is deferred.\r\n\r\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "440fcdd1809d413faeffebd735203059c51ee95e",
+  "head": "fd4d4b747a4619e6771ec00e419251f4fc2af708",
+  "head_ref": "feat/mobile-onboarding-notifications",
+  "base_ref": "develop",
+  "set": "holdout",
+  "smoke": true,
+  "note": "",
+  "issues": [
+    {
+      "id": "r93-1",
+      "real": null,
+      "file": "mobile/src/features/onboarding/OnboardingScreen.tsx",
+      "lines": [
+        77,
+        77
+      ],
+      "severity": "important",
+      "summary": "Major",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    },
+    {
+      "id": "r93-2",
+      "real": null,
+      "file": "specs/f2-onboarding.md",
+      "lines": [
+        17,
+        17
+      ],
+      "severity": "minor",
+      "summary": "Minor",
+      "keywords": [],
+      "source": "CodeRabbit, відповіді автора немає: розмітити"
+    }
+  ],
+  "known_false": []
+}

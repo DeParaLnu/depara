@@ -1,0 +1,5 @@
+# Знімки коду PR, сирі звіти прогонів і облік витрат лишаються локально
+.cache/
+results/raw/
+results/spend.json
+__pycache__/

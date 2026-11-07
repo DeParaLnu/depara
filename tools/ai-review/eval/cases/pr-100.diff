@@ -1,0 +1,1020 @@
+diff --git a/mobile/app.json b/mobile/app.json
+index 22d6a7e..7b9b10e 100644
+--- a/mobile/app.json
++++ b/mobile/app.json
+@@ -26,7 +26,8 @@
+     "scheme": "depara",
+     "plugins": [
+       "expo-router",
+-      "expo-secure-store"
++      "expo-secure-store",
++      "expo-notifications"
+     ],
+     "experiments": {
+       "typedRoutes": true
+diff --git a/mobile/src/api.profile.test.ts b/mobile/src/api.profile.test.ts
+index d565530..f9b705b 100644
+--- a/mobile/src/api.profile.test.ts
++++ b/mobile/src/api.profile.test.ts
+@@ -33,3 +33,24 @@ describe('updateSettings', () => {
+     });
+   });
+ });
++
++// F8: токен пристрою
++describe('push-токен', () => {
++  it('реєстрація шле POST /me/push-token', async () => {
++    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
++    await api.registerPushToken('tok', 'ExponentPushToken[abc]');
++    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++    expect(url).toBe('http://api.test/me/push-token');
++    expect(init.method).toBe('POST');
++    expect(JSON.parse(String(init.body))).toEqual({ token: 'ExponentPushToken[abc]' });
++  });
++
++  it('видалення шле DELETE з тим самим токеном у тілі', async () => {
++    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
++    await api.removePushToken('tok', 'ExponentPushToken[abc]');
++    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++    expect(url).toBe('http://api.test/me/push-token');
++    expect(init.method).toBe('DELETE');
++    expect(JSON.parse(String(init.body))).toEqual({ token: 'ExponentPushToken[abc]' });
++  });
++});
+diff --git a/mobile/src/api.ts b/mobile/src/api.ts
+index b5684a4..3f9cac6 100644
+--- a/mobile/src/api.ts
++++ b/mobile/src/api.ts
+@@ -236,6 +236,11 @@ export const api = {
+     request<void>('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken }) }),
+   // Видалення власного акаунта: 204 без тіла
+   deleteAccount: (token: string) => request<void>('/me', { method: 'DELETE' }, token),
++  // F8: Expo push-токен цього пристрою
++  registerPushToken: (token: string, pushToken: string) =>
++    request<void>('/me/push-token', { method: 'POST', body: JSON.stringify({ token: pushToken }) }, token),
++  removePushToken: (token: string, pushToken: string) =>
++    request<void>('/me/push-token', { method: 'DELETE', body: JSON.stringify({ token: pushToken }) }, token),
+   groups: (token: string) => request<Group[]>('/groups', {}, token),
+   me: (token: string) => request<Me>('/me', {}, token),
+   updateSettings: (token: string, settings: ProfileSettings) =>
+diff --git a/mobile/src/app/(tabs)/_layout.tsx b/mobile/src/app/(tabs)/_layout.tsx
+index 3fe949d..629979f 100644
+--- a/mobile/src/app/(tabs)/_layout.tsx
++++ b/mobile/src/app/(tabs)/_layout.tsx
+@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
+ import { Tabs } from 'expo-router';
+ import { Platform, useWindowDimensions, type ColorValue } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { usePush } from '../../features/push/usePush';
+ import { useReminderSync } from '../../features/reminders/useReminderSync';
+ import { colors } from '../../theme';
+ 
+@@ -25,6 +26,8 @@ const iconColor = (color: ColorValue) => (typeof color === 'string' ? color : un
+ export default function TabsLayout() {
+   // F8: локальні нагадування перед парою живуть, поки користувач увійшов (вкладки змонтовані)
+   useReminderSync();
++  // F8: токен пристрою і відкриття пари з пушу
++  usePush();
+   const insets = useSafeAreaInsets();
+   const { fontScale } = useWindowDimensions();
+   // iOS 13+ не збільшує підписи вкладок (показує їх великими при довгому натисканні),
+diff --git a/mobile/src/app/(tabs)/week.tsx b/mobile/src/app/(tabs)/week.tsx
+index 19ee8a8..86d037b 100644
+--- a/mobile/src/app/(tabs)/week.tsx
++++ b/mobile/src/app/(tabs)/week.tsx
+@@ -1,5 +1,6 @@
+-import { useState } from 'react';
+-import { addDays, mondayOf, toIsoDate } from '../../lib/date';
++import { useLocalSearchParams } from 'expo-router';
++import { useEffect, useState } from 'react';
++import { addDays, fromIsoDate, mondayOf, toIsoDate } from '../../lib/date';
+ import { errorCode, isNetworkError } from '../../lib/errors';
+ import { useGroupLabel, useNow, useWeek } from '../../features/schedule/hooks';
+ import type { TodayState } from '../../features/schedule/TodayView';
+@@ -11,7 +12,19 @@ export default function WeekRoute() {
+   const currentMonday = mondayOf(now);
+   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+ 
++  // F8: натискання на пуш про заміну відкриває її тиждень і деталі пари (див. features/push/usePush.ts)
++  const { date, lessonId, openedAt } = useLocalSearchParams<{ date?: string; lessonId?: string; openedAt?: string }>();
++  const [focusId, setFocusId] = useState<string | null>(null);
++  useEffect(() => {
++    if (!date || !lessonId) return;
++    setWeekStart(mondayOf(fromIsoDate(date)));
++    setFocusId(lessonId);
++    // openedAt змінюється з кожним натисканням, навіть коли пара та сама
++  }, [openedAt]);
++
+   const week = useWeek(toIsoDate(weekStart));
++  // Чекаємо на свіжі дані: у збереженому тижні заміни, про яку пуш, ще немає
++  const focusLesson = (focusId && !week.isFetching && week.data?.lessons.find((l) => l.id === focusId)) || null;
+   const { subtitle, isHeadman, refetchMe } = useGroupLabel();
+ 
+   let state: TodayState;
+@@ -41,6 +54,8 @@ export default function WeekRoute() {
+       subtitle={subtitle}
+       isHeadman={isHeadman}
+       state={state}
++      focusLesson={focusLesson}
++      onFocusShown={() => setFocusId(null)}
+       refreshing={week.isRefetching && !week.isPending}
+       onRefresh={() => {
+         void week.refetch();
+diff --git a/mobile/src/features/auth/session.ts b/mobile/src/features/auth/session.ts
+index a12fd53..d34c65a 100644
+--- a/mobile/src/features/auth/session.ts
++++ b/mobile/src/features/auth/session.ts
+@@ -2,6 +2,7 @@ import { create } from 'zustand';
+ import { api, setSessionBridge, type Session } from '../../api';
+ import { resetCaches } from '../../lib/cacheReset';
+ import { clearPersistedQueries } from '../../lib/queryPersist';
++import { unregisterPushToken } from '../push/registration';
+ import { cancelReminders } from '../reminders/notifications';
+ import { useReminderSettings } from '../reminders/settings';
+ import { getOrCreateDeviceId, loadStoredSession, saveStoredSession } from './storage';
+@@ -17,6 +18,20 @@ type SessionState = {
+   signOut: () => void;
+ };
+ 
++// Сесія, що завершується на сервері. Екран входу зʼявляється одразу, а токен пристрою прибирається вже після цього.
++// Якщо access за цей час прострочений, авто-refresh має її бачити, інакше токен лишиться і пуші йтимуть на телефон
++// користувача, який вийшов.
++let closing: Session | null = null;
++
++// Спершу токен пристрою: для нього потрібен дійсний access, а вихід знищує сесію. Refresh беремо вже після нього:
++// авто-refresh міг його замінити
++async function closeOnServer(session: Session) {
++  closing = session;
++  await unregisterPushToken(session.accessToken);
++  await api.logout(closing.refreshToken).catch(() => {});
++  closing = null;
++}
++
+ export const useSession = create<SessionState>((set, get) => ({
+   session: null,
+   deviceId: null,
+@@ -50,9 +65,7 @@ export const useSession = create<SessionState>((set, get) => ({
+ 
+   signOut: () => {
+     const current = get().session;
+-    if (current?.refreshToken) {
+-      void api.logout(current.refreshToken).catch(() => {});
+-    }
++    if (current?.refreshToken) void closeOnServer(current);
+     set({ session: null });
+     void saveStoredSession(null);
+     void resetCaches().catch(() => {});
+@@ -64,10 +77,11 @@ export const useSession = create<SessionState>((set, get) => ({
+ 
+ // Підключаємо міст авто-рефрешу для перехоплення 401 TOKEN_EXPIRED в api.ts
+ setSessionBridge({
+-  getSession: () => useSession.getState().session,
++  getSession: () => useSession.getState().session ?? closing,
+   getDeviceId: () => getOrCreateDeviceId(),
+   onRefreshed: async (tokens) => {
+     const current = useSession.getState().session;
++    if (!current && closing) closing = { ...closing, ...tokens };
+     if (current) {
+       const updated: Session = {
+         ...current,
+@@ -79,6 +93,8 @@ setSessionBridge({
+     }
+   },
+   onRefreshFailed: async () => {
++    // Користувач уже вийшов, закривається лише його сесія на сервері
++    if (!useSession.getState().session) return;
+     useSession.getState().signOut();
+   },
+ });
+diff --git a/mobile/src/features/onboarding/NotificationsStep.tsx b/mobile/src/features/onboarding/NotificationsStep.tsx
+index 8fd36c2..32c4e6e 100644
+--- a/mobile/src/features/onboarding/NotificationsStep.tsx
++++ b/mobile/src/features/onboarding/NotificationsStep.tsx
+@@ -3,6 +3,7 @@ import { useState } from 'react';
+ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { colors } from '../../theme';
++import { requestPermission } from '../reminders/notifications';
+ import type { ReminderMinutes } from '../reminders/plan';
+ import { ReminderPicker } from '../reminders/ReminderPicker';
+ import { useApplyReminder } from '../reminders/useApplyReminder';
+@@ -10,9 +11,10 @@ import { useApplyReminder } from '../reminders/useApplyReminder';
+ type Props = { onDone: () => void };
+ 
+ // F2/F8: останній крок онбордингу «Не пропустіть заміну» (макет docs/design/07-notifications.png).
+-// «Дозволити сповіщення» питає дозвіл і вмикає нагадування з обраним часом; «Пізніше» нічого не вмикає.
+-// Відмова в дозволі онбординг не зупиняє: нагадування можна ввімкнути пізніше в профілі.
+-// Пуші про заміни (F8) з'являться пізніше, дозвіл для них той самий.
++// «Дозволити сповіщення» питає дозвіл (він потрібен і пушам про заміни, тож навіть без нагадувань) і вмикає
++// нагадування з обраним часом; «Пізніше» нічого не вмикає.
++// Відмова в дозволі онбординг не зупиняє: увімкнути можна пізніше в профілі.
++// Токен пристрою реєструється вже у вкладках (features/push/usePush.ts).
+ export function NotificationsStep({ onDone }: Props) {
+   const insets = useSafeAreaInsets();
+   const { saveChoice, enable } = useApplyReminder();
+@@ -20,13 +22,13 @@ export function NotificationsStep({ onDone }: Props) {
+   const [asking, setAsking] = useState(false);
+ 
+   const allow = async () => {
++    setAsking(true);
+     if (minutes === 0) {
+       saveChoice(0);
+-      onDone();
+-      return;
++      await requestPermission();
++    } else {
++      await enable(minutes);
+     }
+-    setAsking(true);
+-    await enable(minutes);
+     setAsking(false);
+     onDone();
+   };
+@@ -57,7 +59,7 @@ export function NotificationsStep({ onDone }: Props) {
+         {asking ? (
+           <ActivityIndicator color="#FFFFFF" />
+         ) : (
+-          <Text style={styles.primaryText}>{minutes === 0 ? 'Продовжити' : 'Дозволити сповіщення'}</Text>
++          <Text style={styles.primaryText}>Дозволити сповіщення</Text>
+         )}
+       </Pressable>
+       <Pressable
+diff --git a/mobile/src/features/push/SubstitutionPushSetting.tsx b/mobile/src/features/push/SubstitutionPushSetting.tsx
+new file mode 100644
+index 0000000..a63d496
+--- /dev/null
++++ b/mobile/src/features/push/SubstitutionPushSetting.tsx
+@@ -0,0 +1,103 @@
++import { useMutation, useQueryClient } from '@tanstack/react-query';
++import { useEffect, useState } from 'react';
++import { AppState, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
++import { api, type Me } from '../../api';
++import { colors } from '../../theme';
++import { useSession } from '../auth/session';
++import { hasPermission, notificationsSupported, requestPermission } from '../reminders/notifications';
++import { useMe } from '../schedule/hooks';
++import { syncPushToken } from './registration';
++
++// F8/F9: перемикач «Зміни та скасування». Налаштування живе на сервері: саме він вирішує, кому слати пуш.
++// Вимкнений перемикач токен пристрою не прибирає, сервер просто не шле цьому користувачу.
++export function SubstitutionPushSetting() {
++  const token = useSession((s) => s.session?.accessToken);
++  const queryClient = useQueryClient();
++  const me = useMe();
++  // Старі відповіді без поля вважаємо ввімкненими, як і значення за замовчуванням на сервері
++  const enabled = me.data?.notifySubstitutions ?? true;
++
++  const save = useMutation({
++    mutationKey: ['updateSettings'],
++    mutationFn: (notifySubstitutions: boolean) => api.updateSettings(token!, { notifySubstitutions }),
++    // Перемикач реагує одразу, а при збої повертається назад
++    onMutate: async (notifySubstitutions) => {
++      await queryClient.cancelQueries({ queryKey: ['me'] });
++      const previous = queryClient.getQueryData<Me>(['me']);
++      if (previous) queryClient.setQueryData<Me>(['me'], { ...previous, notifySubstitutions });
++      return { previous };
++    },
++    onError: (_error, _value, context) => {
++      if (context?.previous) queryClient.setQueryData(['me'], context.previous);
++    },
++    onSuccess: (updated: Me) => queryClient.setQueryData(['me'], updated),
++  });
++
++  const [missingPermission, setMissingPermission] = useState(false);
++  const [denied, setDenied] = useState(false);
++
++  useEffect(() => {
++    if (!notificationsSupported) return;
++    const check = () => {
++      void hasPermission().then((granted) => {
++        setMissingPermission(!granted);
++        if (granted) setDenied(false);
++      });
++    };
++    check();
++    // Користувач міг увімкнути сповіщення в налаштуваннях телефону і повернутися
++    const sub = AppState.addEventListener('change', (s) => s === 'active' && check());
++    return () => sub.remove();
++  }, []);
++
++  const allow = async () => {
++    const result = await requestPermission();
++    if (result === 'granted') {
++      setMissingPermission(false);
++      if (token) void syncPushToken(token);
++    } else {
++      setDenied(true);
++    }
++  };
++
++  return (
++    <View style={styles.block}>
++      <View style={styles.row}>
++        <Text style={styles.label}>Зміни та скасування</Text>
++        <Switch
++          testID="notify-substitutions"
++          accessibilityLabel="Зміни та скасування"
++          value={enabled}
++          disabled={!me.data || save.isPending}
++          onValueChange={(value) => save.mutate(value)}
++          trackColor={{ true: colors.primary, false: colors.border }}
++        />
++      </View>
++      {save.isError ? <Text style={styles.hint}>Не вдалося зберегти. Перевірте звʼязок і спробуйте ще раз.</Text> : null}
++      {enabled && denied ? (
++        <View style={styles.hintRow} accessibilityRole="alert">
++          <Text style={styles.hint}>Сповіщення вимкнені для ДеПари. Увімкніть їх у налаштуваннях телефону.</Text>
++          <Pressable testID="push-open-settings" accessibilityRole="link" onPress={() => void Linking.openSettings()} hitSlop={8}>
++            <Text style={styles.link}>Відкрити налаштування</Text>
++          </Pressable>
++        </View>
++      ) : enabled && missingPermission ? (
++        <View style={styles.hintRow} accessibilityRole="alert">
++          <Text style={styles.hint}>Без дозволу на сповіщення повідомлення про заміни не прийдуть.</Text>
++          <Pressable testID="push-allow" accessibilityRole="button" onPress={() => void allow()} hitSlop={8}>
++            <Text style={styles.link}>Дозволити</Text>
++          </Pressable>
++        </View>
++      ) : null}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  block: { gap: 4 },
++  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
++  label: { fontSize: 17, color: colors.text, flexShrink: 1 },
++  hintRow: { gap: 4 },
++  hint: { fontSize: 14, lineHeight: 19, color: colors.textMuted },
++  link: { fontSize: 14, fontWeight: '700', color: colors.primary, textDecorationLine: 'underline' },
++});
+diff --git a/mobile/src/features/push/registration.test.ts b/mobile/src/features/push/registration.test.ts
+new file mode 100644
+index 0000000..053492d
+--- /dev/null
++++ b/mobile/src/features/push/registration.test.ts
+@@ -0,0 +1,104 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++const { registerPushToken, removePushToken, hasPermission, readPushToken } = vi.hoisted(() => ({
++  registerPushToken: vi.fn(),
++  removePushToken: vi.fn(),
++  hasPermission: vi.fn(),
++  readPushToken: vi.fn(),
++}));
++
++vi.mock('../../api', () => ({ api: { registerPushToken, removePushToken } }));
++vi.mock('../../lib/logger', () => ({ log: { warn: vi.fn() } }));
++vi.mock('../reminders/notifications', () => ({ hasPermission }));
++vi.mock('./token', () => ({ readPushToken }));
++
++import { syncPushToken, unregisterPushToken } from './registration';
++
++const TOKEN = 'ExponentPushToken[abc]';
++
++beforeEach(async () => {
++  // Модуль памʼятає токен: кожен тест починає з виходу, потім чисті лічильники
++  readPushToken.mockResolvedValue(null);
++  await unregisterPushToken('tok');
++  vi.clearAllMocks();
++  hasPermission.mockResolvedValue(true);
++  readPushToken.mockResolvedValue(TOKEN);
++  registerPushToken.mockResolvedValue(undefined);
++  removePushToken.mockResolvedValue(undefined);
++});
++
++describe('syncPushToken', () => {
++  it('шле токен, коли є дозвіл', async () => {
++    await syncPushToken('tok');
++    expect(registerPushToken).toHaveBeenCalledWith('tok', TOKEN);
++  });
++
++  it('без дозволу не запитує токен і нічого не шле', async () => {
++    hasPermission.mockResolvedValue(false);
++    await syncPushToken('tok');
++    expect(readPushToken).not.toHaveBeenCalled();
++    expect(registerPushToken).not.toHaveBeenCalled();
++  });
++
++  it('без токена (Expo Go, немає projectId) нічого не шле', async () => {
++    readPushToken.mockResolvedValue(null);
++    await syncPushToken('tok');
++    expect(registerPushToken).not.toHaveBeenCalled();
++  });
++
++  it('той самий токен шле один раз, новий шле знову', async () => {
++    await syncPushToken('tok');
++    await syncPushToken('tok');
++    expect(registerPushToken).toHaveBeenCalledTimes(1);
++    readPushToken.mockResolvedValue('ExponentPushToken[new]');
++    await syncPushToken('tok');
++    expect(registerPushToken).toHaveBeenLastCalledWith('tok', 'ExponentPushToken[new]');
++  });
++
++  it('після збою сервера пробує знову і не кидає помилку', async () => {
++    registerPushToken.mockRejectedValueOnce(new Error('NETWORK_ERROR'));
++    await expect(syncPushToken('tok')).resolves.toBeUndefined();
++    await syncPushToken('tok');
++    expect(registerPushToken).toHaveBeenCalledTimes(2);
++  });
++
++  it('одночасні виклики роблять один запит', async () => {
++    await Promise.all([syncPushToken('tok'), syncPushToken('tok')]);
++    expect(registerPushToken).toHaveBeenCalledTimes(1);
++  });
++});
++
++describe('unregisterPushToken', () => {
++  it('видаляє зареєстрований токен', async () => {
++    await syncPushToken('tok');
++    readPushToken.mockClear();
++    await unregisterPushToken('tok');
++    expect(removePushToken).toHaveBeenCalledWith('tok', TOKEN);
++    expect(readPushToken).not.toHaveBeenCalled();
++  });
++
++  it('токен із минулого запуску теж видаляє', async () => {
++    await unregisterPushToken('tok');
++    expect(removePushToken).toHaveBeenCalledWith('tok', TOKEN);
++  });
++
++  it('вихід під час реєстрації не дає токену дійти до сервера', async () => {
++    let release!: (value: string) => void;
++    readPushToken.mockReturnValueOnce(new Promise<string>((resolve) => (release = resolve)));
++    const sync = syncPushToken('tok');
++    await Promise.resolve();
++    const out = unregisterPushToken('tok');
++    release(TOKEN);
++    await Promise.all([sync, out]);
++    expect(registerPushToken).not.toHaveBeenCalled();
++    expect(removePushToken).toHaveBeenCalledWith('tok', TOKEN);
++  });
++
++  it('збій сервера не ламає вихід, а наступний вхід реєструє токен знову', async () => {
++    await syncPushToken('tok');
++    removePushToken.mockRejectedValueOnce(new Error('NETWORK_ERROR'));
++    await expect(unregisterPushToken('tok')).resolves.toBeUndefined();
++    await syncPushToken('tok2');
++    expect(registerPushToken).toHaveBeenLastCalledWith('tok2', TOKEN);
++  });
++});
+diff --git a/mobile/src/features/push/registration.ts b/mobile/src/features/push/registration.ts
+new file mode 100644
+index 0000000..12aa438
+--- /dev/null
++++ b/mobile/src/features/push/registration.ts
+@@ -0,0 +1,46 @@
++import { api } from '../../api';
++import { log } from '../../lib/logger';
++import { hasPermission } from '../reminders/notifications';
++import { readPushToken } from './token';
++
++// F8: токен цього пристрою на сервері. Живе до виходу з акаунта, після перезапуску застосунку шлеться знову:
++// так сервер оновлює час останньої активності, а новий токен (пристрій міг його змінити) потрапляє туди сам.
++let registered: string | null = null;
++let inflight: Promise<void> | null = null;
++// Вихід, що стався під час реєстрації, скасовує її: токен не має дійти до сервера вже після видалення
++let generation = 0;
++
++const warn = (message: string, error: unknown) =>
++  log.warn('push', message, { reason: error instanceof Error ? error.message : String(error) });
++
++async function register(accessToken: string, startedIn: number) {
++  if (!(await hasPermission())) return;
++  const token = await readPushToken();
++  if (!token || token === registered || startedIn !== generation) return;
++  try {
++    await api.registerPushToken(accessToken, token);
++    registered = token;
++  } catch (error) {
++    // Спробуємо ще раз, коли застосунок повернеться на передній план
++    warn('токен пристрою не збережено на сервері', error);
++  }
++}
++
++/** Передати токен на сервер, якщо є дозвіл. Не кидає помилок: без токена просто не буде пушів. */
++export function syncPushToken(accessToken: string): Promise<void> {
++  inflight ??= register(accessToken, generation).finally(() => {
++    inflight = null;
++  });
++  return inflight;
++}
++
++/** Прибрати токен із сервера перед виходом, інакше пуші йтимуть на телефон уже без користувача. Не кидає помилок. */
++export async function unregisterPushToken(accessToken: string): Promise<void> {
++  generation += 1;
++  await inflight;
++  // Реєстрація могла не вдатися в цьому запуску, а токен лишитися на сервері з минулого
++  const token = registered ?? (await readPushToken());
++  registered = null;
++  if (!token) return;
++  await api.removePushToken(accessToken, token).catch((error) => warn('токен пристрою не видалено з сервера', error));
++}
+diff --git a/mobile/src/features/push/target.test.ts b/mobile/src/features/push/target.test.ts
+new file mode 100644
+index 0000000..1474bc6
+--- /dev/null
++++ b/mobile/src/features/push/target.test.ts
+@@ -0,0 +1,23 @@
++import { describe, expect, it } from 'vitest';
++import { parsePushTarget } from './target';
++
++describe('parsePushTarget', () => {
++  it('бере пару і дату з пушу про заміну', () => {
++    const data = { type: 'substitution', substitutionId: 's1', lessonId: 'l1', date: '2026-11-06' };
++    expect(parsePushTarget(data)).toEqual({ date: '2026-11-06', lessonId: 'l1' });
++  });
++
++  it('не чіпає нагадування й сповіщення без data', () => {
++    expect(parsePushTarget({})).toBeNull();
++    expect(parsePushTarget(null)).toBeNull();
++    expect(parsePushTarget(undefined)).toBeNull();
++    expect(parsePushTarget({ type: 'reminder', lessonId: 'l1', date: '2026-11-06' })).toBeNull();
++  });
++
++  it('відкидає неповні й некоректні дані', () => {
++    expect(parsePushTarget({ type: 'substitution', date: '2026-11-06' })).toBeNull();
++    expect(parsePushTarget({ type: 'substitution', lessonId: '', date: '2026-11-06' })).toBeNull();
++    expect(parsePushTarget({ type: 'substitution', lessonId: 'l1', date: '06.11.2026' })).toBeNull();
++    expect(parsePushTarget({ type: 'substitution', lessonId: 'l1' })).toBeNull();
++  });
++});
+diff --git a/mobile/src/features/push/target.ts b/mobile/src/features/push/target.ts
+new file mode 100644
+index 0000000..413923c
+--- /dev/null
++++ b/mobile/src/features/push/target.ts
+@@ -0,0 +1,12 @@
++// F8: куди веде пуш про заміну. Бекенд кладе в data `type: "substitution"`, `lessonId` і `date` пари.
++export type PushTarget = { date: string; lessonId: string };
++
++/** Розібрати data сповіщення. Нагадування про пару і все чуже дають null: їх застосунок не відкриває. */
++export function parsePushTarget(data: unknown): PushTarget | null {
++  if (!data || typeof data !== 'object') return null;
++  const { type, date, lessonId } = data as Record<string, unknown>;
++  if (type !== 'substitution') return null;
++  if (typeof lessonId !== 'string' || !lessonId) return null;
++  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
++  return { date, lessonId };
++}
+diff --git a/mobile/src/features/push/token.ts b/mobile/src/features/push/token.ts
+new file mode 100644
+index 0000000..4dba7fa
+--- /dev/null
++++ b/mobile/src/features/push/token.ts
+@@ -0,0 +1,32 @@
++import Constants, { ExecutionEnvironment } from 'expo-constants';
++import * as Notifications from 'expo-notifications';
++import { Platform } from 'react-native';
++import { log } from '../../lib/logger';
++import { ensureChannels, notificationsSupported } from '../reminders/notifications';
++
++let warnedNoProject = false;
++
++/**
++ * Expo push-токен цього пристрою або null, якщо його зараз не отримати: веб, Expo Go на Android
++ * (там пушів немає з SDK 53), проєкт не привʼязаний до EAS, немає мережі. Застосунок це переживає: лише пушів не буде.
++ */
++export async function readPushToken(): Promise<string | null> {
++  if (!notificationsSupported) return null;
++  if (Platform.OS === 'android' && Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return null;
++
++  const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
++  if (!projectId) {
++    if (!warnedNoProject) log.warn('push', 'немає EAS projectId, токен пристрою не отримати (див. eas init)');
++    warnedNoProject = true;
++    return null;
++  }
++
++  try {
++    // На Android 13+ канал має існувати до запиту токена
++    await ensureChannels();
++    return (await Notifications.getExpoPushTokenAsync({ projectId })).data;
++  } catch (error) {
++    log.warn('push', 'не вдалося отримати токен пристрою', { reason: error instanceof Error ? error.message : String(error) });
++    return null;
++  }
++}
+diff --git a/mobile/src/features/push/usePush.ts b/mobile/src/features/push/usePush.ts
+new file mode 100644
+index 0000000..fca50ac
+--- /dev/null
++++ b/mobile/src/features/push/usePush.ts
+@@ -0,0 +1,57 @@
++import { useQueryClient } from '@tanstack/react-query';
++import * as Notifications from 'expo-notifications';
++import { router } from 'expo-router';
++import { useEffect } from 'react';
++import { AppState } from 'react-native';
++import { useSession } from '../auth/session';
++import { notificationsSupported } from '../reminders/notifications';
++import { syncPushToken } from './registration';
++import { parsePushTarget } from './target';
++
++/**
++ * F8: пуші про заміни, поки користувач у застосунку (монтується у вкладках, тобто він увійшов і має групу).
++ * Реєструє токен пристрою, оновлює розклад, коли пуш прийшов, і відкриває пару, коли на пуш натиснули.
++ */
++export function usePush() {
++  const queryClient = useQueryClient();
++
++  useEffect(() => {
++    const sync = () => {
++      const token = useSession.getState().session?.accessToken;
++      if (token) void syncPushToken(token);
++    };
++    sync();
++    // Дозвіл могли дати в налаштуваннях телефону, а минула спроба могла не вдатись через мережу
++    const sub = AppState.addEventListener('change', (state) => {
++      if (state === 'active') sync();
++    });
++    return () => sub.remove();
++  }, []);
++
++  useEffect(() => {
++    if (!notificationsSupported) return;
++    const refreshSchedule = () => queryClient.invalidateQueries({ queryKey: ['week'] });
++
++    const open = (response: Notifications.NotificationResponse) => {
++      const target = parsePushTarget(response.notification.request.content.data);
++      if (!target) return;
++      Notifications.clearLastNotificationResponse();
++      void refreshSchedule();
++      // openedAt: другий пуш про ту саму пару теж має відкрити її, хоча дата і пара ті самі
++      router.navigate({ pathname: '/week', params: { ...target, openedAt: String(Date.now()) } });
++    };
++
++    // Застосунок запустився з натискання на пуш: подія вже минула, відповідь лежить у «останній»
++    const last = Notifications.getLastNotificationResponse();
++    if (last) open(last);
++
++    const tapped = Notifications.addNotificationResponseReceivedListener(open);
++    const received = Notifications.addNotificationReceivedListener((notification) => {
++      if (parsePushTarget(notification.request.content.data)) void refreshSchedule();
++    });
++    return () => {
++      tapped.remove();
++      received.remove();
++    };
++  }, [queryClient]);
++}
+diff --git a/mobile/src/features/reminders/ReminderSetting.tsx b/mobile/src/features/reminders/ReminderSetting.tsx
+index b3602dd..ac310ff 100644
+--- a/mobile/src/features/reminders/ReminderSetting.tsx
++++ b/mobile/src/features/reminders/ReminderSetting.tsx
+@@ -1,6 +1,7 @@
+ import { useEffect, useState } from 'react';
+ import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+ import { colors } from '../../theme';
++import { SubstitutionPushSetting } from '../push/SubstitutionPushSetting';
+ import { hasPermission } from './notifications';
+ import type { ReminderMinutes } from './plan';
+ import { ReminderPicker } from './ReminderPicker';
+@@ -53,6 +54,7 @@ export function ReminderSetting() {
+   return (
+     <View style={styles.block}>
+       <Text style={styles.section}>СПОВІЩЕННЯ</Text>
++      <SubstitutionPushSetting />
+       <View style={styles.labelRow}>
+         <Text style={styles.label}>Нагадування перед парою</Text>
+         {asking ? <ActivityIndicator color={colors.primary} accessibilityLabel="Запит дозволу" /> : null}
+diff --git a/mobile/src/features/reminders/notifications.ts b/mobile/src/features/reminders/notifications.ts
+index cb8f829..c3a67d0 100644
+--- a/mobile/src/features/reminders/notifications.ts
++++ b/mobile/src/features/reminders/notifications.ts
+@@ -4,7 +4,7 @@ import { log } from '../../lib/logger';
+ import type { PlannedReminder } from './plan';
+ 
+ // F8: обгортка над expo-notifications для локальних нагадувань. У вебі планування сповіщень немає: усе no-op.
+-const supported = Platform.OS === 'android' || Platform.OS === 'ios';
++export const notificationsSupported = Platform.OS === 'android' || Platform.OS === 'ios';
+ const CHANNEL_ID = 'lesson-reminders';
+ const PREFIX = 'lesson-';
+ 
+@@ -12,7 +12,7 @@ const warn = (message: string, error: unknown) =>
+   log.warn('reminders', message, { reason: error instanceof Error ? error.message : String(error) });
+ 
+ // Нагадування, що спрацювало, коли застосунок відкритий, теж показуємо банером
+-if (supported) {
++if (notificationsSupported) {
+   Notifications.setNotificationHandler({
+     handleNotification: async () => ({
+       shouldShowBanner: true,
+@@ -24,19 +24,24 @@ if (supported) {
+ }
+ 
+ // На Android 8+ сповіщення мають належати каналу, а на Android 13+ без каналу не зʼявиться запит дозволу
+-async function ensureChannel() {
++export async function ensureChannels() {
+   if (Platform.OS !== 'android') return;
+   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+     name: 'Нагадування про пари',
+     importance: Notifications.AndroidImportance.HIGH,
+   });
++  // Пуші про заміни (F8) бекенд шле без channelId, тож вони йдуть у канал default
++  await Notifications.setNotificationChannelAsync('default', {
++    name: 'Зміни та скасування',
++    importance: Notifications.AndroidImportance.HIGH,
++  });
+ }
+ 
+ export type PermissionResult = 'granted' | 'denied' | 'unsupported';
+ 
+ /** Чи можна показувати сповіщення, без запиту користувачу. */
+ export async function hasPermission(): Promise<boolean> {
+-  if (!supported) return false;
++  if (!notificationsSupported) return false;
+   try {
+     return (await Notifications.getPermissionsAsync()).granted;
+   } catch (error) {
+@@ -47,9 +52,9 @@ export async function hasPermission(): Promise<boolean> {
+ 
+ /** Запитати дозвіл (лише коли користувач сам вмикає нагадування в профілі). */
+ export async function requestPermission(): Promise<PermissionResult> {
+-  if (!supported) return 'unsupported';
++  if (!notificationsSupported) return 'unsupported';
+   try {
+-    await ensureChannel();
++    await ensureChannels();
+     const current = await Notifications.getPermissionsAsync();
+     if (current.granted) return 'granted';
+     if (!current.canAskAgain) return 'denied';
+@@ -62,7 +67,7 @@ export async function requestPermission(): Promise<PermissionResult> {
+ 
+ /** Прибрати всі нагадування про пари (інших запланованих сповіщень застосунок не має, але чіпаємо лише свої). */
+ export async function cancelReminders(): Promise<void> {
+-  if (!supported) return;
++  if (!notificationsSupported) return;
+   try {
+     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+     await Promise.all(
+@@ -77,10 +82,10 @@ export async function cancelReminders(): Promise<void> {
+ 
+ /** Замінити заплановані нагадування новим планом. */
+ export async function scheduleReminders(plan: PlannedReminder[]): Promise<void> {
+-  if (!supported) return;
++  if (!notificationsSupported) return;
+   await cancelReminders();
+   try {
+-    await ensureChannel();
++    await ensureChannels();
+   } catch (error) {
+     warn('не вдалося створити канал сповіщень', error);
+   }
+diff --git a/mobile/src/features/reminders/useApplyReminder.ts b/mobile/src/features/reminders/useApplyReminder.ts
+index 1637c17..79a47c8 100644
+--- a/mobile/src/features/reminders/useApplyReminder.ts
++++ b/mobile/src/features/reminders/useApplyReminder.ts
+@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
+ import { api, type Me } from '../../api';
+ import { log } from '../../lib/logger';
+ import { useSession } from '../auth/session';
++import { syncPushToken } from '../push/registration';
+ import { requestPermission, type PermissionResult } from './notifications';
+ import type { ReminderMinutes } from './plan';
+ import { useReminderSettings } from './settings';
+@@ -31,7 +32,11 @@ export function useApplyReminder() {
+   /** Запитати дозвіл і, якщо дали, увімкнути нагадування за `value` хвилин. */
+   const enable = async (value: ReminderMinutes): Promise<PermissionResult> => {
+     const result = await requestPermission();
+-    if (result === 'granted') saveChoice(value);
++    if (result === 'granted') {
++      saveChoice(value);
++      // Той самий дозвіл вмикає й пуші про заміни
++      if (token) void syncPushToken(token);
++    }
+     return result;
+   };
+ 
+diff --git a/mobile/src/features/schedule/WeekView.tsx b/mobile/src/features/schedule/WeekView.tsx
+index 5750457..51f3129 100644
+--- a/mobile/src/features/schedule/WeekView.tsx
++++ b/mobile/src/features/schedule/WeekView.tsx
+@@ -1,5 +1,5 @@
+ import { Ionicons } from '@expo/vector-icons';
+-import { useMemo, useState } from 'react';
++import { useEffect, useMemo, useState } from 'react';
+ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, View } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import type { Lesson } from '../../api';
+@@ -97,6 +97,9 @@ type Props = {
+   subtitle: string;
+   isHeadman: boolean;
+   state: TodayState;
++  /** Пара, яку треба відкрити одразу (натискання на пуш) */
++  focusLesson?: Lesson | null;
++  onFocusShown?: () => void;
+   refreshing: boolean;
+   onRefresh: () => void;
+ };
+@@ -113,12 +116,20 @@ export function WeekView({
+   subtitle,
+   isHeadman,
+   state,
++  focusLesson,
++  onFocusShown,
+   refreshing,
+   onRefresh,
+ }: Props) {
+   const insets = useSafeAreaInsets();
+   const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
+ 
++  useEffect(() => {
++    if (!focusLesson) return;
++    setOpenLesson(focusLesson);
++    onFocusShown?.();
++  }, [focusLesson, onFocusShown]);
++
+   const sections = useMemo<DaySection[]>(() => {
+     const lessons = state.kind === 'ready' ? state.lessons : [];
+     const withStatus = withNext(lessons, now);
+diff --git a/mobile/src/mock/mockFetch.test.ts b/mobile/src/mock/mockFetch.test.ts
+index 781b74f..e1d2ad5 100644
+--- a/mobile/src/mock/mockFetch.test.ts
++++ b/mobile/src/mock/mockFetch.test.ts
+@@ -64,4 +64,17 @@ describe('мок: заміни (F6)', () => {
+     const res = await call('/substitutions', { method: 'POST', body: JSON.stringify({ lessonId: lesson.id, kind: 'ROOM_CHANGED' }) });
+     expect(res).toMatchObject({ status: 400, body: { error: 'NEW_CLASSROOM_REQUIRED' } });
+   });
++
++  it('налаштування змінюються без групи, токен пристрою приймається (F8, F9)', async () => {
++    const before = await call('/me');
++    const patch = await call('/me', { method: 'PATCH', body: JSON.stringify({ notifySubstitutions: false }) });
++    expect(patch.status).toBe(200);
++    expect(patch.body).toMatchObject({ notifySubstitutions: false, groupId: before.body.groupId });
++    expect((await call('/me')).body.notifySubstitutions).toBe(false);
++    await call('/me', { method: 'PATCH', body: JSON.stringify({ notifySubstitutions: true }) });
++
++    const token = JSON.stringify({ token: 'ExponentPushToken[abc]' });
++    expect((await call('/me/push-token', { method: 'POST', body: token })).status).toBe(204);
++    expect((await call('/me/push-token', { method: 'DELETE', body: token })).status).toBe(204);
++  });
+ });
+diff --git a/mobile/src/mock/mockFetch.ts b/mobile/src/mock/mockFetch.ts
+index 92fd8ed..22afa8e 100644
+--- a/mobile/src/mock/mockFetch.ts
++++ b/mobile/src/mock/mockFetch.ts
+@@ -7,7 +7,8 @@ import { MOCK_BUILDINGS, MOCK_CLASSROOMS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MO
+ 
+ const LATENCY_MS = 250;
+ 
+-let state: { groupId: string | null; subgroup: number } = { groupId: null, subgroup: 0 };
++const INITIAL_STATE = { groupId: null as string | null, subgroup: 0, reminderMinutes: MOCK_ME.reminderMinutes, notifySubstitutions: true };
++let state = INITIAL_STATE;
+ 
+ // F6: заміни, створені й скасовані в цьому запуску (за id пари). Пара мока має id mock-<понеділок>-<номер>
+ const createdSubs = new Map<string, Substitution>();
+@@ -25,6 +26,8 @@ const reply = (status: number, body: unknown) =>
+     headers: { 'content-type': 'application/json', 'x-request-id': 'mock' },
+   });
+ 
++const currentMe = (): Me => ({ ...MOCK_ME, ...state });
++
+ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+ 
+ // «218/Т» -> корпус з довідника мока (як building у відповіді бекенда)
+@@ -74,7 +77,7 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
+   const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : {};
+ 
+   if (method === 'POST' && route === '/auth/microsoft') {
+-    state = { groupId: null, subgroup: 0 };
++    state = INITIAL_STATE;
+     createdSubs.clear();
+     removedSubs.clear();
+     const session: Session = { accessToken: 'mock-access', refreshToken: 'mock-refresh', needsOnboarding: true };
+@@ -99,18 +102,28 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
+ 
+   if (route === '/me') {
+     if (method === 'DELETE') {
+-      state = { groupId: null, subgroup: 0 };
++      state = INITIAL_STATE;
+       return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
+     }
+     if (method === 'PATCH') {
++      // F9: налаштування без групи
++      if (body.groupId === undefined) {
++        const { reminderMinutes = state.reminderMinutes, notifySubstitutions = state.notifySubstitutions } = body;
++        state = { ...state, reminderMinutes, notifySubstitutions };
++        return reply(200, currentMe());
++      }
+       if (!MOCK_GROUPS.some((g) => g.id === body.groupId)) return reply(404, { error: 'GROUP_NOT_FOUND' });
+       const subgroup = Number.isInteger(body.subgroup) ? body.subgroup : 0;
+       if (subgroup < 0 || subgroup > 2) return reply(400, { error: 'INVALID_SUBGROUP' });
+-      state = { groupId: body.groupId, subgroup };
++      state = { ...state, groupId: body.groupId, subgroup };
+       return reply(200, { id: MOCK_ME.id, groupId: state.groupId, subgroup: state.subgroup });
+     }
+-    const me: Me = { ...MOCK_ME, groupId: state.groupId, subgroup: state.subgroup };
+-    return reply(200, me);
++    return reply(200, currentMe());
++  }
++
++  // F8: у моку пушів немає, токен лише приймаємо
++  if (route === '/me/push-token' && (method === 'POST' || method === 'DELETE')) {
++    return new Response(null, { status: 204, headers: { 'x-request-id': 'mock' } });
+   }
+ 
+   if (method === 'GET' && route === '/schedule/week') {
+diff --git a/specs/README.md b/specs/README.md
+index eadb710..75ce740 100644
+--- a/specs/README.md
++++ b/specs/README.md
+@@ -18,10 +18,10 @@
+ | [f2-onboarding.md](f2-onboarding.md) | Вибір факультету, групи, підгрупи | Бекенд і UI готові (факультет, група, підгрупа) |
+ | [f3-schedule.md](f3-schedule.md) | Розклад: сьогодні, тиждень, деталі, офлайн | Бекенд і UI готові: «Сьогодні», «Тиждень», деталі пари, стан «не опубліковано», позначка «Офлайн», кеш розкладу на пристрої до 14 днів (переживає перезапуск), `ETag`/`304` |
+ | [f5-search.md](f5-search.md) | Пошук аудиторій і викладачів | Аудиторії й корпуси готові (бекенд і UI, фільтр, маршрут). Пошук викладачів відкладено до V2 |
+-| [f6-substitutions.md](f6-substitutions.md) | Заміни пар (староста) | Бекенд і UI готові: староста додає й скасовує заміну, група бачить її в розкладі. Пушів немає (F8) |
++| [f6-substitutions.md](f6-substitutions.md) | Заміни пар (староста) | Бекенд і UI готові: староста додає й скасовує заміну, група бачить її в розкладі, пуш групі через F8 |
+ | [f7-admin.md](f7-admin.md) | Адмінка: ролі, імпорт розкладу | Бекенд є (група, CORS), веб-сторінка в плані |
+-| [f8-notifications.md](f8-notifications.md) | Сповіщення і нагадування | Локальні нагадування перед парою є. Пуші про заміни: бекенд готовий (токен пристрою, Expo Push), у застосунку не реалізовано |
+-| [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, зміна групи й підгрупи, вихід, видалення акаунта, посилання на політику конфіденційності. Нагадування перед парою в UI; перемикач «Зміни та скасування» чекає на пуші F8, теми немає |
++| [f8-notifications.md](f8-notifications.md) | Сповіщення і нагадування | Локальні нагадування є. Пуші про заміни реалізовані в бекенді й застосунку; реальна доставка чекає на EAS, FCM і APNs |
++| [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, зміна групи й підгрупи, вихід, видалення акаунта, посилання на політику конфіденційності. Нагадування перед парою в UI; є перемикач «Зміни та скасування», теми немає |
+ | [v2-backlog.md](v2-backlog.md) | Не для MVP | Ідеї |
+ 
+ Нумерація F1–F9 збігається з назвами E2E-тестів у `backend/test/e2e/`.
+diff --git a/specs/f2-onboarding.md b/specs/f2-onboarding.md
+index 24eb7ed..9472cb8 100644
+--- a/specs/f2-onboarding.md
++++ b/specs/f2-onboarding.md
+@@ -14,7 +14,7 @@
+ 3. Вибір спеціальності (є на макеті, у даних поки немає, див. відкриті питання).
+ 4. Вибір курсу, групи і підгрупи (`Усі`, `1`, `2`). Підгрупа потрібна, щоб не бачити чужі лабораторні.
+ 5. Група й підгрупа зберігаються через `PATCH /me`.
+-6. Останній крок «Не пропустіть заміну» (макет 07): час нагадування (`Вимк`, 10 або 15 хв, за замовчуванням 10) і «Дозволити сповіщення», що питає дозвіл і вмикає нагадування (F8), або «Пізніше». Відмова в дозволі онбординг не зупиняє, нагадування вмикаються пізніше в профілі. Якщо застосунок закрили на цьому кроці, наступний запуск починає з нього (група вже збережена).
++6. Останній крок «Не пропустіть заміну» (макет 07): час нагадування (`Вимк`, 10 або 15 хв, за замовчуванням 10) і «Дозволити сповіщення», що питає дозвіл і вмикає нагадування (F8), або «Пізніше». Дозвіл питається і при `Вимк`: він потрібен пушам про заміни. Відмова в дозволі онбординг не зупиняє, сповіщення вмикаються пізніше в профілі. Якщо застосунок закрили на цьому кроці, наступний запуск починає з нього (група вже збережена).
+ 7. Перехід на розклад.
+ 
+ ## Екрани і стани
+diff --git a/specs/f6-substitutions.md b/specs/f6-substitutions.md
+index d3bd7d9..10d2341 100644
+--- a/specs/f6-substitutions.md
++++ b/specs/f6-substitutions.md
+@@ -1,6 +1,6 @@
+ # F6. Заміни пар
+ 
+-**Стан:** бекенд і UI готові (додавання й скасування заміни старостою); пушів немає (F8) · **Відповідальні:** бекенд, мобільний, дизайн
++**Стан:** бекенд і UI готові (додавання й скасування заміни старостою); пуш групі через F8 · **Відповідальні:** бекенд, мобільний, дизайн
+ 
+ ## Навіщо
+ Староста швидко вносить зміну, і група бачить її в розкладі та отримує сповіщення. Це головна відмінність від конкурентів.
+@@ -12,7 +12,7 @@
+ 1. Староста натискає «Додати заміну» на екрані «Сьогодні» (пара обраного дня) або в деталях пари (ця пара). Форма «Нова заміна» дає вибрати будь-яку пару тижня без заміни.
+ 2. Обирає тип: **Скасовано** (`CANCELLED`), **Інший викладач** (`REPLACED`), **Перенесено** (`MOVED`), **Інша аудиторія** (`ROOM_CHANGED`).
+ 3. Заповнює поля, потрібні для типу (новий викладач, аудиторія, дата і номер пари), додає коментар (до 500 символів).
+-4. Після збереження застосунок перезавантажує розклад і показує «Заміну збережено». Група бачить заміну з наступним оновленням розкладу; пуш групі буде разом із F8.
++4. Після збереження застосунок перезавантажує розклад і показує «Заміну збережено». Група бачить заміну з наступним оновленням розкладу і отримує пуш (F8).
+ 
+ У деталях пари із заміною староста бачить «Скасувати заміну» (з підтвердженням). Студент цих кнопок не бачить. Перенесення: нова дата (поточний і наступний тиждень, крім неділі) та/або номер пари 1–8, аудиторія необовʼязкова. Помилки бекенда показуються текстом під формою.
+ 
+@@ -35,4 +35,4 @@
+ - [ ] Після створення заміни розклад групи оновлюється без перезапуску.
+ 
+ ## Відкриті питання
+-- Сповіщення групі після створення заміни: бекенд відправляє (F8), у застосунку реєстрації токена ще немає.
++- Сповіщення групі після створення заміни (F8): реальна доставка чекає на налаштування EAS, FCM і APNs.
+diff --git a/specs/f8-notifications.md b/specs/f8-notifications.md
+index e9a4d3f..4255725 100644
+--- a/specs/f8-notifications.md
++++ b/specs/f8-notifications.md
+@@ -1,6 +1,6 @@
+ # F8. Сповіщення та нагадування
+ 
+-**Стан:** локальні нагадування перед парою є в застосунку; пуші про заміни: бекенд готовий (токен пристрою, Expo Push), у застосунку не реалізовано · **Відповідальні:** бекенд, мобільний
++**Стан:** локальні нагадування є; пуші про заміни реалізовані в бекенді й застосунку, реальна доставка чекає на налаштування (див. «Що лишилось») · **Відповідальні:** бекенд, мобільний
+ 
+ ## Навіщо
+ Студент дізнається про заміну одразу і не пропускає пару.
+@@ -36,10 +36,19 @@
+ - Квитанції доставки Expo (receipts) не перевіряються: це наступний крок, якщо пуші губитимуться.
+ - Пуш про скасування самої заміни (`DELETE /substitutions/:id`) не відправляється.
+ 
++## У застосунку
++- **Дозвіл:** один на нагадування й пуші, питається в онбордингу (навіть коли нагадування вимкнені) і в профілі.
++- **Токен:** реєструється після входу у вкладках, знову при кожному запуску і поверненні на передній план, якщо токен змінився або минула спроба не вдалась. Перед виходом видаляється, зокрема з простроченим access (авто-refresh бачить сесію, що завершується). Якщо видалення не вдалось (офлайн), токен лишається на сервері до наступного входу на цьому пристрої.
++- **Пуш прийшов:** розклад оновлюється. **Натиснули:** відкривається тиждень пари з деталями, зокрема при холодному старті. Деталі чекають на свіжий розклад, щоб показати саме цю заміну.
++- **Перемикач «Зміни та скасування»** у профілі пише `notifySubstitutions` (`PATCH /me`). Токен лишається, сервер просто не шле.
++- Expo Go на Android пушів не підтримує (з SDK 53), там працюють лише нагадування. На Android пуші йдуть у канал `default`.
++
+ ## Що лишилось
+ | Що | Хто |
+ |---|---|
+-| Запит дозволу, `POST /me/push-token` після входу, `DELETE /me/push-token` перед виходом, відкриття пари з пушу | Мобільний |
++| `eas init`: без EAS `projectId` токен пристрою не отримати, застосунок це переживає, але пушів не буде | Техлід |
++| Android: проєкт Firebase, `google-services.json` (`android.googleServicesFile`) і ключ FCM V1 в Expo. Без цього токена немає | Техлід |
++| iOS: ключ APNs, потрібен платний акаунт Apple Developer. Поки його немає, пуші на iPhone не приходять | Техлід |
+ 
+ ## Критерії приймання
+ - [ ] Після дозволу токен пристрою зберігається на сервері.
+diff --git a/specs/f9-profile.md b/specs/f9-profile.md
+index 5af93b3..cc722e5 100644
+--- a/specs/f9-profile.md
++++ b/specs/f9-profile.md
+@@ -1,6 +1,6 @@
+ # F9. Профіль і налаштування
+ 
+-**Стан:** частково (дані, зміна групи й підгрупи, нагадування перед парою, вихід, видалення акаунта; перемикач «Зміни та скасування» в UI чекає на пуші F8, теми немає) · **Відповідальні:** мобільний, бекенд
++**Стан:** частково (дані, зміна групи й підгрупи, нагадування перед парою, вихід, видалення акаунта; перемикач «Зміни та скасування», теми немає) · **Відповідальні:** мобільний, бекенд
+ 
+ ## Як це працює
+ Екран показує ім'я і пошту, групу, підгрупу, перемикач «Зміни та скасування», час нагадування (вимк, 10 хв, 15 хв), тему (системна, світла, темна) і кнопку «Вийти з акаунту».

@@ -1,0 +1,473 @@
+diff --git a/backend/prisma/migrations/20261104000000_user_notify_substitutions/migration.sql b/backend/prisma/migrations/20261104000000_user_notify_substitutions/migration.sql
+new file mode 100644
+index 0000000..646c9e9
+--- /dev/null
++++ b/backend/prisma/migrations/20261104000000_user_notify_substitutions/migration.sql
+@@ -0,0 +1,3 @@
++-- F8/F9: перемикач «Зміни та скасування» в профілі. За замовчуванням увімкнено: пуш про заміну це головна функція.
++-- Константний DEFAULT у Postgres 11+ не переписує таблицю, тож міграція безпечна і на заповненій базі.
++ALTER TABLE "app_user" ADD COLUMN "notify_substitutions" BOOLEAN NOT NULL DEFAULT true;
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 49816d8..46da2c4 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -72,6 +72,7 @@ model User {
+   groupId         String?  @map("group_id") @db.Uuid
+   subgroup        Int      @default(0) // 0 = бачити всі підгрупи
+   reminderMinutes Int      @default(0) @map("reminder_minutes") // 0, 10, 15
++  notifySubstitutions Boolean @default(true) @map("notify_substitutions") // пуш про заміни й скасування (F8)
+   createdAt       DateTime @default(now()) @map("created_at")
+   updatedAt       DateTime @updatedAt @map("updated_at")
+ 
+diff --git a/backend/src/lib/profilePatch.ts b/backend/src/lib/profilePatch.ts
+new file mode 100644
+index 0000000..bc5b857
+--- /dev/null
++++ b/backend/src/lib/profilePatch.ts
+@@ -0,0 +1,66 @@
++import type { Role } from '@prisma/client';
++import { isSubgroup, isUuid } from './validation';
++
++// Хвилини нагадування перед парою: вимкнено, 10 або 15 (F9)
++export const REMINDER_MINUTES = [0, 10, 15] as const;
++
++export interface ProfilePatch {
++  groupId?: string;
++  subgroup?: number;
++  reminderMinutes?: number;
++  notifySubstitutions?: boolean;
++}
++
++export type ProfilePatchResult = { ok: true; patch: ProfilePatch } | { ok: false; error: string };
++
++// Розбір тіла PATCH /me. Усі поля необовʼязкові, змінюється лише те, що передано.
++// Що робити з підгрупою при зміні групи, вирішує resolvePatch: для цього потрібна поточна група з бази.
++export function parseProfilePatch(body: unknown): ProfilePatchResult {
++  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
++  const patch: ProfilePatch = {};
++
++  if ('groupId' in b) {
++    // null чи порожній рядок не очищають групу: без групи немає розкладу
++    if (!b.groupId) return { ok: false, error: 'GROUP_REQUIRED' };
++    if (!isUuid(b.groupId)) return { ok: false, error: 'INVALID_GROUP_ID' };
++    patch.groupId = b.groupId;
++  }
++  if (b.subgroup !== undefined) {
++    if (!isSubgroup(b.subgroup)) return { ok: false, error: 'INVALID_SUBGROUP' };
++    patch.subgroup = b.subgroup;
++  }
++  if (b.reminderMinutes !== undefined) {
++    if (!REMINDER_MINUTES.includes(b.reminderMinutes as never)) return { ok: false, error: 'INVALID_REMINDER_MINUTES' };
++    patch.reminderMinutes = b.reminderMinutes as number;
++  }
++  if (b.notifySubstitutions !== undefined) {
++    if (typeof b.notifySubstitutions !== 'boolean') return { ok: false, error: 'INVALID_NOTIFY_SUBSTITUTIONS' };
++    patch.notifySubstitutions = b.notifySubstitutions;
++  }
++
++  if (Object.keys(patch).length === 0) return { ok: false, error: 'NOTHING_TO_UPDATE' };
++  return { ok: true, patch };
++}
++
++// Чи можна застосувати зміну до цього користувача (стан із бази), або яку помилку віддати
++export function rejectPatch(
++  user: { role: Role; groupId: string | null },
++  patch: ProfilePatch,
++): { status: number; error: string } | null {
++  // Права старости привʼязані до його групи (F6: заміни лише своєї групи). Якби староста міг сам перейти в іншу
++  // групу, він отримав би право змінювати її розклад. Групу старості змінює адмін (PATCH /admin/users/:id/group),
++  // сам він змінює лише підгрупу. Староста без групи обирає її сам (онбординг).
++  if (patch.groupId && user.role === 'HEADMAN' && user.groupId && user.groupId !== patch.groupId) {
++    return { status: 403, error: 'HEADMAN_GROUP_LOCKED' };
++  }
++  // Підгрупа без групи нічого не означає: спершу онбординг (вибір групи)
++  if (patch.subgroup !== undefined && !patch.groupId && !user.groupId) return { status: 400, error: 'GROUP_REQUIRED' };
++  return null;
++}
++
++// Що записати в базу. Нова група без підгрупи скидає підгрупу на 0: підгрупа старої групи для нової не має сенсу.
++// Повторно надіслана поточна група підгрупу не чіпає.
++export function resolvePatch(user: { groupId: string | null }, patch: ProfilePatch): ProfilePatch {
++  if (patch.groupId && patch.subgroup === undefined && patch.groupId !== user.groupId) return { ...patch, subgroup: 0 };
++  return patch;
++}
+diff --git a/backend/src/routes/profile.ts b/backend/src/routes/profile.ts
+index c544245..a87b03f 100644
+--- a/backend/src/routes/profile.ts
++++ b/backend/src/routes/profile.ts
+@@ -2,10 +2,32 @@ import type { FastifyInstance } from 'fastify';
+ import { config } from '../config';
+ import { prisma } from '../db';
+ import { canDeleteAccount } from '../lib/accountDeletion';
+-import { isSubgroup, isUuid } from '../lib/validation';
++import { parseProfilePatch, rejectPatch, resolvePatch } from '../lib/profilePatch';
+ import { requireAuth } from '../plugins/auth';
+ 
+-// F2: список груп і вибір своєї
++type Profile = {
++  id: string;
++  email: string;
++  fullName: string;
++  role: string;
++  groupId: string | null;
++  subgroup: number;
++  reminderMinutes: number;
++  notifySubstitutions: boolean;
++};
++
++const toMe = (user: Profile) => ({
++  id: user.id,
++  email: user.email,
++  fullName: user.fullName,
++  role: user.role,
++  groupId: user.groupId,
++  subgroup: user.subgroup,
++  reminderMinutes: user.reminderMinutes,
++  notifySubstitutions: user.notifySubstitutions,
++});
++
++// F2: список груп і вибір своєї; F9: профіль і налаштування
+ export async function profileRoutes(app: FastifyInstance) {
+   app.get('/groups', { preHandler: requireAuth }, async () => {
+     const groups = await prisma.studyGroup.findMany({
+@@ -24,45 +46,33 @@ export async function profileRoutes(app: FastifyInstance) {
+   app.get('/me', { preHandler: requireAuth }, async (req, reply) => {
+     const user = await prisma.user.findUnique({ where: { id: req.userId } });
+     if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
+-    return {
+-      id: user.id,
+-      email: user.email,
+-      fullName: user.fullName,
+-      role: user.role,
+-      groupId: user.groupId,
+-      subgroup: user.subgroup,
+-      reminderMinutes: user.reminderMinutes,
+-    };
++    return toMe(user);
+   });
+ 
++  // Змінює лише передані поля: groupId, subgroup, reminderMinutes, notifySubstitutions. Відповідь як у GET /me.
+   app.patch('/me', { preHandler: requireAuth }, async (req, reply) => {
+-    const { groupId, subgroup } = (req.body ?? {}) as {
+-      groupId?: unknown;
+-      subgroup?: unknown;
+-    };
+-    if (!groupId) return reply.code(400).send({ error: 'GROUP_REQUIRED' });
+-    if (!isUuid(groupId)) return reply.code(400).send({ error: 'INVALID_GROUP_ID' });
+-    if (subgroup !== undefined && !isSubgroup(subgroup)) {
+-      return reply.code(400).send({ error: 'INVALID_SUBGROUP' });
+-    }
+-    if (!(await prisma.studyGroup.findUnique({ where: { id: groupId } }))) {
++    const parsed = parseProfilePatch(req.body);
++    if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
++    const { patch } = parsed;
++
++    if (patch.groupId && !(await prisma.studyGroup.findUnique({ where: { id: patch.groupId } }))) {
+       return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
+     }
+     // Access-токен живе 15 хв і після видалення акаунта ще дійсний: відсутній користувач це 401, а не 500
+-    const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { role: true, groupId: true } });
+-    if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
+-    // Права старости прив'язані до його групи (F6: заміни лише своєї групи). Якби староста міг сам перейти
+-    // в іншу групу, він отримав би право змінювати її розклад. Тому групу старості змінює адмін
+-    // (PATCH /admin/users/:id/group), а сам він може змінити лише підгрупу.
+-    if (user.role === 'HEADMAN' && user.groupId && user.groupId !== groupId) {
+-      return reply.code(403).send({ error: 'HEADMAN_GROUP_LOCKED' });
++    // Рішення (чи можна, що робити з підгрупою) залежать від ролі й групи. Оновлення йде лише якщо в базі досі
++    // ті самі роль і група: якщо адмін змінив їх між читанням і записом, рішення приймається заново
++    for (let attempt = 0; attempt < 3; attempt++) {
++      const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { role: true, groupId: true } });
++      if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
++      const rejected = rejectPatch(user, patch);
++      if (rejected) return reply.code(rejected.status).send({ error: rejected.error });
++      const updated = await prisma.user.updateManyAndReturn({
++        where: { id: req.userId, role: user.role, groupId: user.groupId },
++        data: resolvePatch(user, patch),
++      });
++      if (updated.length > 0) return toMe(updated[0]);
+     }
+-    const updated = await prisma.user.updateMany({
+-      where: { id: req.userId },
+-      data: { groupId, subgroup: (subgroup as number | undefined) ?? 0 },
+-    });
+-    if (updated.count === 0) return reply.code(401).send({ error: 'UNAUTHORIZED' });
+-    return { id: req.userId, groupId, subgroup: (subgroup as number | undefined) ?? 0 };
++    return reply.code(409).send({ error: 'PROFILE_CHANGED' }); // профіль змінювали тричі поспіль: клієнт повторить
+   });
+ 
+   // Видалення власного акаунта (вимога магазинів застосунків). Запис користувача видаляється повністю
+diff --git a/backend/test/e2e/f9-profile.test.ts b/backend/test/e2e/f9-profile.test.ts
+index 1b26146..995be2b 100644
+--- a/backend/test/e2e/f9-profile.test.ts
++++ b/backend/test/e2e/f9-profile.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from 'vitest';
+ import {
+-  adminToken, API, authHeaders, DEVICE, importLesson, loginRaw, postJson, send, setupStudent, userId, weekLessons,
++  adminToken, API, authHeaders, DEVICE, emptyGroup, importLesson, loginRaw, postJson, send, setupStudent, userId, weekLessons,
+ } from './helpers';
+ 
+ const run = Date.now();
+@@ -12,6 +12,74 @@ async function loginFull(email: string) {
+   return (await res.json()) as { accessToken: string; refreshToken: string; needsOnboarding: boolean; user: { id: string; role: string } };
+ }
+ 
++type Me = { groupId: string | null; subgroup: number; reminderMinutes: number; notifySubstitutions: boolean };
++const me = async (token: string) => (await (await fetch(`${API}/me`, { headers: authHeaders(token) })).json()) as Me;
++
++describe('F9: налаштування профілю (PATCH /me)', () => {
++  it('новий акаунт: нагадування вимкнено, сповіщення про заміни увімкнено', async () => {
++    const { accessToken } = await loginFull(`f9.defaults.${run}@lnu.edu.ua`);
++    expect(await me(accessToken)).toMatchObject({ reminderMinutes: 0, notifySubstitutions: true });
++  });
++
++  it('нагадування й перемикач сповіщень зберігаються, решта профілю не змінюється', async () => {
++    const token = await setupStudent(`f9.settings.${run}@lnu.edu.ua`, 2);
++    const before = await me(token);
++
++    const res = await send('PATCH', '/me', token, { reminderMinutes: 10, notifySubstitutions: false });
++    expect(res.status).toBe(200);
++    const body = (await res.json()) as Me;
++    expect(body).toMatchObject({ reminderMinutes: 10, notifySubstitutions: false, groupId: before.groupId, subgroup: 2 });
++    expect(await me(token)).toEqual(body); // відповідь як у GET /me
++  });
++
++  it('лише підгрупа змінюється без групи і одразу змінює розклад', async () => {
++    const token = await setupStudent(`f9.subgroup.${run}@lnu.edu.ua`, 1);
++    const groupId = (await me(token)).groupId;
++    expect((await send('PATCH', '/me', token, { subgroup: 2 })).status).toBe(200);
++    expect(await me(token)).toMatchObject({ groupId, subgroup: 2 });
++  });
++
++  it('повторно надіслана поточна група без підгрупи підгрупу не скидає', async () => {
++    const token = await setupStudent(`f9.samegroup.${run}@lnu.edu.ua`, 2);
++    const { groupId } = await me(token);
++    expect((await send('PATCH', '/me', token, { groupId })).status).toBe(200);
++    expect(await me(token)).toMatchObject({ groupId, subgroup: 2 });
++  });
++
++  it('нова група без підгрупи скидає підгрупу на 0', async () => {
++    const token = await setupStudent(`f9.regroup.${run}@lnu.edu.ua`, 2);
++    const other = await emptyGroup(await adminToken(), `F9-${run}`);
++    expect((await send('PATCH', '/me', token, { groupId: other })).status).toBe(200);
++    expect(await me(token)).toMatchObject({ groupId: other, subgroup: 0 });
++  });
++
++  it('некоректні значення дають 400 з кодом і нічого не змінюють', async () => {
++    const token = await setupStudent(`f9.invalid.${run}@lnu.edu.ua`);
++    const cases: [unknown, string][] = [
++      [{}, 'NOTHING_TO_UPDATE'],
++      [{ reminderMinutes: 5 }, 'INVALID_REMINDER_MINUTES'],
++      [{ notifySubstitutions: 'так' }, 'INVALID_NOTIFY_SUBSTITUTIONS'],
++      [{ subgroup: 3 }, 'INVALID_SUBGROUP'],
++      [{ groupId: null }, 'GROUP_REQUIRED'],
++      // одне некоректне поле відхиляє весь запит, навіть коли інші коректні
++      [{ reminderMinutes: 15, subgroup: 7 }, 'INVALID_SUBGROUP'],
++    ];
++    for (const [body, error] of cases) {
++      const res = await send('PATCH', '/me', token, body);
++      expect([res.status, await errorOf(res)]).toEqual([400, error]);
++    }
++    expect(await me(token)).toMatchObject({ reminderMinutes: 0, subgroup: 0, notifySubstitutions: true });
++  });
++
++  it('підгрупа без вибраної групи це GROUP_REQUIRED', async () => {
++    const { accessToken } = await loginFull(`f9.nogroup.${run}@lnu.edu.ua`);
++    const res = await send('PATCH', '/me', accessToken, { subgroup: 1 });
++    expect([res.status, await errorOf(res)]).toEqual([400, 'GROUP_REQUIRED']);
++    // а налаштування сповіщень до онбордингу змінювати можна
++    expect((await send('PATCH', '/me', accessToken, { reminderMinutes: 15 })).status).toBe(200);
++  });
++});
++
+ describe('F9: видалення акаунта', () => {
+   it('без токена 401', async () => {
+     expect((await fetch(`${API}/me`, { method: 'DELETE' })).status).toBe(401);
+@@ -86,8 +154,7 @@ describe('F9: зміна групи', () => {
+ 
+   it('студент змінює групу й підгрупу сам', async () => {
+     const student = await setupStudent(`f9.student.${run}@lnu.edu.ua`);
+-    const groups = await groupsOf(student);
+-    const other = groups.find((g) => g.code === 'ТЕСТ-32')!;
++    const other = { id: await emptyGroup(await adminToken(), `F9-S-${run}`) };
+     const res = await send('PATCH', '/me', student, { groupId: other.id, subgroup: 2 });
+     expect(res.status).toBe(200);
+     const me = (await (await fetch(`${API}/me`, { headers: authHeaders(student) })).json()) as { groupId: string; subgroup: number };
+@@ -100,13 +167,15 @@ describe('F9: зміна групи', () => {
+     await send('PATCH', `/admin/users/${await userId(headman)}/role`, admin, { role: 'HEADMAN' });
+     const groups = await groupsOf(headman);
+     const own = groups.find((g) => g.code === 'ТЕСТ-31')!;
+-    const other = groups.find((g) => g.code === 'ТЕСТ-32')!;
++    const other = { id: await emptyGroup(admin, `F9-H-${run}`) };
+ 
+     const moved = await send('PATCH', '/me', headman, { groupId: other.id });
+     expect(moved.status).toBe(403);
+     expect(await errorOf(moved)).toBe('HEADMAN_GROUP_LOCKED');
+ 
+     expect((await send('PATCH', '/me', headman, { groupId: own.id, subgroup: 1 })).status).toBe(200);
++    // підгрупу й налаштування староста змінює й без groupId
++    expect((await send('PATCH', '/me', headman, { subgroup: 2, reminderMinutes: 10 })).status).toBe(200);
+ 
+     expect((await send('PATCH', `/admin/users/${await userId(headman)}/group`, admin, { groupId: other.id })).status).toBe(200);
+     const me = (await (await fetch(`${API}/me`, { headers: authHeaders(headman) })).json()) as { groupId: string };
+diff --git a/backend/test/unit/profile-patch.test.ts b/backend/test/unit/profile-patch.test.ts
+new file mode 100644
+index 0000000..19f3442
+--- /dev/null
++++ b/backend/test/unit/profile-patch.test.ts
+@@ -0,0 +1,79 @@
++import { describe, expect, it } from 'vitest';
++import { parseProfilePatch, rejectPatch, resolvePatch } from '../../src/lib/profilePatch';
++
++const GROUP = '3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f';
++const error = (body: unknown) => {
++  const r = parseProfilePatch(body);
++  return r.ok ? null : r.error;
++};
++const patch = (body: unknown) => {
++  const r = parseProfilePatch(body);
++  if (!r.ok) throw new Error(r.error);
++  return r.patch;
++};
++
++describe('parseProfilePatch', () => {
++  it('група з підгрупою і без неї (що робити з підгрупою, вирішує resolvePatch)', () => {
++    expect(patch({ groupId: GROUP })).toEqual({ groupId: GROUP });
++    expect(patch({ groupId: GROUP, subgroup: 2 })).toEqual({ groupId: GROUP, subgroup: 2 });
++  });
++
++  it('кожне поле можна змінити окремо', () => {
++    expect(patch({ subgroup: 1 })).toEqual({ subgroup: 1 });
++    expect(patch({ reminderMinutes: 15 })).toEqual({ reminderMinutes: 15 });
++    expect(patch({ notifySubstitutions: false })).toEqual({ notifySubstitutions: false });
++  });
++
++  it('порожнє тіло або лише невідомі поля нічого не змінюють', () => {
++    for (const body of [undefined, null, {}, { theme: 'dark' }, 'рядок']) expect(error(body)).toBe('NOTHING_TO_UPDATE');
++  });
++
++  it('група: null чи порожня це GROUP_REQUIRED, не uuid це INVALID_GROUP_ID', () => {
++    expect(error({ groupId: null })).toBe('GROUP_REQUIRED');
++    expect(error({ groupId: '' })).toBe('GROUP_REQUIRED');
++    expect(error({ groupId: 'abc' })).toBe('INVALID_GROUP_ID');
++  });
++
++  it('підгрупа лише 0, 1 або 2', () => {
++    for (const subgroup of [3, -1, 1.5, '1', null]) expect(error({ subgroup })).toBe('INVALID_SUBGROUP');
++  });
++
++  it('нагадування лише 0, 10 або 15 хвилин', () => {
++    expect(patch({ reminderMinutes: 0 })).toEqual({ reminderMinutes: 0 });
++    for (const reminderMinutes of [5, 30, '10', null, 10.5]) {
++      expect(error({ reminderMinutes })).toBe('INVALID_REMINDER_MINUTES');
++    }
++  });
++
++  it('перемикач сповіщень лише boolean', () => {
++    for (const notifySubstitutions of ['false', 0, null]) {
++      expect(error({ notifySubstitutions })).toBe('INVALID_NOTIFY_SUBSTITUTIONS');
++    }
++  });
++});
++
++describe('rejectPatch і patchGuards', () => {
++  const OTHER = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
++  const headman = { role: 'HEADMAN' as const, groupId: GROUP };
++
++  it('староста з групою не переходить в іншу групу сам, у свою (з підгрупою) може', () => {
++    expect(rejectPatch(headman, { groupId: OTHER, subgroup: 0 })).toEqual({ status: 403, error: 'HEADMAN_GROUP_LOCKED' });
++    expect(rejectPatch(headman, { groupId: GROUP, subgroup: 1 })).toBeNull();
++    expect(rejectPatch(headman, { subgroup: 2, reminderMinutes: 10 })).toBeNull();
++    expect(rejectPatch({ role: 'HEADMAN', groupId: null }, { groupId: OTHER, subgroup: 0 })).toBeNull(); // онбординг
++    expect(rejectPatch({ role: 'STUDENT', groupId: GROUP }, { groupId: OTHER, subgroup: 0 })).toBeNull();
++  });
++
++  it('підгрупа без групи це GROUP_REQUIRED, налаштування без групи можна', () => {
++    expect(rejectPatch({ role: 'STUDENT', groupId: null }, { subgroup: 1 })).toEqual({ status: 400, error: 'GROUP_REQUIRED' });
++    expect(rejectPatch({ role: 'STUDENT', groupId: null }, { reminderMinutes: 15 })).toBeNull();
++  });
++
++  it('нова група без підгрупи скидає підгрупу на 0, повторно надіслана поточна не скидає', () => {
++    expect(resolvePatch({ groupId: GROUP }, { groupId: OTHER })).toEqual({ groupId: OTHER, subgroup: 0 });
++    expect(resolvePatch({ groupId: null }, { groupId: OTHER })).toEqual({ groupId: OTHER, subgroup: 0 });
++    expect(resolvePatch({ groupId: GROUP }, { groupId: GROUP })).toEqual({ groupId: GROUP });
++    expect(resolvePatch({ groupId: GROUP }, { groupId: OTHER, subgroup: 2 })).toEqual({ groupId: OTHER, subgroup: 2 });
++    expect(resolvePatch({ groupId: GROUP }, { reminderMinutes: 10 })).toEqual({ reminderMinutes: 10 });
++  });
++});
+diff --git a/specs/README.md b/specs/README.md
+index 468472c..f67a4ef 100644
+--- a/specs/README.md
++++ b/specs/README.md
+@@ -21,7 +21,7 @@
+ | [f6-substitutions.md](f6-substitutions.md) | Заміни пар (староста) | Бекенд і UI готові: староста додає й скасовує заміну, група бачить її в розкладі. Пушів немає (F8) |
+ | [f7-admin.md](f7-admin.md) | Адмінка: ролі, імпорт розкладу | Бекенд є (група, CORS), веб-сторінка в плані |
+ | [f8-notifications.md](f8-notifications.md) | Сповіщення і нагадування | Не реалізовано |
+-| [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, зміна групи й підгрупи, вихід, видалення акаунта, посилання на політику конфіденційності. Теми й нагадувань немає |
++| [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, зміна групи й підгрупи, вихід, видалення акаунта, посилання на політику конфіденційності. Бекенд зберігає нагадування й перемикач сповіщень (`PATCH /me`); у UI теми й нагадувань немає |
+ | [v2-backlog.md](v2-backlog.md) | Не для MVP | Ідеї |
+ 
+ Нумерація F1–F9 збігається з назвами E2E-тестів у `backend/test/e2e/`.
+diff --git a/specs/f8-notifications.md b/specs/f8-notifications.md
+index 27c5442..20e2f65 100644
+--- a/specs/f8-notifications.md
++++ b/specs/f8-notifications.md
+@@ -12,7 +12,7 @@
+ - Дозвіл на сповіщення питається в онбордингу, відмову можна змінити пізніше («Пізніше»).
+ 
+ ## Стан бекенду
+-У схемі є таблиця `NotificationToken` (токен пристрою і користувач), але немає ендпоінтів для реєстрації токена і немає відправки. Поле `User.reminderMinutes` читається в `GET /me`, але `PATCH /me` його не змінює.
++У схемі є таблиця `NotificationToken` (токен пристрою і користувач), але немає ендпоінтів для реєстрації токена і немає відправки. Налаштування вже зберігаються: `reminderMinutes` і перемикач `notifySubstitutions` змінюються через `PATCH /me` (F9).
+ 
+ ## Що потрібно
+ | Що | Хто |
+diff --git a/specs/f9-profile.md b/specs/f9-profile.md
+index c413db2..2ba62d4 100644
+--- a/specs/f9-profile.md
++++ b/specs/f9-profile.md
+@@ -1,6 +1,6 @@
+ # F9. Профіль і налаштування
+ 
+-**Стан:** частково (дані, зміна групи й підгрупи, вихід, видалення акаунта; теми й нагадувань немає) · **Відповідальні:** мобільний, бекенд
++**Стан:** частково (дані, зміна групи й підгрупи, нагадування й перемикач сповіщень на бекенді, вихід, видалення акаунта; теми й нагадувань в UI немає) · **Відповідальні:** мобільний, бекенд
+ 
+ ## Як це працює
+ Екран показує ім'я і пошту, групу, підгрупу, перемикач «Зміни та скасування», час нагадування (вимк, 10 хв, 15 хв), тему (системна, світла, темна) і кнопку «Вийти з акаунту».
+@@ -10,19 +10,27 @@
+ ## API
+ | Метод і шлях | Для чого |
+ |---|---|
+-| `GET /me` | `id`, `email`, `fullName`, `role`, `groupId`, `subgroup`, `reminderMinutes` |
+-| `PATCH /me` | Зараз змінює лише `groupId` і `subgroup`. Староста не може сам перейти в іншу групу: 403 `HEADMAN_GROUP_LOCKED` (права на заміни прив'язані до групи), групу йому змінює адмін через `PATCH /admin/users/:id/group`; підгрупу староста змінює сам |
++| `GET /me` | `id`, `email`, `fullName`, `role`, `groupId`, `subgroup`, `reminderMinutes`, `notifySubstitutions` |
++| `PATCH /me` | Змінює лише передані поля: `groupId`, `subgroup`, `reminderMinutes`, `notifySubstitutions`. Відповідь як у `GET /me`. Староста не може сам перейти в іншу групу: 403 `HEADMAN_GROUP_LOCKED` (права на заміни прив'язані до групи), групу йому змінює адмін через `PATCH /admin/users/:id/group`; підгрупу староста змінює сам |
+ | `POST /auth/logout` | Вихід |
+ | `DELETE /me` | Видалити свій акаунт (204). `LAST_ADMIN` (409): останнього адміна видалити не можна |
+ 
++**`PATCH /me`:**
++- `groupId`: нова група. Без `subgroup` у тому ж запиті підгрупа скидається на `0` (якщо група справді інша: повторно надіслана поточна група підгрупу не чіпає). `null` чи порожній рядок дають `GROUP_REQUIRED`: групу не можна прибрати.
++- `subgroup`: 0 (усі), 1 або 2. Можна змінити окремо від групи, але лише коли група вже вибрана, інакше `GROUP_REQUIRED`.
++- `reminderMinutes`: нагадування перед парою, `0` (вимк), `10` або `15`. Нагадування локальне на пристрої (F8), сервер лише зберігає вибір.
++- `notifySubstitutions`: перемикач «Зміни та скасування» (`true` за замовчуванням). Вимкнений не отримує пуш про заміну (F8).
++- Помилки: `HEADMAN_GROUP_LOCKED` (403); 400: `NOTHING_TO_UPDATE` (немає жодного відомого поля), `GROUP_REQUIRED`, `INVALID_GROUP_ID`, `INVALID_SUBGROUP`, `INVALID_REMINDER_MINUTES`, `INVALID_NOTIFY_SUBSTITUTIONS`; `GROUP_NOT_FOUND` (404); `PROFILE_CHANGED` (409, роль чи групу змінили тричі поспіль під час запиту, варто повторити). Одне некоректне поле відхиляє весь запит.
++
+ **Видалення акаунта** (вимога Google Play і App Store): «Видалити акаунт» у профілі з підтвердженням. Запис користувача видаляється повністю
+ (пошта, ім'я, група, налаштування, токени пристроїв). Заміни, створені старостою, лишаються в розкладі групи без автора. Refresh-сесії
+ стають недійсними (`/auth/refresh` не знаходить користувача), access-токен ще до 15 хвилин дає 401 на `/me`. Новий вхід з тією ж поштою
+ створює новий акаунт з нуля (онбординг). У резервних копіях дані лишаються до 14 днів. Публічна сторінка з описом: `/delete-account`.
+ 
+ ## Критерії приймання
+-- [ ] Зміна групи й підгрупи зберігається і одразу змінює розклад.
++- [ ] Зміна групи й підгрупи зберігається і одразу змінює розклад; підгрупу можна змінити окремо від групи.
+ - [ ] Староста не може сам змінити групу (403 `HEADMAN_GROUP_LOCKED`), підгрупу змінює; адмін змінює групу старості.
++- [ ] Час нагадування і перемикач «Зміни та скасування» зберігаються на сервері (`PATCH /me`) і повертаються в `GET /me`.
+ - [ ] Вихід очищає токени на пристрої і знищує сесію.
+ - [ ] Видалення акаунта: 204, старі токени дають 401 (не 500), refresh відхиляється, новий вхід створює порожній акаунт.
+ - [ ] Староста з замінами видаляється, заміни лишаються в розкладі групи.
+@@ -30,5 +38,4 @@
+ - [ ] Тема і час нагадування зберігаються між запусками.
+ 
+ ## Відкриті питання
+-- `PATCH /me` не вміє змінювати `reminderMinutes` і налаштування сповіщень. Потрібно розширити.
+-- Поле `groupId` у `PATCH /me` обов'язкове, тож змінити лише підгрупу окремо не можна.
++- Тема зберігається лише на пристрої, на сервер не передається.
