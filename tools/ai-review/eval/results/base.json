@@ -1,0 +1,72 @@
+{
+ "label": "base",
+ "smoke": false,
+ "set": null,
+ "cases": [
+  100,
+  68,
+  71,
+  73,
+  80,
+  81,
+  83,
+  86,
+  87,
+  90,
+  93,
+  97,
+  99
+ ],
+ "runs": [
+  {
+   "cases": 13,
+   "real_total": 21,
+   "found": 3,
+   "recall": 0.14285714285714285,
+   "killed": 1,
+   "false_known": 1,
+   "false_upper": 34,
+   "findings": 37,
+   "not_reviewed_share": 0.125,
+   "failed_cases": 0,
+   "seconds_max": 257.4,
+   "seconds_total": 1716.2,
+   "cost_usd": 0.4147,
+   "truncated": 38
+  }
+ ],
+ "summary": {
+  "runs": 1,
+  "found": {
+   "mean": 3.0,
+   "min": 3.0,
+   "max": 3.0
+  },
+  "false_known": {
+   "mean": 1.0,
+   "min": 1.0,
+   "max": 1.0
+  },
+  "false_upper": {
+   "mean": 34.0,
+   "min": 34.0,
+   "max": 34.0
+  },
+  "not_reviewed_share": {
+   "mean": 0.125,
+   "min": 0.125,
+   "max": 0.125
+  },
+  "seconds_max": {
+   "mean": 257.4,
+   "min": 257.4,
+   "max": 257.4
+  },
+  "cost_usd": {
+   "mean": 0.4147,
+   "min": 0.4147,
+   "max": 0.4147
+  }
+ },
+ "partial": false
+}

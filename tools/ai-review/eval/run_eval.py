@@ -140,13 +140,14 @@ def run_case_isolated(case: dict, key: str, timeout: float = CASE_TIMEOUT) -> di
         out = Path(tmp) / "report.json"
         env = {**os.environ, "TOGETHER_API_KEY": key}
         try:
-            subprocess.run([sys.executable, str(Path(__file__).resolve()), "--one-case", str(case["pr"]), "--out", str(out)],
-                           env=env, timeout=timeout, capture_output=True, check=False)
+            proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--one-case", str(case["pr"]), "--out", str(out)],
+                                  env=env, timeout=timeout, capture_output=True, check=False)
         except subprocess.TimeoutExpired:
             return {"error": f"завис: ревʼю не завершилось за {timeout:.0f} с", "seconds": timeout, "timed_out": True,
                     "usage": {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "truncated": 0}}
         if not out.is_file():
-            return {"error": "процес ревʼю впав без звіту", "seconds": 0.0,
+            tail = scrub((proc.stderr or b"").decode("utf-8", "replace").strip(), key)[-300:]
+            return {"error": f"процес ревʼю впав без звіту: {tail}", "seconds": 0.0,
                     "usage": {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "truncated": 0}}
         return json.loads(out.read_text("utf-8"))
 
@@ -246,17 +247,17 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
         return show_compare(*args.compare)
     if args.rescore:
         return rescore(args.rescore)
-    if not args.label:
-        parser.error("потрібен --label або --compare")
-
     env = os.environ if env is None else env
-    if args.one_case:
+    if args.one_case:  # до перевірки --label: дочірній процес його не отримує
         use_system_certificates(os.environ)
         key = env.get("TOGETHER_API_KEY", "")
         case = next(c for c in load_cases({args.one_case}, False, None))
         report = run_case(case, key, HERE.parent / "rules.md")
         Path(args.out).write_text(scrub(json.dumps(report, ensure_ascii=False), key), "utf-8")
         return 0
+    if not args.label:
+        parser.error("потрібен --label або --compare")
+
     key = load_key(env, main_env_file())
     if not key:
         print("TOGETHER_API_KEY не задано: додайте його в кореневий .env або в змінну середовища.", file=sys.stderr)

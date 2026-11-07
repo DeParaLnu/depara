@@ -154,11 +154,27 @@ class Isolation(unittest.TestCase):
         seen = {}
         def fake_run(cmd, env, **kw):
             seen.update(cmd=cmd, env=env)
-            return mock.Mock()
+            return mock.Mock(stderr=b"")
         with mock.patch.object(run_eval.subprocess, "run", fake_run):
             run_eval.run_case_isolated({"pr": 1}, FAKE_KEY, timeout=1)
         self.assertNotIn(FAKE_KEY, " ".join(seen["cmd"]))
         self.assertEqual(seen["env"]["TOGETHER_API_KEY"], FAKE_KEY)
+
+    def test_child_mode_runs_without_label(self):
+        """Саме цей шлях проходить дочірній процес: раніше він падав на вимозі --label."""
+        case = {"pr": 1, "title": "T", "issues": [], "known_false": []}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(run_eval, "load_cases", lambda *a: [case]), \
+                mock.patch.object(run_eval, "run_case", return_value={"seconds": 1, "note": FAKE_KEY}):
+            out = Path(tmp) / "r.json"
+            self.assertEqual(run_eval.main(["--one-case", "1", "--out", str(out)], env={"TOGETHER_API_KEY": FAKE_KEY}), 0)
+            self.assertNotIn(FAKE_KEY, out.read_text())
+
+    def test_child_crash_keeps_reason_without_key(self):
+        crash = mock.Mock(stderr=f"Traceback ... ключ {FAKE_KEY} ValueError: x".encode())
+        with mock.patch.object(run_eval.subprocess, "run", return_value=crash):
+            report = run_eval.run_case_isolated({"pr": 1}, FAKE_KEY, timeout=1)
+        self.assertIn("ValueError", report["error"])
+        self.assertNotIn(FAKE_KEY, report["error"])
 
     def test_hung_case_still_counts_against_budget(self):
         with tempfile.TemporaryDirectory() as tmp:
