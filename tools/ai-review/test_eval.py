@@ -1,0 +1,231 @@
+"""Тести eval без мережі й без ключа: підрахунок метрик, облік витрат, звіт ревʼюера, формат кейсів."""
+
+import io
+import json
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from unittest import mock
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE / "eval"))
+
+import review  # noqa: E402
+import run_eval  # noqa: E402
+import score  # noqa: E402
+
+FAKE_KEY = "fake-key-for-tests"
+ISSUE = {"id": "r1", "real": True, "file": "a.ts", "lines": [10, 12], "keywords": []}
+
+
+def finding(file="a.ts", line=11, title="t", problem="p"):
+    return {"file": file, "line": line, "title": title, "problem": problem}
+
+
+class Matching(unittest.TestCase):
+    def test_line_nearby_counts(self):
+        self.assertTrue(score.matches(finding(line=15), ISSUE))
+        self.assertTrue(score.matches(finding(line=5), ISSUE))
+
+    def test_far_line_or_other_file_does_not_count(self):
+        self.assertFalse(score.matches(finding(line=40), ISSUE))
+        self.assertFalse(score.matches(finding(file="b.ts"), ISSUE))
+
+    def test_keyword_works_without_lines(self):
+        label = {"file": "a.ts", "keywords": ["Інвалідац"]}
+        self.assertTrue(score.matches(finding(line=400, title="немає інвалідації кешу"), label))
+        self.assertFalse(score.matches(finding(line=400, title="інше"), label))
+
+
+class ScoreCase(unittest.TestCase):
+    case = {"pr": 1, "issues": [ISSUE, {"id": "r2", "real": True, "file": "b.ts", "lines": [1, 1]},
+                                {"id": "r3", "real": None, "file": "c.ts", "lines": [5, 5]}],
+            "known_false": [{"id": "f1", "file": "d.ts", "keywords": ["кеш"]}]}
+
+    def test_found_false_and_unlabeled(self):
+        report = {"findings": [finding(), finding(line=12), finding("d.ts", 1, "кеш"), finding("e.ts", 1)],
+                  "files_total": 4, "not_reviewed": ["e.ts"]}
+        s = score.score_case(self.case, report)
+        self.assertEqual(s["found"], ["r1"])  # два пункти про одну проблему це одна знайдена
+        self.assertEqual((s["false_known"], s["unlabeled"], s["not_reviewed"]), (1, 1, 1))
+
+    def test_real_issue_killed_by_verification_is_visible(self):
+        report = {"findings": [], "rejected": [{**finding("b.ts", 1), "reason": "refuted"}]}
+        self.assertEqual(score.score_case(self.case, report)["killed"], ["r2"])
+
+    def test_found_issue_is_not_also_killed(self):
+        report = {"findings": [finding()], "rejected": [{**finding(), "reason": "duplicate"}]}
+        self.assertEqual(score.score_case(self.case, report)["killed"], [])
+
+    def test_pending_label_counts_nowhere(self):
+        s = score.score_case(self.case, {"findings": [finding("c.ts", 5)]})
+        self.assertEqual((s["real_total"], s["unlabeled"], s["false_known"]), (2, 0, 0))
+
+    def test_failed_review_is_reported(self):
+        self.assertTrue(score.score_case(self.case, {"error": "збій"})["failed"])
+
+
+class Comparing(unittest.TestCase):
+    @staticmethod
+    def summary(found, false=(2, 2), share=(0.5, 0.5), seconds=100):
+        run = lambda f, x, s: {"found": f, "false_known": x, "false_upper": x, "not_reviewed_share": s,  # noqa: E731
+                               "seconds_max": seconds, "cost_usd": 0.1}
+        return score.summarize_runs([run(found[i], false[i], share[i]) for i in range(2)])
+
+    def test_within_noise_is_kept(self):
+        base = self.summary((4, 6))
+        self.assertTrue(score.compare(base, self.summary((4, 5)))["keep"])
+
+    def test_fewer_real_issues_is_rejected(self):
+        verdict = score.compare(self.summary((5, 5)), self.summary((3, 3)))
+        self.assertEqual((verdict["keep"], verdict["worse"]), (False, ["found"]))
+
+    def test_more_false_is_rejected(self):
+        self.assertIn("false_known", score.compare(self.summary((5, 5)), self.summary((5, 5), (4, 4)))["worse"])
+
+    def test_over_time_budget_is_rejected(self):
+        self.assertIn("seconds_max", score.compare(self.summary((5, 5)), self.summary((5, 5), seconds=500))["worse"])
+
+
+class Spending(unittest.TestCase):
+    def test_limit_survives_between_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "spend.json"
+            first = run_eval.Spend(path, 1.0)
+            self.assertTrue(first.can_start())
+            first.add(0.9)
+            self.assertFalse(run_eval.Spend(path, 1.0).can_start())
+
+    def test_cost_uses_catalog_prices(self):
+        self.assertAlmostEqual(run_eval.cost({"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}), 0.42)
+
+    def test_stops_before_limit_without_requests(self):
+        spend = mock.Mock(can_start=lambda: False, total=19.0)
+        with mock.patch.object(run_eval, "run_case") as run:
+            summary, scored, stopped = run_eval.run_once([{"pr": 1}], FAKE_KEY, Path("r"), spend, 1)
+        run.assert_not_called()
+        self.assertTrue(stopped)
+        self.assertEqual(scored, [])
+        self.assertEqual(summary["cost_usd"], 0)
+
+
+class Key(unittest.TestCase):
+    def test_env_first_then_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(f'OTHER=1\nTOGETHER_API_KEY="{FAKE_KEY}"\n')
+            self.assertEqual(run_eval.load_key({}, env_file), FAKE_KEY)
+            self.assertEqual(run_eval.load_key({"TOGETHER_API_KEY": "x"}, env_file), "x")
+            self.assertEqual(run_eval.load_key({}, Path(tmp) / "немає"), "")
+
+    def test_without_key_stops_cleanly(self):
+        err = io.StringIO()
+        with mock.patch.object(run_eval, "main_env_file", return_value=Path("/немає/.env")), redirect_stderr(err):
+            self.assertEqual(run_eval.main(["--label", "x"], env={}), 2)
+        self.assertIn("TOGETHER_API_KEY", err.getvalue())
+
+    def test_key_never_reaches_results(self):
+        self.assertNotIn(FAKE_KEY, run_eval.scrub(f"HTTP 401 ключ {FAKE_KEY}", FAKE_KEY))
+
+
+DIFF = """diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1 +1,2 @@
+ const a = 1;
++const secretValue = compute(a);
+"""
+
+
+def fake_chat(answers):
+    """Підставна модель: ревʼю шматка і друга перевірка відповідають різне."""
+    def chat(cfg, messages, tools, *a, **k):
+        cfg.usage.add({"prompt_tokens": 10, "completion_tokens": 5}, "stop")
+        verifying = messages[0]["content"].startswith("Ти перевіряєш")
+        return {"content": json.dumps(answers["verify"] if verifying else answers["review"])}
+    return chat
+
+
+class Report(unittest.TestCase):
+    def run_review(self, answers):
+        cfg = review.Config(api_key=FAKE_KEY)
+        report: dict = {}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(review, "chat", fake_chat(answers)), \
+                redirect_stdout(io.StringIO()):
+            Path(tmp, "a.ts").write_text("const a = 1;\nconst secretValue = compute(a);\n")
+            cfg.repo_dir = Path(tmp)
+            text = review.run_review(cfg, {"title": "T"}, DIFF, "", review.RepoTools(Path(tmp)), report)
+        return text, report, cfg
+
+    @staticmethod
+    def item(evidence="const secretValue = compute(a);"):
+        return {"file": "a.ts", "line": 2, "severity": "important", "title": "Проблема", "evidence": evidence, "problem": "Опис"}
+
+    def test_confirmed_goes_to_findings(self):
+        _, report, cfg = self.run_review({"review": {"summary": "s", "findings": [self.item()]},
+                                          "verify": {"verdict": "confirmed", "reason": "r"}})
+        self.assertEqual([f["line"] for f in report["findings"]], [2])
+        self.assertEqual(report["rejected"], [])
+        self.assertEqual((report["files_total"], report["chunks_failed"], report["not_reviewed"]), (1, 0, []))
+        self.assertGreaterEqual(cfg.usage.as_dict()["requests"], 2)
+
+    def test_refuted_is_kept_with_reason(self):
+        _, report, _ = self.run_review({"review": {"summary": "s", "findings": [self.item()]},
+                                        "verify": {"verdict": "refuted", "reason": "r"}})
+        self.assertEqual(report["findings"], [])
+        self.assertEqual([r["reason"] for r in report["rejected"]], ["refuted"])
+
+    def test_invented_quote_is_kept_with_reason(self):
+        _, report, _ = self.run_review({"review": {"summary": "s", "findings": [self.item("такого рядка немає")]},
+                                        "verify": {"verdict": "confirmed", "reason": "r"}})
+        self.assertEqual([r["reason"] for r in report["rejected"]], ["no_evidence"])
+
+    def test_report_is_optional_and_does_not_change_comment(self):
+        answers = {"review": {"summary": "Підсумок", "findings": []}, "verify": {}}
+        text, _, _ = self.run_review(answers)
+        cfg = review.Config(api_key=FAKE_KEY)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(review, "chat", fake_chat(answers)):
+            cfg.repo_dir = Path(tmp)
+            self.assertEqual(review.run_review(cfg, {"title": "T"}, DIFF, "", review.RepoTools(Path(tmp))), text)
+
+    def test_rules_path_overrides_snapshot(self):
+        seen = []
+        chat = fake_chat({"review": {"summary": "s", "findings": []}, "verify": {}})
+        spy = lambda cfg, messages, *a, **k: (seen.append(messages[0]["content"]), chat(cfg, messages, *a, **k))[1]  # noqa: E731
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(review, "chat", spy):
+            root = Path(tmp)
+            (root / "tools" / "ai-review").mkdir(parents=True)
+            (root / "tools" / "ai-review" / "rules.md").write_text("СТАРІ ПРАВИЛА")
+            (root / "new.md").write_text("НОВІ ПРАВИЛА")
+            cfg = review.Config(api_key=FAKE_KEY, repo_dir=root, rules_path=root / "new.md")
+            review.run_review(cfg, {"title": "T"}, DIFF, "", review.RepoTools(root))
+        self.assertIn("НОВІ ПРАВИЛА", seen[0])
+        self.assertNotIn("СТАРІ ПРАВИЛА", seen[0])
+
+
+class Cases(unittest.TestCase):
+    def test_every_case_is_complete(self):
+        paths = sorted((HERE / "eval" / "cases").glob("pr-*.json"))
+        self.assertGreaterEqual(len(paths), 10)
+        for path in paths:
+            case = json.loads(path.read_text("utf-8"))
+            with self.subTest(pr=case["pr"]):
+                self.assertTrue(path.with_suffix(".diff").is_file())
+                self.assertIn(case["set"], ("dev", "holdout"))
+                self.assertRegex(case["head"], r"^[0-9a-f]{40}$")
+                ids = [x["id"] for x in case["issues"] + case["known_false"]]
+                self.assertEqual(len(ids), len(set(ids)))
+                for issue in case["issues"]:
+                    self.assertIn(issue["real"], (True, False, None))
+
+    def test_rules_examples_stay_out_of_holdout(self):
+        """#71 і #86 стають прикладами в rules.md: контрольний набір не має на них вчитись."""
+        for pr in (71, 86):
+            case = json.loads((HERE / "eval" / "cases" / f"pr-{pr}.json").read_text("utf-8"))
+            self.assertEqual(case["set"], "dev")
+
+
+if __name__ == "__main__":
+    unittest.main()
