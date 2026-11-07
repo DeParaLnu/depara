@@ -1,4 +1,4 @@
-import type { Classroom, Lesson, Me, NewSubstitution, SubstitutionKind, Teacher } from '../../api';
+import type { Lesson, Me, NewSubstitution, Room, SubstitutionKind, Teacher } from '../../api';
 
 // F6: логіка форми «Нова заміна» без React і нативних модулів (її перевіряють юніт-тести).
 // Правила повторюють перевірки бекенда (backend/src/routes/substitutions.ts), щоб помилку було видно
@@ -20,7 +20,7 @@ export type SubstitutionForm = {
   lesson: Lesson | null;
   kind: SubstitutionKind | null;
   teacher: Teacher | null;
-  classroom: Classroom | null;
+  classroom: Room | null;
   newDate: string | null; // YYYY-MM-DD
   newPairNumber: number | null;
   comment: string;

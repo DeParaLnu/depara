@@ -1,4 +1,4 @@
-import type { Lesson, LessonType, Substitution } from '../../api';
+import type { Lesson, LessonType, Room, Substitution } from '../../api';
 import { minutesOf, nowMinutes, toIsoDate } from '../../lib/date';
 
 export const lessonTypeLabel: Record<LessonType, string | null> = {
@@ -12,40 +12,21 @@ export const lessonTypeLabel: Record<LessonType, string | null> = {
 export const audienceLabel = (a: Lesson['audience']) =>
   a === 'STREAM' ? 'Потік' : a === 'COMBINED' ? 'Збірна група' : null;
 
-/** Бекенд віддає аудиторію як «218/Т» (номер/код корпусу). */
-export function parseRoom(room: string | null): { number: string; building: string } | null {
-  if (!room) return null;
-  const [number, building] = room.split('/');
-  return { number, building: building ?? '' };
-}
-
-export const roomLabel = (room: string | null) => {
-  const r = parseRoom(room);
-  if (!r) return null;
-  return r.building ? `Корпус ${r.building} · ауд. ${r.number}` : `ауд. ${r.number}`;
-};
+export const roomLabel = (room: Room | null) =>
+  room ? `Корпус ${room.building.code} · ауд. ${room.number}` : null;
 
 /** Що показати в деталях пари з урахуванням заміни: нова аудиторія, викладач, корпус. */
 export function lessonDetails(lesson: Lesson) {
   const sub = lesson.substitution;
   const cancelled = sub?.kind === 'CANCELLED';
-  const roomChanged = !!sub?.newRoom;
-  const room = roomChanged ? sub!.newRoom : lesson.room;
-  const building = roomChanged ? (sub!.newBuilding ?? lesson.building) : lesson.building;
-  const label = roomLabel(room);
+  const room = sub?.newRoom ?? lesson.room;
   return {
     cancelled,
     teacher: sub?.newTeacher ?? lesson.teacher,
-    // «Корпус Т · ауд. 218, вул. Генерала Тарнавського, 107»; без аудиторії лише «Корпус на Тарнавського, вул. …»
-    location: label
-      ? building?.address
-        ? `${label}, ${building.address}`
-        : label
-      : building
-        ? `${building.name}, ${building.address}`
-        : null,
+    // «Корпус Т · ауд. 218, вул. Генерала Тарнавського, 107»
+    location: room ? `${roomLabel(room)}, ${room.building.address}` : null,
     // Маршрут має сенс лише для пари, що відбудеться, і лише коли відомий корпус (веде на адресу корпусу)
-    route: !cancelled && building ? { building } : null,
+    route: !cancelled && room ? { building: room.building } : null,
   };
 }
 

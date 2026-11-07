@@ -11,14 +11,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { Building, Classroom } from '../../api';
+import type { Building, Room } from '../../api';
 import { StateView } from '../../components/StateView';
 import { openRoute } from '../../lib/maps';
 import { colors, errorText } from '../../theme';
 
 export type RoomsState =
   | { kind: 'loading' }
-  | { kind: 'ready'; rooms: Classroom[] }
+  | { kind: 'ready'; rooms: Room[] }
   | { kind: 'error'; code: string };
 
 type Props = {

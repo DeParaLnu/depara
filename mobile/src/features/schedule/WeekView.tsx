@@ -7,7 +7,7 @@ import { StateView } from '../../components/StateView';
 import { clock, toIsoDate, weekdayFull, weekDays, weekRangeLabel } from '../../lib/date';
 import { colors, errorText } from '../../theme';
 import { LessonDetailsSheet } from './components/LessonDetailsSheet';
-import { parseRoom, withNext, type LessonStatus } from './lesson';
+import { withNext, type LessonStatus } from './lesson';
 import type { TodayState } from './TodayView';
 
 type Row = { kind: 'lesson'; lesson: Lesson; status: LessonStatus } | { kind: 'empty'; key: string };
@@ -41,7 +41,7 @@ function WeekRow({ lesson, onPress }: { lesson: Lesson; onPress: () => void }) {
   const sub = lesson.substitution;
   const cancelled = sub?.kind === 'CANCELLED';
   const type = TYPE_SHORT[lesson.type];
-  const room = parseRoom(sub?.newRoom ?? lesson.room);
+  const room = sub?.newRoom ?? lesson.room;
   const moved = sub ? movedLabel(sub) : null;
   return (
     <Pressable
@@ -81,7 +81,7 @@ function WeekRow({ lesson, onPress }: { lesson: Lesson; onPress: () => void }) {
           {type.label}
         </Text>
       </View>
-      <Text style={styles.rowRoom}>{room && !cancelled ? `${room.number}${room.building ? `/${room.building}` : ''}` : ''}</Text>
+      <Text style={styles.rowRoom}>{room && !cancelled ? room.label : ''}</Text>
     </Pressable>
   );
 }

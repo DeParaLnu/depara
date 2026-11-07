@@ -5,7 +5,7 @@
 export const PERSIST_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** Змінюйте при зміні форми відповідей API: старий кеш на диску тоді відкидається, а не ламає екрани. */
-export const PERSIST_CACHE_VERSION = '1';
+export const PERSIST_CACHE_VERSION = '2';
 
 // Лише те, що потрібно, щоб відкрити розклад без мережі. Пошук аудиторій навмисно не зберігаємо.
 const PERSISTED_KEYS = new Set(['week', 'me', 'groups', 'buildings']);

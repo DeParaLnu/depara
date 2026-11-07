@@ -71,12 +71,21 @@ export function currentMonday(): string {
   return x.toISOString().slice(0, 10);
 }
 
+// Аудиторія у відповідях API: GET /classrooms, room і newRoom у GET /schedule/week
+export interface Room {
+  id: string;
+  number: string;
+  label: string;
+  building: { code: string; name: string; address: string };
+}
+
 export interface WeekLesson {
   id: string;
   date: string;
   subject: string;
   pairNumber: number;
-  substitution: { id: string; kind: string; newTeacher: string | null; newRoom: string | null } | null;
+  room: Room | null;
+  substitution: { id: string; kind: string; newTeacher: string | null; newRoom: Room | null } | null;
 }
 
 // Розклад тижня, до якого належить date (за замовчуванням поточний)
