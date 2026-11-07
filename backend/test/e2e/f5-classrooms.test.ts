@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API, authHeaders, setupStudent } from './helpers';
-
-type Room = { id: string; number: string; label: string; building: { code: string; name: string; address: string } };
+import { API, authHeaders, setupStudent, type Room } from './helpers';
 
 async function searchRooms(token: string, q?: string, building?: string): Promise<{ status: number; rooms: Room[] }> {
   const params = new URLSearchParams();
@@ -12,7 +10,7 @@ async function searchRooms(token: string, q?: string, building?: string): Promis
   return { status: res.status, rooms: res.status === 200 ? ((await res.json()) as Room[]) : [] };
 }
 
-// Критерії приймання зі specs/f5-search.md. У seed є N10/Б і N11/Б (латинська N), а також №9/Б і №5/Б.
+// Критерії приймання зі specs/f5-search.md. У seed є N10/Б, N11/Б, N9/Б і N5/Б (латинська N).
 describe('F5: пошук аудиторій', () => {
   it('пошук 218 повертає аудиторію з літерою корпусу', async () => {
     const token = await setupStudent('f5.student@lnu.edu.ua');
@@ -38,6 +36,29 @@ describe('F5: пошук аудиторій', () => {
     const lower = await searchRooms(token, 'n1');
     expect(lower.status).toBe(200);
     expect(lower.rooms.map((r) => r.id).sort()).toEqual(upper.rooms.map((r) => r.id).sort());
+  });
+
+  it('запит нормалізується: №, n і кирилична Н дають N, пробіли не важливі', async () => {
+    const token = await setupStudent('f5.normalize@lnu.edu.ua');
+    for (const q of ['N9', 'n9', '№9', 'Н9', 'н9', ' № 9 ']) {
+      const { status, rooms } = await searchRooms(token, q);
+      expect(status, q).toBe(200);
+      expect(rooms.map((r) => r.label), q).toEqual(['N9/Б']);
+    }
+  });
+
+  it('запит «номер/корпус» знаходить аудиторію, регістр і латиниця в корпусі не важливі', async () => {
+    const token = await setupStudent('f5.label@lnu.edu.ua');
+    for (const q of ['218/Т', '218/т', '218/T', '218 / Т']) {
+      const { status, rooms } = await searchRooms(token, q);
+      expect(status, q).toBe(200);
+      expect(rooms.map((r) => r.label), q).toEqual(['218/Т']);
+    }
+    // Той самий номер в іншому корпусі не підходить, а незавершений запит шукає лише за номером
+    expect((await searchRooms(token, '218/Б')).rooms).toEqual([]);
+    expect((await searchRooms(token, '218/')).rooms.map((r) => r.label)).toContain('218/Т');
+    // Корпус із запиту діє разом із фільтром building
+    expect((await searchRooms(token, '218/Т', 'Б')).rooms).toEqual([]);
   });
 
   it('порожній запит повертає список без помилки, не більше 20', async () => {

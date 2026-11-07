@@ -109,7 +109,7 @@ model Building {
 model Classroom {
   id         String   @id @default(uuid()) @db.Uuid
   buildingId String   @map("building_id") @db.Uuid
-  number     String   // рядок: «406», «N10», «129а», «№9»
+  number     String   // рядок: «406», «N10», «129а»; формат задає normalizeRoom
   floor      Int?
   building   Building @relation(fields: [buildingId], references: [id])
 

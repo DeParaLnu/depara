@@ -156,7 +156,7 @@ function lessonCard(l, current) {
   const s = l.substitution;
   const cancelled = s?.kind === 'CANCELLED';
   const teacher = s?.newTeacher ? `<span class="old">${esc(l.teacher)}</span> <span class="new">${esc(s.newTeacher)}</span>` : esc(l.teacher ?? '');
-  const room = s?.newRoom ? `<span class="old">${esc(l.room)}</span> <span class="new">${esc(s.newRoom)}</span>` : esc(l.room ?? 'онлайн / без аудиторії');
+  const room = s?.newRoom ? `<span class="old">${esc(l.room?.label)}</span> <span class="new">${esc(s.newRoom.label)}</span>` : esc(l.room?.label ?? 'онлайн / без аудиторії');
   const moved = s?.kind === 'MOVED' ? `<div class="new">→ ${esc(s.newDate ?? l.date)}${s.newPairNumber ? ', пара ' + s.newPairNumber : ''}</div>` : '';
   return `<div class="card lesson ${s ? (cancelled ? 'cancelled' : 'sub') : ''} ${current ? 'now' : ''}">
     <div class="row"><span class="time">${l.start}–${l.end} · пара ${l.pairNumber}</span>

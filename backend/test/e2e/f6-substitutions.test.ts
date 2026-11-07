@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  adminToken, API, authHeaders, importLesson, send, setupStudent, userId, weekLessons,
+  adminToken, API, authHeaders, importLesson, send, setupStudent, userId, weekLessons, type Room,
 } from './helpers';
 
 const errorOf = async (res: Response) => ((await res.json()) as { error: string }).error;
@@ -51,7 +51,7 @@ describe('F6: створення замін', () => {
 
   it('заміна викладача та зміна аудиторії повертають нові значення в розкладі', async () => {
     const teacher = await first<{ fullName: string }>('/teachers', headman);
-    const room = await first<{ label: string }>('/classrooms', headman);
+    const room = await first<Room>('/classrooms', headman);
 
     const l1 = await freshLesson();
     expect((await send('POST', '/substitutions', headman, { lessonId: l1, kind: 'REPLACED', newTeacherId: teacher.id })).status).toBe(201);
@@ -59,7 +59,7 @@ describe('F6: створення замін', () => {
     expect((await send('POST', '/substitutions', headman, { lessonId: l2, kind: 'ROOM_CHANGED', newClassroomId: room.id })).status).toBe(201);
 
     expect((await lessonsOf(student, l1)).find((l) => l.id === l1)?.substitution?.newTeacher).toBe(teacher.fullName);
-    expect((await lessonsOf(student, l2)).find((l) => l.id === l2)?.substitution?.newRoom).toBe(room.label);
+    expect((await lessonsOf(student, l2)).find((l) => l.id === l2)?.substitution?.newRoom).toEqual(room);
   });
 
   it('перенесення вимагає нову дату чи пару, що відрізняється від поточної', async () => {

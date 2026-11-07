@@ -1,4 +1,4 @@
-import type { Building, Lesson, Me, Session, Substitution, Teacher, WeekSchedule } from '../api';
+import type { Lesson, Me, Room, Session, Substitution, Teacher, WeekSchedule } from '../api';
 import { addDays, fromIsoDate, mondayOf, toIsoDate } from '../lib/date';
 import { MOCK_BUILDINGS, MOCK_CLASSROOMS, MOCK_GROUPS, MOCK_LESSONS, MOCK_ME, MOCK_SCHEDULE_GROUP_ID, PAIR_TIMES } from './fixtures';
 
@@ -30,9 +30,8 @@ const currentMe = (): Me => ({ ...MOCK_ME, ...state });
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-// «218/Т» -> корпус з довідника мока (як building у відповіді бекенда)
-const buildingOf = (room: string | null): Building | null =>
-  room ? (MOCK_BUILDINGS[room.slice(room.lastIndexOf('/') + 1)] ?? null) : null;
+// «218/Т» -> аудиторія з довідника мока (як room у відповіді бекенда)
+const roomOf = (label: string | null): Room | null => MOCK_CLASSROOMS.find((r) => r.label === label) ?? null;
 
 function weekOf(dateParam: string | null): WeekSchedule {
   const monday = mondayOf(dateParam ? fromIsoDate(dateParam) : new Date());
@@ -53,10 +52,9 @@ function weekOf(dateParam: string | null): WeekSchedule {
       audience: l.audience,
       subgroup: l.subgroup,
       teacher: l.teacher,
-      room: l.room,
-      building: buildingOf(l.room),
+      room: roomOf(l.room),
       substitution: l.substitution
-        ? { id: `mock-sub-${weekStart}-${i}`, ...l.substitution, newBuilding: buildingOf(l.substitution.newRoom) }
+        ? { id: `mock-sub-${weekStart}-${i}`, ...l.substitution, newRoom: roomOf(l.substitution.newRoom) }
         : null,
     }))
     .map((l) =>
@@ -161,12 +159,13 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
 
   if (method === 'GET' && route === '/classrooms') {
     const params = new URLSearchParams(query);
-    const q = params.get('q')?.trim().toLowerCase();
+    // Як normalizeRoom на бекенді: без пробілів, префікси № і Н це N, запит із / шукає за «номер/корпус»
+    const q = params.get('q')?.replace(/\s+/g, '').toLowerCase().replace(/^[№н](?=\d|$)/, 'n');
     const building = params.get('building')?.trim().toLowerCase();
 
     let list = MOCK_CLASSROOMS;
     if (q) {
-      list = list.filter((r) => r.number.toLowerCase().includes(q));
+      list = list.filter((r) => (q.includes('/') ? r.label : r.number).toLowerCase().includes(q));
     }
     if (building) {
       list = list.filter((r) => r.building.code.toLowerCase() === building);
@@ -202,8 +201,7 @@ function createSubstitution(body: Record<string, unknown>): Response {
     kind,
     comment: typeof body.comment === 'string' ? body.comment : null,
     newTeacher: kind === 'REPLACED' ? teacher!.fullName : null,
-    newRoom: kind === 'ROOM_CHANGED' || kind === 'MOVED' ? (room?.label ?? null) : null,
-    newBuilding: kind === 'ROOM_CHANGED' || kind === 'MOVED' ? (room?.building ?? null) : null,
+    newRoom: kind === 'ROOM_CHANGED' || kind === 'MOVED' ? room : null,
     newDate: kind === 'MOVED' && typeof body.newDate === 'string' ? body.newDate : null,
     newPairNumber: kind === 'MOVED' && typeof body.newPairNumber === 'number' ? body.newPairNumber : null,
   };

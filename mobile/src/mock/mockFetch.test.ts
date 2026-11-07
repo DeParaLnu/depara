@@ -18,6 +18,22 @@ beforeEach(async () => {
   await call('/me', { method: 'PATCH', body: JSON.stringify({ groupId: 'mock-g-test-31', subgroup: 0 }) });
 });
 
+describe('мок: аудиторії', () => {
+  it('кожна аудиторія у фікстурах розкладу є в довіднику', async () => {
+    const { MOCK_LESSONS } = await import('./fixtures');
+    const { lessons } = await week();
+    expect(lessons.filter((l) => l.room).length).toBe(MOCK_LESSONS.filter((l) => l.room).length);
+    for (const l of lessons.filter((x) => x.room)) expect(l.room!.label).toBe(`${l.room!.number}/${l.room!.building.code}`);
+  });
+
+  it('пошук приймає № і формат «номер/корпус», як бекенд', async () => {
+    const labels = async (q: string) =>
+      ((await call(`/classrooms?q=${encodeURIComponent(q)}`)).body as { label: string }[]).map((r) => r.label);
+    expect(await labels('№9')).toEqual(['N9/Б']);
+    expect(await labels('218/т')).toEqual(['218/Т']);
+  });
+});
+
 describe('мок: заміни (F6)', () => {
   it('скасування пари видно в розкладі, повторна заміна дає 409, після DELETE пара звичайна', async () => {
     const lesson = (await week()).lessons.find((l) => !l.substitution)!;
