@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -52,6 +53,26 @@ SEVERITY_ALIASES = {
 }
 
 
+class Usage:
+    """Лічильник запитів і токенів усього ревʼю: метрики для журналу й контроль витрат в eval.
+    Запити йдуть паралельно, тому під блокуванням."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.requests = self.prompt_tokens = self.completion_tokens = self.truncated = 0
+
+    def add(self, usage: dict | None, finish_reason: str | None) -> None:
+        with self._lock:
+            self.requests += 1
+            self.prompt_tokens += int((usage or {}).get("prompt_tokens") or 0)
+            self.completion_tokens += int((usage or {}).get("completion_tokens") or 0)
+            self.truncated += finish_reason == "length"
+
+    def as_dict(self) -> dict:
+        return {"requests": self.requests, "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens, "truncated": self.truncated}
+
+
 @dataclass
 class Config:
     api_key: str = ""
@@ -75,6 +96,8 @@ class Config:
     extra_body: dict = field(default_factory=dict)  # додаткові параметри запиту, напр. вимкнути міркування
     dry_run: bool = False
     timeout: int = 120
+    rules_path: Path | None = None  # eval: правила поточної версії, а не зі знімка старого PR
+    usage: Usage = field(default_factory=Usage)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -511,7 +534,9 @@ def chat(cfg: Config, messages: list[dict], tools: list[dict] | None, temperatur
         try:
             text, _ = request("POST", f"{cfg.base_url}/chat/completions",
                               {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}, body, timeout)
-            choice = json.loads(text)["choices"][0]
+            data = json.loads(text)
+            choice = data["choices"][0]
+            cfg.usage.add(data.get("usage"), choice.get("finish_reason"))
             if choice.get("finish_reason") == "length":
                 # видно в журналі Actions: найчастіша причина «модель не повернула коректний JSON»
                 print(f"::warning::Відповідь моделі обрізано лімітом max_tokens={body['max_tokens']} "
@@ -942,12 +967,21 @@ def format_comment(review: str, cfg: Config, sha: str) -> str:
     return body[:MAX_COMMENT_CHARS]
 
 
-def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> str | None:
+def finding_dict(f: Finding, reason: str = "") -> dict:
+    """Пункт для звіту eval: reason каже, на якому етапі його відкинуто."""
+    item = {"file": f.file, "line": f.line, "severity": f.severity, "title": f.title, "problem": f.problem,
+            "evidence": f.evidence.splitlines()[0].strip() if f.evidence.strip() else ""}
+    return {**item, "reason": reason} if reason else item
+
+
+def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, report: dict | None = None) -> str | None:
+    """Повертає текст коментаря. Якщо передано report, заповнює його структурованими даними для eval."""
+    report = report if report is not None else {}
     chunks, skipped = plan_chunks(diff, cfg)
     if not chunks:
         return None
     system = SYSTEM_PROMPT
-    rules = cfg.repo_dir / "tools" / "ai-review" / "rules.md"
+    rules = cfg.rules_path or cfg.repo_dir / "tools" / "ai-review" / "rules.md"
     if rules.is_file():
         system += "\n\nПравила проєкту:\n" + rules.read_text("utf-8")
     service = [x for x in skipped if "службовий" in x]  # лок-файли, зображення: у коментар лише кількістю
@@ -955,6 +989,9 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
     diff_by_path = {path: text for path, text in split_diff(diff)}
     pr_files = [p for p in diff_by_path if not any(fnmatch.fnmatch(p, pat) for pat in IGNORED_PATTERNS)]
     context = pr_context(pr, ci, skipped, pr_files)
+    rejected: list[dict] = []
+    failed_files: list[str] = []
+    report.update(files_total=len(pr_files), chunks_total=len(chunks), chunks_failed=0, rejected=rejected, findings=[])
 
     stats = {"raw": 0, "no_evidence": 0, "refuted": 0, "duplicates": 0, "over_limit": 0, "unverified": 0}
     notes: list[str] = []
@@ -979,12 +1016,17 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
             data = future.result()
         except BudgetExhausted:
             budget_skipped.extend(names)
+            report["chunks_failed"] += 1
             continue
         except (RuntimeError, KeyError, ValueError, IndexError) as err:
             notes.append(f"Частину файлів ({', '.join(names)}) не переглянуто: {err}")
+            failed_files.extend(names)
+            report["chunks_failed"] += 1
             continue
         if not data:  # review_chunk повертає {}, якщо відповідь не вдалося розібрати навіть після виправлення формату
             notes.append(f"Частину файлів ({', '.join(names)}) не переглянуто: модель не повернула коректний JSON")
+            failed_files.extend(names)
+            report["chunks_failed"] += 1
             continue
         summaries.append(str(data.get("summary") or "").strip())
         items = data.get("findings") if isinstance(data.get("findings"), list) else []
@@ -997,6 +1039,7 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
     if budget_skipped:
         notes.append("Не всі файли встигли переглянутись: вичерпано часовий бюджет. Пропущено: "
                      + ", ".join(dict.fromkeys(budget_skipped)))
+    report["not_reviewed"] = sorted({*failed_files, *budget_skipped, *(x.rsplit(" (", 1)[0] for x in skipped)})
     if not summaries and not raw_findings:
         raise RuntimeError("модель не повернула жодної придатної відповіді")
 
@@ -1006,9 +1049,11 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
             anchored.append(f)
         else:
             stats["no_evidence"] += 1
+            rejected.append(finding_dict(f, "no_evidence"))
 
     unique = dedupe(anchored)
     stats["duplicates"] = len(anchored) - len(unique)
+    rejected.extend(finding_dict(f, "duplicate") for f in anchored if not any(f is u for u in unique))
 
     if cfg.verify:
         with ThreadPoolExecutor(max_workers=cfg.workers) as pool:
@@ -1022,8 +1067,11 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
             if f.severity == "critical":
                 f.unverified = True
                 confirmed.append(f)
+            else:
+                rejected.append(finding_dict(f, "unverified"))
         elif verdict == "refuted" or (verdict == "unsure" and f.severity == "minor"):
             stats["refuted"] += 1  # непевну дрібницю теж не показуємо
+            rejected.append(finding_dict(f, verdict))
         else:
             if verdict == "unsure":
                 f.severity = LOWER[f.severity]  # без підтвердження на рівень нижче: «важливо» йде в згорнуті дрібниці
@@ -1031,6 +1079,8 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools) -> s
     confirmed.sort(key=lambda x: SEVERITIES[x.severity][2])  # після зниження порядок за серйозністю міг змінитись
     final = confirmed[: cfg.max_findings]
     stats["over_limit"] = len(confirmed) - len(final)
+    rejected.extend(finding_dict(f, "over_limit") for f in confirmed[cfg.max_findings:])
+    report.update(findings=[finding_dict(f) for f in final], stats=stats, notes=notes)
     if skipped:
         notes.append("Не переглянуто: " + "; ".join(skipped))
     if service:
