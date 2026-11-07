@@ -25,7 +25,7 @@
     },
     {
       "id": "r97-2",
-      "real": null,
+      "real": true,
       "file": "mobile/e2e/specs/f9-profile.e2e.ts",
       "lines": [
         11,
@@ -34,7 +34,7 @@
       "severity": "minor",
       "summary": "Wait for the subgroup control to be enabled before clicking it.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     }
   ],
   "known_false": []

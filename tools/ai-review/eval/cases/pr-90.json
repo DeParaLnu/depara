@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r90-1",
-      "real": null,
+      "real": true,
       "file": "mobile/src/api.ts",
       "lines": [
         242,
@@ -21,7 +21,7 @@
       "severity": "minor",
       "summary": "Support settings-only PATCH requests in mock mode.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     },
     {
       "id": "r90-2",
@@ -38,7 +38,7 @@
     },
     {
       "id": "r90-3",
-      "real": null,
+      "real": false,
       "file": "mobile/src/features/reminders/settings.ts",
       "lines": [
         32,
@@ -47,7 +47,7 @@
       "severity": "minor",
       "summary": "Discard hydration results after a newer settings change.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     },
     {
       "id": "r90-4",
