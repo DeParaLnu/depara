@@ -111,6 +111,13 @@ class Spending(unittest.TestCase):
         self.assertEqual(summary["cost_usd"], 0)
 
 
+class Certificates(unittest.TestCase):
+    def test_tls_verification_stays_on(self):
+        source = (HERE / "eval" / "run_eval.py").read_text("utf-8") + (HERE / "review.py").read_text("utf-8")
+        self.assertNotIn("CERT_NONE", source)
+        self.assertNotIn("_create_unverified_context", source)
+
+
 class Rescoring(unittest.TestCase):
     def test_new_labels_change_result_without_requests(self):
         case = {"pr": 1, "issues": [{"id": "r1", "real": None, "file": "a.ts", "lines": [11, 11]}], "known_false": []}

@@ -1040,6 +1040,7 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
         notes.append("Не всі файли встигли переглянутись: вичерпано часовий бюджет. Пропущено: "
                      + ", ".join(dict.fromkeys(budget_skipped)))
     report["not_reviewed"] = sorted({*failed_files, *budget_skipped, *(x.rsplit(" (", 1)[0] for x in skipped)})
+    report["notes"] = notes  # і коли не відповів жоден шматок: без цього причину збою не видно
     if not summaries and not raw_findings:
         raise RuntimeError("модель не повернула жодної придатної відповіді")
 

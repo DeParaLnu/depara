@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import subprocess
 import sys
 import threading
@@ -45,6 +46,12 @@ def load_key(env: dict, env_file: Path | None) -> str:
             if line.startswith("TOGETHER_API_KEY="):
                 return line.split("=", 1)[1].strip().strip("\"'")
     return ""
+
+
+def use_system_certificates(env: dict) -> None:
+    """Python із Homebrew не бачить кореневих сертифікатів macOS. Перевірку TLS не вимикаємо: у запиті йде ключ."""
+    if not ssl.get_default_verify_paths().cafile and Path("/etc/ssl/cert.pem").is_file():
+        env.setdefault("SSL_CERT_FILE", "/etc/ssl/cert.pem")
 
 
 def git(*args: str, cwd: Path = HERE, **kw) -> subprocess.CompletedProcess:
@@ -220,6 +227,7 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
     if not key:
         print("TOGETHER_API_KEY не задано: додайте його в кореневий .env або в змінну середовища.", file=sys.stderr)
         return 2
+    use_system_certificates(os.environ)
     only = {int(x) for x in args.cases.split(",")} if args.cases else None
     cases = load_cases(only, args.smoke, args.set)
     if not cases:
@@ -237,6 +245,8 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
             scrub(json.dumps(scored, ensure_ascii=False, indent=1), key), "utf-8")
         print(line(f"прогін {i}", summary))
         for s in scored:
+            if s["error"]:
+                print(f"  збій #{s['pr']}: {scrub(s['error'], key)[:120]}; {scrub('; '.join(s['report'].get('notes') or []), key)[:200]}")
             for item in s["unlabeled_items"]:
                 print(f"  нерозмічено #{s['pr']} {item['file']}:{item['line']} {item['title'][:70]}")
         if stopped:
