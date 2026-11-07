@@ -64,7 +64,7 @@
     },
     {
       "id": "r90-5",
-      "real": null,
+      "real": true,
       "file": "specs/f9-profile.md",
       "lines": [
         3,
@@ -73,7 +73,7 @@
       "severity": "minor",
       "summary": "Correct the profile feature status.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     }
   ],
   "known_false": []

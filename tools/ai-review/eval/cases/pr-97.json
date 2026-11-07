@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r97-1",
-      "real": null,
+      "real": true,
       "file": "docs/mobile-e2e-runner.md",
       "lines": [
         11,
@@ -21,7 +21,7 @@
       "severity": "minor",
       "summary": "Document that the E2E admin comes from `E2E_ADMIN_EMAIL`, and that it must be listed in backend `ADMIN_EMAILS`.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     },
     {
       "id": "r97-2",

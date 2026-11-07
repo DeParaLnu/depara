@@ -25,7 +25,7 @@
     },
     {
       "id": "r93-2",
-      "real": null,
+      "real": false,
       "file": "specs/f2-onboarding.md",
       "lines": [
         17,
@@ -34,7 +34,7 @@
       "severity": "minor",
       "summary": "Qualify the group-present criteria by onboarding completion.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     }
   ],
   "known_false": []

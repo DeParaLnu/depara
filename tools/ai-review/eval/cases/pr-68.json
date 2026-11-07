@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r68-1",
-      "real": null,
+      "real": true,
       "file": "README.md",
       "lines": [
         58,
@@ -21,7 +21,7 @@
       "severity": "minor",
       "summary": "Commit the EAS projectId so every builder uses one project.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, перевірено вручну"
     }
   ],
   "known_false": []
