@@ -12,7 +12,7 @@
   "issues": [
     {
       "id": "r83-1",
-      "real": null,
+      "real": true,
       "file": "backend/src/routes/profile.ts",
       "lines": [
         57,
@@ -21,11 +21,11 @@
       "severity": "minor",
       "summary": "Compare UUIDs case-insensitively.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, підтверджено вручну"
     },
     {
       "id": "r83-2",
-      "real": null,
+      "real": true,
       "file": "backend/test/e2e/f9-profile.test.ts",
       "lines": [
         90,
@@ -34,7 +34,7 @@
       "severity": "important",
       "summary": "Create `ТЕСТ-32` in the E2E seed.",
       "keywords": [],
-      "source": "CodeRabbit, відповіді автора немає: розмітити"
+      "source": "CodeRabbit, підтверджено вручну"
     }
   ],
   "known_false": []
