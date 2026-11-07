@@ -148,6 +148,30 @@ describe('F7: імпорт розкладу', () => {
     expect(lesson).toBeTruthy();
   });
 
+  it('імпорт нормалізує аудиторії: різні записи дають одну, невідомий корпус лишається попередженням', async () => {
+    const admin = await adminToken();
+    const student = await setupStudent('f7.rooms@lnu.edu.ua');
+    const slot = uniqueSlot(4);
+    const base = { group: 'ТЕСТ-31', date: slot.date, pair: slot.pair };
+    const res = await send('POST', '/admin/schedule/import', admin, {
+      lessons: [
+        { ...base, subgroup: 1, subject: 'Нормалізація 1', room: ' № 77 / t ' },
+        { ...base, subgroup: 2, subject: 'Нормалізація 2', room: 'н77/Т' },
+        { ...base, subgroup: 0, subject: 'Невідомий корпус', room: '1/Я' },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { imported: number; warnings: string[] };
+    expect(body.imported).toBe(3);
+    expect(body.warnings.join()).toContain('Корпусу "Я" немає в довіднику');
+
+    const found = (await weekLessons(student, slot.date)).filter((l) => l.date === slot.date && l.pairNumber === slot.pair);
+    const rooms = found.filter((l) => l.room).map((l) => l.room!);
+    expect(rooms.map((r) => r.label)).toEqual(['N77/Т', 'N77/Т']);
+    expect(rooms[0].id).toBe(rooms[1].id);
+    expect(found.find((l) => l.subject === 'Невідомий корпус')?.room).toBeNull();
+  });
+
   it('імпорт лише довідників без пар: виправляє адресу корпусу, яку бачать студенти', async () => {
     const admin = await adminToken();
     const student = await setupStudent('f7.reference@lnu.edu.ua');

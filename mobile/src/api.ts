@@ -31,7 +31,8 @@ export type SubstitutionKind = 'CANCELLED' | 'REPLACED' | 'MOVED' | 'ROOM_CHANGE
 // Корпус аудиторії: літера, назва й адреса (для екрана деталей і маршруту)
 export type Building = { code: string; name: string; address: string };
 
-export type Classroom = {
+// Аудиторія: той самий вигляд у пошуку, розкладі й замінах
+export type Room = {
   id: string;
   number: string;
   label: string; // «номер/код корпусу»
@@ -43,8 +44,7 @@ export type Substitution = {
   kind: SubstitutionKind;
   comment: string | null;
   newTeacher: string | null;
-  newRoom: string | null; // «номер/код корпусу»
-  newBuilding: Building | null;
+  newRoom: Room | null;
   newDate: string | null;
   newPairNumber: number | null;
 };
@@ -72,8 +72,7 @@ export type Lesson = {
   audience: 'STREAM' | 'COMBINED' | 'GROUP';
   subgroup: number; // 0 = уся група
   teacher: string | null;
-  room: string | null; // «номер/код корпусу»
-  building: Building | null;
+  room: Room | null;
   substitution: Substitution | null;
 };
 
@@ -258,7 +257,7 @@ export const api = {
     if (q) params.set('q', q);
     if (building) params.set('building', building);
     const qs = params.toString();
-    return request<Classroom[]>(`/classrooms${qs ? `?${qs}` : ''}`, {}, token);
+    return request<Room[]>(`/classrooms${qs ? `?${qs}` : ''}`, {}, token);
   },
   teachers: (token: string, q?: string) =>
     request<Teacher[]>(`/teachers${q ? `?q=${encodeURIComponent(q)}` : ''}`, {}, token),

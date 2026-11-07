@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { Classroom, Lesson, Teacher } from '../../api';
+import type { Lesson, Room, Teacher } from '../../api';
 import { buildSubstitution, canManageSubstitutions, emptyForm, MAX_COMMENT, selectableLessons } from './form';
 
+const classroom: Room = {
+  id: 'c1',
+  number: 'N10',
+  label: 'N10/Б',
+  building: { code: 'Б', name: 'Корпус на Драгоманова', address: 'вул. Драгоманова, 50' },
+};
 const lesson = (over: Partial<Lesson> = {}): Lesson => ({
   id: 'l1',
   date: '2026-11-04',
@@ -13,13 +19,11 @@ const lesson = (over: Partial<Lesson> = {}): Lesson => ({
   audience: 'GROUP',
   subgroup: 0,
   teacher: 'доц. Горон Б. І.',
-  room: '218/Т',
-  building: null,
+  room: classroom,
   substitution: null,
   ...over,
 });
 const teacher: Teacher = { id: 't1', fullName: 'Корчак Ю. М.', position: null };
-const classroom = { id: 'c1', number: 'N10', label: 'N10/Б' } as Classroom;
 const form = (over: Partial<ReturnType<typeof emptyForm>>) => ({ ...emptyForm(lesson()), ...over });
 
 describe('buildSubstitution', () => {

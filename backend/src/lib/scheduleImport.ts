@@ -1,4 +1,5 @@
 import { Audience, LessonType, type PrismaClient } from '@prisma/client';
+import { normalizeBuildingCode, normalizeRoom } from './rooms';
 import { isIsoDate, isNonEmptyString } from './validation';
 
 // Формат збігається з prisma/seed/schedule.seed.json. Усі довідники необов'язкові.
@@ -148,12 +149,6 @@ export function validateImport(raw: unknown): { ok: true; data: ImportPayload } 
   return { ok: true, data: { pair_times, faculties, groups, buildings, teachers, lessons } };
 }
 
-// "218/Т" -> { number: "218", code: "Т" }. Ділимо по ОСТАННЬОМУ слешу.
-function splitRoom(room: string): { number: string; code: string } {
-  const i = room.lastIndexOf('/');
-  return { number: room.slice(0, i).trim(), code: room.slice(i + 1).trim() };
-}
-
 const toTime = (s: string) => new Date(`1970-01-01T${s}:00Z`);
 const toDate = (s: string) => new Date(`${s}T00:00:00Z`);
 
@@ -194,12 +189,13 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
 
       const buildingId = new Map<string, string>();
       for (const b of data.buildings) {
+        const code = normalizeBuildingCode(b.code);
         const row = await tx.building.upsert({
-          where: { code: b.code },
+          where: { code },
           update: { name: b.name, address: b.address },
-          create: { code: b.code, name: b.name, address: b.address },
+          create: { code, name: b.name, address: b.address },
         });
-        buildingId.set(b.code, row.id);
+        buildingId.set(code, row.id);
       }
 
       for (const t of data.teachers) {
@@ -272,7 +268,7 @@ export async function importSchedule(prisma: PrismaClient, data: ImportPayload):
           if (roomCache.has(l.room)) {
             classroomId = roomCache.get(l.room) ?? null;
           } else {
-            const room = splitRoom(l.room);
+            const room = normalizeRoom(l.room);
             let bid = buildingId.get(room.code);
             if (!bid) bid = (await tx.building.findUnique({ where: { code: room.code } }))?.id;
             if (!bid) {

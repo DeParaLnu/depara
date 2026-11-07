@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
+import { normalizeRoom, toRoom } from '../lib/rooms';
 import { requireAuth } from '../plugins/auth';
 
 // F5: пошук аудиторій і довідник корпусів, за номером (q) і/або корпусом (building = літера корпусу)
@@ -16,21 +17,18 @@ export async function classroomRoutes(app: FastifyInstance) {
     if ((q !== undefined && typeof q !== 'string') || (building !== undefined && typeof building !== 'string')) {
       return reply.code(400).send({ error: 'INVALID_QUERY' });
     }
-    const code = building?.trim();
+    // Запит у форматі «218/Т» шукає за номером і корпусом, тому корпус із q діє разом із фільтром building
+    const { number, code } = normalizeRoom(q ?? '');
+    const codes = [code, building?.trim()].filter(Boolean);
     const rooms = await prisma.classroom.findMany({
       where: {
-        ...(q ? { number: { contains: q, mode: 'insensitive' } } : {}),
-        ...(code ? { building: { code: { equals: code, mode: 'insensitive' } } } : {}),
+        ...(number ? { number: { contains: number, mode: 'insensitive' } } : {}),
+        AND: codes.map((c) => ({ building: { code: { equals: c, mode: 'insensitive' } } })),
       },
       include: { building: true },
       take: 20,
       orderBy: [{ number: 'asc' }, { building: { code: 'asc' } }],
     });
-    return rooms.map((r) => ({
-      id: r.id,
-      number: r.number,
-      label: `${r.number}/${r.building.code}`,
-      building: { code: r.building.code, name: r.building.name, address: r.building.address },
-    }));
+    return rooms.map(toRoom);
   });
 }
