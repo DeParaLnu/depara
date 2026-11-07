@@ -5,6 +5,9 @@
   python3 tools/ai-review/eval/run_eval.py --label reasoning-off --smoke
   python3 tools/ai-review/eval/run_eval.py --compare base reasoning-off
   python3 tools/ai-review/eval/run_eval.py --rescore base    # нові мітки без нового платного прогону
+  python3 tools/ai-review/eval/run_eval.py --label base --runs 2 --append   # дописати прогони до наявних
+
+Довгі прогони варто запускати під caffeinate -i: Mac, що засинає, лишає запит до моделі висіти.
 
 Ключ береться зі змінної TOGETHER_API_KEY або з кореневого .env основного клона і нікуди не друкується.
 Налаштування ревʼюера задаються тими самими змінними AI_REVIEW_*. Подробиці: docs/ai-review.md.
@@ -18,6 +21,7 @@ import os
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,6 +39,7 @@ CACHE = HERE / ".cache"
 PRICE_IN, PRICE_OUT = 0.17, 0.25  # $ за 1 млн токенів, Qwen/Qwen3.5-9B у каталозі Together
 BUDGET_USD = 19.0  # ліміт ключа 20 $: лишаємо запас на прогін, що вже йде
 RESERVE_USD = 0.25  # стільки має лишатись до межі, щоб почати ще один кейс
+CASE_TIMEOUT = review.Config.budget_seconds + 180  # бюджет ревʼю плюс запас; довше означає, що процес завис
 CI_TEXT = "backend-e2e: виконується; backend-lint-typecheck: виконується; mobile-typecheck-test: виконується"
 
 
@@ -128,6 +133,24 @@ def run_case(case: dict, key: str, rules: Path) -> dict:
     return report
 
 
+def run_case_isolated(case: dict, key: str, timeout: float = CASE_TIMEOUT) -> dict:
+    """Кейс в окремому процесі з жорстким лімітом: завислий запит (сон Mac, обірване зʼєднання) не зупиняє весь eval.
+    Ключ передається через змінну середовища, не в аргументах: так його не видно в списку процесів."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "report.json"
+        env = {**os.environ, "TOGETHER_API_KEY": key}
+        try:
+            subprocess.run([sys.executable, str(Path(__file__).resolve()), "--one-case", str(case["pr"]), "--out", str(out)],
+                           env=env, timeout=timeout, capture_output=True, check=False)
+        except subprocess.TimeoutExpired:
+            return {"error": f"завис: ревʼю не завершилось за {timeout:.0f} с", "seconds": timeout, "timed_out": True,
+                    "usage": {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "truncated": 0}}
+        if not out.is_file():
+            return {"error": "процес ревʼю впав без звіту", "seconds": 0.0,
+                    "usage": {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "truncated": 0}}
+        return json.loads(out.read_text("utf-8"))
+
+
 def run_once(cases: list[dict], key: str, rules: Path, spend: Spend, jobs: int) -> tuple[dict, list[dict], bool]:
     stopped = threading.Event()
 
@@ -135,8 +158,9 @@ def run_once(cases: list[dict], key: str, rules: Path, spend: Spend, jobs: int) 
         if not spend.can_start():
             stopped.set()
             return None
-        report = run_case(case, key, rules)
-        spend.add(cost(report["usage"]))
+        report = run_case_isolated(case, key)
+        # у вбитого процесу витрат не видно: рахуємо запас, щоб межа 20 $ не пливла
+        spend.add(RESERVE_USD if report.get("timed_out") else cost(report["usage"]))
         return case, report
 
     with ThreadPoolExecutor(max_workers=jobs) as pool:
@@ -214,6 +238,9 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
     parser.add_argument("--budget-usd", type=float, default=BUDGET_USD)
     parser.add_argument("--compare", nargs=2, metavar=("БАЗА", "НОВЕ"))
     parser.add_argument("--rescore", metavar="НАЗВА", help="перерахувати збережений прогін за поточними мітками")
+    parser.add_argument("--append", action="store_true", help="дописати прогони до вже збережених під цією назвою")
+    parser.add_argument("--one-case", type=int, help=argparse.SUPPRESS)  # внутрішнє: один кейс в окремому процесі
+    parser.add_argument("--out", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.compare:
         return show_compare(*args.compare)
@@ -223,6 +250,13 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
         parser.error("потрібен --label або --compare")
 
     env = os.environ if env is None else env
+    if args.one_case:
+        use_system_certificates(os.environ)
+        key = env.get("TOGETHER_API_KEY", "")
+        case = next(c for c in load_cases({args.one_case}, False, None))
+        report = run_case(case, key, HERE.parent / "rules.md")
+        Path(args.out).write_text(scrub(json.dumps(report, ensure_ascii=False), key), "utf-8")
+        return 0
     key = load_key(env, main_env_file())
     if not key:
         print("TOGETHER_API_KEY не задано: додайте його в кореневий .env або в змінну середовища.", file=sys.stderr)
@@ -238,7 +272,8 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
     runs, raw_dir = [], RESULTS / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     stopped = False
-    for i in range(1, args.runs + 1):
+    first = 1 + (len(list(raw_dir.glob(f"{args.label}-*.json"))) if args.append else 0)
+    for i in range(first, first + args.runs):
         summary, scored, stopped = run_once(cases, key, rules, spend, args.jobs)
         runs.append(summary)
         (raw_dir / f"{args.label}-{i}.json").write_text(
@@ -256,6 +291,8 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
     result = {"label": args.label, "smoke": args.smoke, "set": args.set, "cases": [c["pr"] for c in cases],
               "runs": runs, "summary": score.summarize_runs(runs), "partial": stopped}
     (RESULTS / f"{args.label}.json").write_text(scrub(json.dumps(result, ensure_ascii=False, indent=1), key), "utf-8")
+    if args.append:
+        rescore(args.label)  # підсумок за всіма прогонами під цією назвою, а не лише за дописаними
     print(f"Усього витрачено: {spend.total:.2f} $ із {args.budget_usd:.2f} $.")
     return 0
 

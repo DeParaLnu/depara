@@ -142,6 +142,35 @@ class Rescoring(unittest.TestCase):
         self.assertEqual(saved["runs"][0]["found"], 1)
 
 
+class Isolation(unittest.TestCase):
+    def test_hung_case_becomes_error_not_hang(self):
+        import subprocess
+        with mock.patch.object(run_eval.subprocess, "run", side_effect=subprocess.TimeoutExpired("x", 1)):
+            report = run_eval.run_case_isolated({"pr": 1}, FAKE_KEY, timeout=1)
+        self.assertTrue(report["timed_out"])
+        self.assertIn("завис", report["error"])
+
+    def test_key_goes_through_env_not_argv(self):
+        seen = {}
+        def fake_run(cmd, env, **kw):
+            seen.update(cmd=cmd, env=env)
+            return mock.Mock()
+        with mock.patch.object(run_eval.subprocess, "run", fake_run):
+            run_eval.run_case_isolated({"pr": 1}, FAKE_KEY, timeout=1)
+        self.assertNotIn(FAKE_KEY, " ".join(seen["cmd"]))
+        self.assertEqual(seen["env"]["TOGETHER_API_KEY"], FAKE_KEY)
+
+    def test_hung_case_still_counts_against_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spend = run_eval.Spend(Path(tmp) / "s.json", 10)
+            hung = {"error": "завис", "seconds": 1, "timed_out": True, "files_total": 1,
+                    "usage": {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "truncated": 0}}
+            case = {"pr": 1, "issues": [], "known_false": []}
+            with mock.patch.object(run_eval, "run_case_isolated", return_value=hung):
+                run_eval.run_once([case], FAKE_KEY, Path("r"), spend, 1)
+            self.assertAlmostEqual(spend.total, run_eval.RESERVE_USD)
+
+
 class Key(unittest.TestCase):
     def test_env_first_then_file(self):
         with tempfile.TemporaryDirectory() as tmp:
