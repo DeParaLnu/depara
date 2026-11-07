@@ -97,8 +97,10 @@
         61
       ],
       "severity": "important",
-      "summary": "Sensitive Data Exposure",
-      "keywords": [],
+      "summary": "Вихід під час відновлення кешу з диска повертає дані попереднього користувача",
+      "keywords": [
+        "відновлен"
+      ],
       "source": "CodeRabbit, автор виправив"
     },
     {

@@ -4,6 +4,7 @@
   python3 tools/ai-review/eval/run_eval.py --label base --runs 3
   python3 tools/ai-review/eval/run_eval.py --label reasoning-off --smoke
   python3 tools/ai-review/eval/run_eval.py --compare base reasoning-off
+  python3 tools/ai-review/eval/run_eval.py --rescore base    # нові мітки без нового платного прогону
 
 Ключ береться зі змінної TOGETHER_API_KEY або з кореневого .env основного клона і нікуди не друкується.
 Налаштування ревʼюера задаються тими самими змінними AI_REVIEW_*. Подробиці: docs/ai-review.md.
@@ -133,18 +134,44 @@ def run_once(cases: list[dict], key: str, rules: Path, spend: Spend, jobs: int) 
 
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         done = [r for r in pool.map(one, cases) if r]
+    summary, scored = score_reports(done)
+    return summary, scored, stopped.is_set()
+
+
+def score_reports(done: list[tuple[dict, dict]]) -> tuple[dict, list[dict]]:
+    """Метрики зі звітів. Звіт зберігається цілком: мітки можна змінити й перерахувати без нових запитів."""
     scored = []
     for case, report in done:
         s = score.score_case(case, report)
-        s.update(seconds=report["seconds"], usage=report["usage"], error=report.get("error", ""),
-                 rejected=report.get("rejected", []), notes=report.get("notes", []))
+        s.update(seconds=report["seconds"], usage=report["usage"], error=report.get("error", ""), report=report)
         scored.append(s)
     summary = score.aggregate(scored)
     summary["seconds_max"] = max((s["seconds"] for s in scored), default=0.0)
     summary["seconds_total"] = round(sum(s["seconds"] for s in scored), 1)
     summary["cost_usd"] = round(sum(cost(s["usage"]) for s in scored), 4)
     summary["truncated"] = sum(s["usage"]["truncated"] for s in scored)
-    return summary, scored, stopped.is_set()
+    return summary, scored
+
+
+def rescore(label: str) -> int:
+    """Перераховує прогін за поточними мітками: жодного запиту до моделі."""
+    paths = sorted((RESULTS / "raw").glob(f"{label}-*.json"), key=lambda p: int(p.stem.rsplit("-", 1)[1]))
+    if not paths:
+        print(f"Немає збережених звітів прогону {label}.", file=sys.stderr)
+        return 2
+    cases = {c["pr"]: c for c in load_cases(None, False, None)}
+    runs = []
+    for i, path in enumerate(paths, 1):
+        done = [(cases[s["pr"]], s["report"]) for s in json.loads(path.read_text("utf-8")) if s["pr"] in cases]
+        summary, scored = score_reports(done)
+        runs.append(summary)
+        path.write_text(json.dumps(scored, ensure_ascii=False, indent=1), "utf-8")
+        print(line(f"прогін {i}", summary))
+    target = RESULTS / f"{label}.json"
+    result = json.loads(target.read_text("utf-8")) if target.is_file() else {"label": label}
+    result.update(runs=runs, summary=score.summarize_runs(runs))
+    target.write_text(json.dumps(result, ensure_ascii=False, indent=1), "utf-8")
+    return 0
 
 
 def scrub(text: str, key: str) -> str:
@@ -179,9 +206,12 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
     parser.add_argument("--jobs", type=int, default=2, help="скільки PR одночасно")
     parser.add_argument("--budget-usd", type=float, default=BUDGET_USD)
     parser.add_argument("--compare", nargs=2, metavar=("БАЗА", "НОВЕ"))
+    parser.add_argument("--rescore", metavar="НАЗВА", help="перерахувати збережений прогін за поточними мітками")
     args = parser.parse_args(argv)
     if args.compare:
         return show_compare(*args.compare)
+    if args.rescore:
+        return rescore(args.rescore)
     if not args.label:
         parser.error("потрібен --label або --compare")
 

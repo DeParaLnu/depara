@@ -111,6 +111,25 @@ class Spending(unittest.TestCase):
         self.assertEqual(summary["cost_usd"], 0)
 
 
+class Rescoring(unittest.TestCase):
+    def test_new_labels_change_result_without_requests(self):
+        case = {"pr": 1, "issues": [{"id": "r1", "real": None, "file": "a.ts", "lines": [11, 11]}], "known_false": []}
+        report = {"findings": [finding()], "files_total": 1, "not_reviewed": [], "seconds": 1.0,
+                  "usage": {"prompt_tokens": 1, "completion_tokens": 1, "requests": 1, "truncated": 0}}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(run_eval, "RESULTS", Path(tmp)), \
+                mock.patch.object(run_eval, "load_cases", lambda *a: [case]), mock.patch.object(run_eval, "run_case") as run, \
+                redirect_stdout(io.StringIO()):
+            raw = Path(tmp) / "raw"
+            raw.mkdir()
+            _, scored = run_eval.score_reports([(case, report)])
+            (raw / "base-1.json").write_text(json.dumps(scored))
+            case["issues"][0]["real"] = True
+            self.assertEqual(run_eval.rescore("base"), 0)
+            saved = json.loads((Path(tmp) / "base.json").read_text())
+        run.assert_not_called()
+        self.assertEqual(saved["runs"][0]["found"], 1)
+
+
 class Key(unittest.TestCase):
     def test_env_first_then_file(self):
         with tempfile.TemporaryDirectory() as tmp:
