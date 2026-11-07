@@ -19,7 +19,7 @@
         58
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Commit the EAS projectId so every builder uses one project.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     }

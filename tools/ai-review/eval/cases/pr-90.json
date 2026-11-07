@@ -19,7 +19,7 @@
         242
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Support settings-only PATCH requests in mock mode.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     },
@@ -32,7 +32,7 @@
         47
       ],
       "severity": "important",
-      "summary": "Major",
+      "summary": "Send rapid choices to the server in order.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     },
@@ -45,7 +45,7 @@
         32
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Discard hydration results after a newer settings change.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     },
@@ -58,7 +58,7 @@
         60
       ],
       "severity": "important",
-      "summary": "Major",
+      "summary": "Recheck permission when the app becomes active.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     },
@@ -71,7 +71,7 @@
         3
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Correct the profile feature status.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     }

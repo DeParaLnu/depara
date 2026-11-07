@@ -19,7 +19,7 @@
         11
       ],
       "severity": "important",
-      "summary": "Major",
+      "summary": "Preserve corrected lesson data before deleting duplicate slots.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     },
@@ -32,7 +32,7 @@
         48
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Map ioredis command timeouts to temporary unavailability.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     },
@@ -45,7 +45,7 @@
         24
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Truncate `REFRESH_REUSE_GRACE_SECONDS` to an integer.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     },
@@ -58,7 +58,7 @@
         92
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Reject an explicit null `lessons` field.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     },
@@ -71,7 +71,7 @@
         139
       ],
       "severity": "important",
-      "summary": "Major",
+      "summary": "Detect duplicate slots by resolved group identity.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     },
@@ -84,7 +84,7 @@
         77
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Old session is lost if rotation fails after `GETDEL`.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     },
@@ -97,7 +97,7 @@
         61
       ],
       "severity": "important",
-      "summary": "Major",
+      "summary": "Sensitive Data Exposure",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     },
@@ -110,7 +110,7 @@
         110
       ],
       "severity": "important",
-      "summary": "Major",
+      "summary": "Apply the 14-day limit to each persisted query.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     }

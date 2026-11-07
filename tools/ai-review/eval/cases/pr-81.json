@@ -19,7 +19,7 @@
         592
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Return the salvaged result only when it contains at least one finding.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     }

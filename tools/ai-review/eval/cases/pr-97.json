@@ -19,7 +19,7 @@
         11
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Document that the E2E admin comes from `E2E_ADMIN_EMAIL`, and that it must be listed in backend `ADMIN_EMAILS`.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     },
@@ -32,7 +32,7 @@
         11
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Wait for the subgroup control to be enabled before clicking it.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     }

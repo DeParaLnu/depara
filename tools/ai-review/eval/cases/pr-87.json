@@ -19,7 +19,7 @@
         17
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Write the saved group and subgroup into `['me']` on success.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     }

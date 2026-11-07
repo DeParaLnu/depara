@@ -19,7 +19,7 @@
         57
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Compare UUIDs case-insensitively.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     },
@@ -32,7 +32,7 @@
         90
       ],
       "severity": "important",
-      "summary": "Major",
+      "summary": "Create `ТЕСТ-32` in the E2E seed.",
       "keywords": [],
       "source": "CodeRabbit, відповіді автора немає: розмітити"
     }

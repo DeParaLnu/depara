@@ -19,7 +19,7 @@
         26
       ],
       "severity": "minor",
-      "summary": "Minor",
+      "summary": "Normalize `groupId` before comparing it with the stored group.",
       "keywords": [],
       "source": "CodeRabbit, автор виправив"
     }
