@@ -5,12 +5,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../api';
 import { config } from '../../config';
 import { reportError } from '../../lib/errors';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 import { useSession } from './session';
 import { getOrCreateDeviceId } from './storage';
 
 // F1: вхід через Microsoft (корпоративна пошта ЛНУ)
 export function LoginScreen() {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const setSession = useSession((s) => s.setSession);
   const [loading, setLoading] = useState(false);
@@ -101,7 +104,8 @@ export function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingHorizontal: 20, justifyContent: 'space-between' },
   content: { gap: 16 },
   title: { fontSize: 28, lineHeight: 34, fontWeight: '800', color: colors.text },
@@ -143,10 +147,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.surfaceInfo,
   },
   infoText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.textMuted },
   privacy: { fontSize: 14, color: colors.textMuted, textAlign: 'center' },
   e2eButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   e2eButtonText: { color: colors.textMuted, fontSize: 15, textDecorationLine: 'underline' },
-});
+}),
+);

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Lesson } from '../../../api';
-import { colors } from '../../../theme';
+import { makeStyles, useColors } from '../../theme/useTheme';
 import { audienceLabel, lessonTypeLabel, roomLabel, substitutionBadge, type LessonStatus } from '../lesson';
 
 type Props = { lesson: Lesson; status: LessonStatus; onPress?: () => void };
@@ -22,6 +22,8 @@ function a11yLabel(lesson: Lesson, status: LessonStatus) {
 }
 
 export function LessonCard({ lesson, status, onPress }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const sub = lesson.substitution;
   const cancelled = sub?.kind === 'CANCELLED';
   const isNow = status.kind === 'now' && !cancelled;
@@ -120,7 +122,8 @@ export function LessonCard({ lesson, status, onPress }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: 14,
@@ -145,7 +148,7 @@ const styles = StyleSheet.create({
   tag: { height: 22, justifyContent: 'center', backgroundColor: colors.tagBlue, borderRadius: 12, paddingHorizontal: 9 },
   tagText: { fontSize: 12, lineHeight: 16, fontWeight: '700', color: colors.tagBlueText },
   tagLecture: { backgroundColor: colors.primary },
-  tagLectureText: { color: '#FFFFFF' },
+  tagLectureText: { color: colors.onPrimary },
   tagNeutral: { backgroundColor: colors.chip },
   tagNeutralText: { color: colors.textSecondary },
   room: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -156,7 +159,7 @@ const styles = StyleSheet.create({
   badge: { height: 22, justifyContent: 'center', borderRadius: 12, paddingHorizontal: 9 },
   badgeText: { fontSize: 12, lineHeight: 16, fontWeight: '700' },
   badgeNow: { backgroundColor: colors.accent },
-  badgeNowText: { color: '#FFFFFF' },
+  badgeNowText: { color: colors.onPrimary },
   badgeNext: { backgroundColor: colors.chip },
   badgeNextText: { color: colors.textSecondary },
   badgeWarning: { backgroundColor: colors.warningBadge },
@@ -167,4 +170,5 @@ const styles = StyleSheet.create({
   progressTrack: { height: 5, borderRadius: 3, backgroundColor: colors.surfaceTint, overflow: 'hidden' },
   progressFill: { height: 5, backgroundColor: colors.accent },
   progressText: { fontSize: 13, lineHeight: 18, color: colors.textMuted },
-});
+}),
+);

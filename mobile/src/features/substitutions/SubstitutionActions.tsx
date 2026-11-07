@@ -3,13 +3,16 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
 import type { Lesson } from '../../api';
 import { reportError } from '../../lib/errors';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 import { useCanManageSubstitutions, useDeleteSubstitution } from './hooks';
 
 type Props = { lesson: Lesson; onClose: () => void };
 
 // Кнопки старости в деталях пари: «Додати заміну» або «Скасувати заміну». Студент їх не бачить
 export function SubstitutionActions({ lesson, onClose }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const canManage = useCanManageSubstitutions();
   const remove = useDeleteSubstitution();
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +75,8 @@ export function SubstitutionActions({ lesson, onClose }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   button: {
     height: 56,
     borderRadius: 14,
@@ -86,4 +90,5 @@ const styles = StyleSheet.create({
   addText: { fontSize: 17, fontWeight: '700', color: colors.primary },
   cancelText: { fontSize: 17, fontWeight: '700', color: colors.danger },
   error: { color: colors.error, fontSize: 15, lineHeight: 20, marginTop: 12, textAlign: 'center' },
-});
+}),
+);

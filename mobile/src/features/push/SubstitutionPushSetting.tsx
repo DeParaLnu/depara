@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { AppState, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { api, type Me } from '../../api';
-import { colors } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
 import { useSession } from '../auth/session';
 import { hasPermission, notificationsSupported, requestPermission } from '../reminders/notifications';
 import { useMe } from '../schedule/hooks';
@@ -11,6 +11,8 @@ import { syncPushToken } from './registration';
 // F8/F9: перемикач «Зміни та скасування». Налаштування живе на сервері: саме він вирішує, кому слати пуш.
 // Вимкнений перемикач токен пристрою не прибирає, сервер просто не шле цьому користувачу.
 export function SubstitutionPushSetting() {
+  const styles = useStyles();
+  const colors = useColors();
   const token = useSession((s) => s.session?.accessToken);
   const queryClient = useQueryClient();
   const me = useMe();
@@ -93,11 +95,13 @@ export function SubstitutionPushSetting() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   block: { gap: 4 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
   label: { fontSize: 17, color: colors.text, flexShrink: 1 },
   hintRow: { gap: 4 },
   hint: { fontSize: 14, lineHeight: 19, color: colors.textMuted },
   link: { fontSize: 14, fontWeight: '700', color: colors.primary, textDecorationLine: 'underline' },
-});
+}),
+);

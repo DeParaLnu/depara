@@ -5,7 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
 import { StateView } from '../../components/StateView';
 import { clock, headerTitle, mondayOf, toIsoDate, weekDays } from '../../lib/date';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 import { DayStrip } from './components/DayStrip';
 import { LessonCard } from './components/LessonCard';
 import { LessonDetailsSheet } from './components/LessonDetailsSheet';
@@ -41,6 +42,8 @@ export function TodayView({
   onRefresh,
   onAddSubstitution,
 }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
   const insets = useSafeAreaInsets();
   const days = useMemo(() => weekDays(mondayOf(now)), [now]);
@@ -147,7 +150,7 @@ export function TodayView({
           onPress={onAddSubstitution}
           style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
         >
-          <Ionicons name="add" size={24} color="#FFFFFF" />
+          <Ionicons name="add" size={24} color={colors.onPrimary} />
           <Text style={styles.fabText}>Додати заміну</Text>
         </Pressable>
       ) : null}
@@ -156,7 +159,8 @@ export function TodayView({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   unpublished: { flexGrow: 1, justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 21, gap: 12 },
@@ -165,7 +169,7 @@ const styles = StyleSheet.create({
   subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   subtitle: { fontSize: 14, lineHeight: 19, color: colors.textMuted },
   roleBadge: { height: 22, justifyContent: 'center', backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 9 },
-  roleBadgeText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  roleBadgeText: { color: colors.onPrimary, fontSize: 12, lineHeight: 16, fontWeight: '700' },
   refresh: {
     width: 42,
     height: 41,
@@ -211,5 +215,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   fabPressed: { backgroundColor: colors.primaryDark },
-  fabText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-});
+  fabText: { color: colors.onPrimary, fontSize: 17, fontWeight: '700' },
+}),
+);

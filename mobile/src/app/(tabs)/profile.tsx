@@ -10,9 +10,11 @@ import { canChangeOwnGroup, subgroupLabel } from '../../features/profile/group';
 import { useSetGroup } from '../../features/profile/hooks';
 import { SubgroupSheet } from '../../features/profile/SubgroupSheet';
 import { ReminderSetting } from '../../features/reminders/ReminderSetting';
+import { ThemeSetting } from '../../features/theme/ThemeSetting';
 import { useGroups, useMe } from '../../features/schedule/hooks';
 import { reportError } from '../../lib/errors';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../../features/theme/useTheme';
+import { errorText } from '../../theme';
 
 const initials = (name: string) =>
   name
@@ -22,8 +24,10 @@ const initials = (name: string) =>
     .map((p) => p[0].toUpperCase())
     .join('');
 
-// F9: дані користувача, зміна групи й підгрупи, нагадування перед парою, вихід і видалення акаунта. Тема зʼявиться пізніше
+// F9: дані користувача, зміна групи й підгрупи, сповіщення, тема, вихід і видалення акаунта
 export default function ProfileRoute() {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const signOut = useSession((s) => s.signOut);
   const token = useSession((s) => s.session?.accessToken);
@@ -129,6 +133,7 @@ export default function ProfileRoute() {
       </View>
 
       <ReminderSetting />
+      <ThemeSetting />
 
       <SubgroupSheet
         visible={subgroupOpen}
@@ -178,7 +183,8 @@ export default function ProfileRoute() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { flexGrow: 1, paddingHorizontal: 20 },
   hero: { alignItems: 'center', gap: 6, marginBottom: 24 },
@@ -217,11 +223,12 @@ const styles = StyleSheet.create({
     minHeight: 58,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#F5B5B0',
-    backgroundColor: '#FFF7F6',
+    borderColor: colors.dangerBorder,
+    backgroundColor: colors.dangerSurface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   signOutPressed: { backgroundColor: colors.dangerBg },
   signOutText: { color: colors.danger, fontWeight: '700', fontSize: 18 },
-});
+}),
+);

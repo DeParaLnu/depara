@@ -4,7 +4,7 @@ import { Platform, useWindowDimensions, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePush } from '../../features/push/usePush';
 import { useReminderSync } from '../../features/reminders/useReminderSync';
-import { colors } from '../../theme';
+import { useColors } from '../../features/theme/useTheme';
 
 // Розміри з макета: іконка 22 px, підпис 11 px, вкладка ~65 px без безпечної зони
 const ICON_SIZE = 22;
@@ -24,6 +24,7 @@ const iconColor = (color: ColorValue) => (typeof color === 'string' ? color : un
 
 // Нижня навігація з макетів: Сьогодні, Тиждень, Аудиторії, Профіль
 export default function TabsLayout() {
+  const colors = useColors();
   // F8: локальні нагадування перед парою живуть, поки користувач увійшов (вкладки змонтовані)
   useReminderSync();
   // F8: токен пристрою і відкриття пари з пушу
@@ -47,6 +48,7 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        sceneStyle: { backgroundColor: colors.background },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.tabInactive,
         tabBarLabelStyle: {
