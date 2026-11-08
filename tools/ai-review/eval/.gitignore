@@ -3,3 +3,4 @@
 results/raw/
 results/spend.json
 __pycache__/
+results/discarded/
