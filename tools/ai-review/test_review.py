@@ -110,9 +110,10 @@ class ReviewTests(unittest.TestCase):
         (self.root / ".github" / "workflows" / "x.yml").write_text("name: x\non: push\n")
         (self.root / "tools" / "ai-review").mkdir(parents=True)
         (self.root / "tools" / "ai-review" / "rules.md").write_text("ПРАВИЛО-ПРОЄКТУ")
-        self._saved = (review.RETRY_WAIT, os.environ.get("AI_REVIEW_WORKERS"))
+        self._saved = (review.RETRY_WAIT, os.environ.get("AI_REVIEW_WORKERS"), os.environ.get("AI_REVIEW_TWO_STAGE"))
         review.RETRY_WAIT = 0  # без пауз між повторами запитів
         os.environ["AI_REVIEW_WORKERS"] = "1"  # відповіді заглушки видаються по черзі, тож паралельність вимикаємо
+        os.environ["AI_REVIEW_TWO_STAGE"] = "0"  # ці тести про однокроковий конвеєр; двоетапний у test_stage2.py
         Stub.state = {"comments": [], "chat_requests": [], "replies": []}
         self.server = HTTPServer(("127.0.0.1", 0), Stub)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -122,10 +123,11 @@ class ReviewTests(unittest.TestCase):
 
     def tearDown(self):
         review.RETRY_WAIT = self._saved[0]
-        if self._saved[1] is None:
-            os.environ.pop("AI_REVIEW_WORKERS", None)
-        else:
-            os.environ["AI_REVIEW_WORKERS"] = self._saved[1]
+        for name, value in (("AI_REVIEW_WORKERS", self._saved[1]), ("AI_REVIEW_TWO_STAGE", self._saved[2])):
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         self.server.shutdown()
         self.tmp.cleanup()
 
@@ -536,7 +538,7 @@ class ReviewTests(unittest.TestCase):
     def test_request_gets_only_the_remaining_time(self):
         seen = []
 
-        def fake_request(method, url, headers, body=None, timeout=60):
+        def fake_request(method, url, headers, body=None, timeout=60, deadline=None):
             seen.append(timeout)
             return json.dumps({"choices": [{"message": {"content": "{}"}}]}), {}
 
