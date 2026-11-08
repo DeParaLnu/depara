@@ -33,38 +33,70 @@
    "seconds_total": 1716.2,
    "cost_usd": 0.4147,
    "truncated": 38
+  },
+  {
+   "cases": 13,
+   "real_total": 21,
+   "found": 0,
+   "recall": 0.0,
+   "killed": 6,
+   "false_known": 0,
+   "false_upper": 20,
+   "findings": 20,
+   "not_reviewed_share": 0.34523809523809523,
+   "failed_cases": 2,
+   "seconds_max": 420.3,
+   "seconds_total": 2638.4,
+   "cost_usd": 0.398,
+   "truncated": 49
+  },
+  {
+   "cases": 13,
+   "real_total": 21,
+   "found": 4,
+   "recall": 0.19047619047619047,
+   "killed": 1,
+   "false_known": 0,
+   "false_upper": 29,
+   "findings": 33,
+   "not_reviewed_share": 0.26785714285714285,
+   "failed_cases": 0,
+   "seconds_max": 269.8,
+   "seconds_total": 1610.5,
+   "cost_usd": 0.4144,
+   "truncated": 43
   }
  ],
  "summary": {
-  "runs": 1,
+  "runs": 3,
   "found": {
-   "mean": 3.0,
-   "min": 3.0,
-   "max": 3.0
+   "mean": 2.3333333333333335,
+   "min": 0.0,
+   "max": 4.0
   },
   "false_known": {
-   "mean": 1.0,
-   "min": 1.0,
+   "mean": 0.3333333333333333,
+   "min": 0.0,
    "max": 1.0
   },
   "false_upper": {
-   "mean": 34.0,
-   "min": 34.0,
+   "mean": 27.666666666666668,
+   "min": 20.0,
    "max": 34.0
   },
   "not_reviewed_share": {
-   "mean": 0.125,
+   "mean": 0.24603174603174605,
    "min": 0.125,
-   "max": 0.125
+   "max": 0.34523809523809523
   },
   "seconds_max": {
-   "mean": 257.4,
+   "mean": 315.8333333333333,
    "min": 257.4,
-   "max": 257.4
+   "max": 420.3
   },
   "cost_usd": {
-   "mean": 0.4147,
-   "min": 0.4147,
+   "mean": 0.40903333333333336,
+   "min": 0.398,
    "max": 0.4147
   }
  },

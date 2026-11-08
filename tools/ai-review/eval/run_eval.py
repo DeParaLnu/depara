@@ -206,6 +206,13 @@ def rescore(label: str) -> int:
     return 0
 
 
+def next_run_number(raw_dir: Path, label: str) -> int:
+    """Наступний номер прогону: найбільший наявний плюс один, а не кількість файлів.
+    Після видалення зіпсованого прогону рахунок файлів затер би наступний збережений."""
+    numbers = [int(p.stem.rsplit("-", 1)[1]) for p in raw_dir.glob(f"{label}-*.json") if p.stem.rsplit("-", 1)[1].isdigit()]
+    return max(numbers, default=0) + 1
+
+
 def scrub(text: str, key: str) -> str:
     """Захист від випадкового потрапляння ключа у файли результатів, наприклад через текст помилки."""
     return text.replace(key, "***") if key else text
@@ -273,7 +280,7 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
     runs, raw_dir = [], RESULTS / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     stopped = False
-    first = 1 + (len(list(raw_dir.glob(f"{args.label}-*.json"))) if args.append else 0)
+    first = next_run_number(raw_dir, args.label) if args.append else 1
     for i in range(first, first + args.runs):
         summary, scored, stopped = run_once(cases, key, rules, spend, args.jobs)
         runs.append(summary)

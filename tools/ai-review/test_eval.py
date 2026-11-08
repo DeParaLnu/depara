@@ -187,6 +187,16 @@ class Isolation(unittest.TestCase):
             self.assertAlmostEqual(spend.total, run_eval.RESERVE_USD)
 
 
+class Numbering(unittest.TestCase):
+    def test_gap_after_removed_run_does_not_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp)
+            for name in ("base-1.json", "base-3.json", "other-7.json"):
+                (raw / name).write_text("[]")
+            self.assertEqual(run_eval.next_run_number(raw, "base"), 4)
+            self.assertEqual(run_eval.next_run_number(raw, "new"), 1)
+
+
 class Key(unittest.TestCase):
     def test_env_first_then_file(self):
         with tempfile.TemporaryDirectory() as tmp:
