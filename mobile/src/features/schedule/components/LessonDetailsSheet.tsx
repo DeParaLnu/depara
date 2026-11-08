@@ -5,13 +5,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../../api';
 import { dayMonth, fromIsoDate, weekdayShort } from '../../../lib/date';
 import { openRoute } from '../../../lib/maps';
-import { colors } from '../../../theme';
+import { makeStyles, useColors } from '../../theme/useTheme';
 import { SubstitutionActions } from '../../substitutions/SubstitutionActions';
 import { audienceLabel, lessonDetails, lessonTypeLabel, substitutionBadge } from '../lesson';
 
 type Props = { lesson: Lesson | null; onClose: () => void };
 
 function Row({ icon, text, testID }: { icon: ComponentProps<typeof Ionicons>['name']; text: string; testID?: string }) {
+  const styles = useStyles();
+  const colors = useColors();
   return (
     <View style={styles.row} accessible accessibilityLabel={text} testID={testID}>
       <Ionicons name={icon} size={22} color={colors.primary} />
@@ -24,6 +26,7 @@ function Row({ icon, text, testID }: { icon: ComponentProps<typeof Ionicons>['na
 // Староста бачить тут ще «Додати заміну» або «Скасувати заміну» (F6, SubstitutionActions).
 // «Нагадати за 10 хв» зʼявиться разом із сповіщеннями (F8): без них кнопка нічого б не робила.
 export function LessonDetailsSheet({ lesson, onClose }: Props) {
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const d = lesson ? lessonDetails(lesson) : null;
   const sub = lesson?.substitution ?? null;
@@ -110,8 +113,9 @@ export function LessonDetailsSheet({ lesson, onClose }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.45)' },
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: 28,
@@ -150,5 +154,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   primaryPressed: { backgroundColor: colors.primaryDark },
-  primaryText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
-});
+  primaryText: { fontSize: 17, fontWeight: '700', color: colors.onPrimary },
+}),
+);

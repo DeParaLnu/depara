@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
 import { SubstitutionPushSetting } from '../push/SubstitutionPushSetting';
 import { hasPermission } from './notifications';
 import type { ReminderMinutes } from './plan';
@@ -12,6 +12,8 @@ import { useReminderMinutes } from './useReminderSync';
 // Дозвіл на сповіщення питаємо лише тоді, коли користувач сам вмикає нагадування.
 // Вибір діє одразу на пристрої, а на сервер іде копією (PATCH /me): її невдача (офлайн) нагадувань не ламає.
 export function ReminderSetting() {
+  const styles = useStyles();
+  const colors = useColors();
   const minutes = useReminderMinutes();
   const { saveChoice, enable: enableReminder } = useApplyReminder();
   const [asking, setAsking] = useState(false);
@@ -81,7 +83,8 @@ export function ReminderSetting() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   block: { marginTop: 18, gap: 8 },
   section: { fontSize: 13, fontWeight: '700', color: colors.textTime, letterSpacing: 0.3 },
   labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 28 },
@@ -89,4 +92,5 @@ const styles = StyleSheet.create({
   hintRow: { gap: 4 },
   hint: { fontSize: 14, lineHeight: 19, color: colors.textMuted },
   link: { fontSize: 14, fontWeight: '700', color: colors.primary, textDecorationLine: 'underline' },
-});
+}),
+);

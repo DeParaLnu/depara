@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
 
 type Props = { onStart: () => void };
 
@@ -14,12 +14,14 @@ const SAMPLE = [
 
 // Екран привітання перед входом (макет docs/design/03-welcome.png). «Розпочати» веде на вхід (F1).
 export function WelcomeScreen({ onStart }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 16 }]} testID="welcome-screen">
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.logo}>
-          <Ionicons name="location-outline" size={44} color="#FFFFFF" />
+          <Ionicons name="location-outline" size={44} color={colors.onPrimary} />
         </View>
         <Text style={styles.title} accessibilityRole="header">
           ДеПара
@@ -69,7 +71,8 @@ export function WelcomeScreen({ onStart }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background, paddingHorizontal: 21 },
   content: { alignItems: 'center', paddingBottom: 24 },
   logo: {
@@ -113,7 +116,7 @@ const styles = StyleSheet.create({
   tag: { alignSelf: 'flex-start', borderRadius: 11, paddingHorizontal: 9, paddingVertical: 2, marginTop: 2 },
   tagText: { fontSize: 12, lineHeight: 17, fontWeight: '700' },
   tagPrimary: { backgroundColor: colors.primary },
-  tagPrimaryText: { color: '#FFFFFF' },
+  tagPrimaryText: { color: colors.onPrimary },
   tagWarning: { backgroundColor: colors.warningBadge },
   tagWarningText: { color: colors.warningText },
   tagBlue: { backgroundColor: colors.tagBlue },
@@ -126,6 +129,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryPressed: { backgroundColor: colors.primaryDark },
-  primaryText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  primaryText: { color: colors.onPrimary, fontSize: 17, fontWeight: '700' },
   footnote: { color: colors.textMuted, fontSize: 15, textAlign: 'center', marginTop: 14 },
-});
+}),
+);

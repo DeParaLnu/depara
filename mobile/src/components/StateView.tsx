@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme';
+import { makeStyles, useColors } from '../features/theme/useTheme';
 
 type Props = {
   icon: ComponentProps<typeof Ionicons>['name'];
@@ -13,6 +13,8 @@ type Props = {
 
 // Порожній стан, помилка, «Незабаром»: однаковий вигляд для всіх екранів
 export function StateView({ icon, title, description, actionLabel, onAction }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   return (
     <View style={styles.container}>
       <View style={styles.iconWrap}>
@@ -36,13 +38,14 @@ export function StateView({ icon, title, description, actionLabel, onAction }: P
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   container: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingVertical: 48, gap: 10 },
   iconWrap: {
     width: 112,
     height: 112,
     borderRadius: 56,
-    backgroundColor: '#EEF5FF',
+    backgroundColor: colors.surfaceSelected,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
@@ -59,5 +62,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonPressed: { backgroundColor: colors.primaryDark },
-  buttonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
-});
+  buttonText: { color: colors.onPrimary, fontWeight: '600', fontSize: 15 },
+}),
+);

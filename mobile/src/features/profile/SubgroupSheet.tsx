@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
 import { SUBGROUPS } from './group';
 
 type Props = {
@@ -15,6 +15,8 @@ type Props = {
 
 // F9: вибір підгрупи з профілю (нижній лист)
 export function SubgroupSheet({ visible, value, saving, error, onSelect, onClose }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -64,8 +66,9 @@ export function SubgroupSheet({ visible, value, saving, error, onSelect, onClose
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.45)' },
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: 28,
@@ -89,4 +92,5 @@ const styles = StyleSheet.create({
   optionTextSelected: { fontWeight: '700', color: colors.primary },
   state: { paddingTop: 14 },
   error: { color: colors.error, fontSize: 15, textAlign: 'center' },
-});
+}),
+);

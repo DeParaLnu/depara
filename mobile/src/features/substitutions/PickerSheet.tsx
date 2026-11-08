@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 
 export type PickerItem = { key: string; title: string; subtitle?: string };
 
@@ -34,6 +35,8 @@ export function PickerSheet({
   errorCode,
   emptyText = 'Нічого не знайдено',
 }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -99,8 +102,9 @@ export function PickerSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.45)' },
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     maxHeight: '80%',
     backgroundColor: colors.surface,
@@ -138,4 +142,5 @@ const styles = StyleSheet.create({
   state: { paddingVertical: 24 },
   error: { color: colors.error, fontSize: 15, textAlign: 'center' },
   empty: { color: colors.textMuted, fontSize: 15, textAlign: 'center' },
-});
+}),
+);
