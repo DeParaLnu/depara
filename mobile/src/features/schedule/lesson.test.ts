@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Lesson, Room, Substitution } from '../../api';
-import { lessonDetails, roomLabel } from './lesson';
+import { groupBySlot, lessonDetails, roomLabel, substitutionBadge, substitutionStatus } from './lesson';
 
 const room218: Room = {
   id: 'c1',
@@ -77,5 +77,45 @@ describe('lessonDetails', () => {
 
   it('скасована пара не має маршруту', () => {
     expect(lessonDetails(lesson({ substitution: sub({ kind: 'CANCELLED' }) })).route).toBeNull();
+  });
+});
+
+describe('бейдж заміни', () => {
+  it('скасована пара без бейджа (її видно з перекреслення), будь-яка інша зміна це «Заміна»', () => {
+    expect(substitutionBadge(sub({ kind: 'CANCELLED' }))).toBeNull();
+    for (const kind of ['REPLACED', 'ROOM_CHANGED', 'MOVED'] as const) {
+      expect(substitutionBadge(sub({ kind }))).toBe('Заміна');
+    }
+  });
+
+  it('у деталях і для скрінрідера скасування назване словом', () => {
+    expect(substitutionStatus(sub({ kind: 'CANCELLED' }))).toBe('Скасовано');
+    expect(substitutionStatus(sub({ kind: 'MOVED' }))).toBe('Заміна');
+  });
+});
+
+describe('groupBySlot', () => {
+  const ids = (lessons: Lesson[]) => groupBySlot(lessons, (l) => l).map((g) => g.items.map((l) => l.id));
+
+  it('пари двох підгруп на один слот ідуть одним блоком', () => {
+    const day = [
+      lesson({ id: 'a', pairNumber: 1 }),
+      lesson({ id: 'b1', pairNumber: 2, subgroup: 1 }),
+      lesson({ id: 'b2', pairNumber: 2, subgroup: 2 }),
+      lesson({ id: 'c', pairNumber: 3 }),
+    ];
+    expect(ids(day)).toEqual([['a'], ['b1', 'b2'], ['c']]);
+  });
+
+  it('пара всієї групи, одна підгрупа і різні дні не групуються', () => {
+    expect(ids([lesson({ id: 'a', pairNumber: 2, subgroup: 1 }), lesson({ id: 'b', pairNumber: 3, subgroup: 2 })])).toEqual([['a'], ['b']]);
+    expect(ids([lesson({ id: 'a', pairNumber: 2, subgroup: 0 }), lesson({ id: 'b', pairNumber: 2, subgroup: 1 })])).toEqual([['a'], ['b']]);
+    expect(
+      ids([lesson({ id: 'a', pairNumber: 2, subgroup: 1 }), lesson({ id: 'b', pairNumber: 2, subgroup: 2, date: '2026-11-05' })]),
+    ).toEqual([['a'], ['b']]);
+  });
+
+  it('дві пари тієї самої підгрупи на один слот лишаються окремими', () => {
+    expect(ids([lesson({ id: 'a', pairNumber: 2, subgroup: 1 }), lesson({ id: 'b', pairNumber: 2, subgroup: 1 })])).toEqual([['a'], ['b']]);
   });
 });

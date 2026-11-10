@@ -2,9 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Lesson } from '../../../api';
 import { makeStyles, useColors } from '../../theme/useTheme';
-import { audienceLabel, lessonTypeLabel, roomLabel, substitutionBadge, type LessonStatus } from '../lesson';
+import { audienceLabel, lessonTypeLabel, roomLabel, substitutionBadge, substitutionStatus, type LessonStatus } from '../lesson';
 
-type Props = { lesson: Lesson; status: LessonStatus; onPress?: () => void };
+type Props = {
+  lesson: Lesson;
+  status: LessonStatus;
+  onPress?: () => void;
+  /** Картка в блоці двох підгруп: час стоїть у заголовку блоку, а на картці замість нього «Підгрупа N» */
+  inSlotGroup?: boolean;
+};
 
 const minutesLabel = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} год ${m % 60} хв` : `${m} хв`);
 
@@ -12,7 +18,8 @@ const minutesLabel = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} год ${m
 function a11yLabel(lesson: Lesson, status: LessonStatus) {
   const sub = lesson.substitution;
   const parts = [`${lesson.start}–${lesson.end}`, lesson.subject];
-  if (sub) parts.push(substitutionBadge(sub));
+  if (lesson.subgroup > 0) parts.push(`підгрупа ${lesson.subgroup}`);
+  if (sub) parts.push(substitutionStatus(sub).toLowerCase());
   if (status.kind === 'now') parts.push(`зараз, залишилось ${minutesLabel(status.remainingMin)}`);
   if (status.kind === 'next') parts.push('наступна');
   if (lesson.teacher) parts.push(lesson.teacher);
@@ -21,7 +28,7 @@ function a11yLabel(lesson: Lesson, status: LessonStatus) {
   return parts.join(', ');
 }
 
-export function LessonCard({ lesson, status, onPress }: Props) {
+export function LessonCard({ lesson, status, onPress, inSlotGroup }: Props) {
   const styles = useStyles();
   const colors = useColors();
   const sub = lesson.substitution;
@@ -34,6 +41,7 @@ export function LessonCard({ lesson, status, onPress }: Props) {
   const roomChanged = !!newRoom && newRoom !== oldRoom;
   const teacher = sub?.newTeacher ?? lesson.teacher;
   const changed = !!sub && !cancelled;
+  const badge = sub ? substitutionBadge(sub) : null;
 
   return (
     <Pressable
@@ -53,16 +61,14 @@ export function LessonCard({ lesson, status, onPress }: Props) {
       {changed && <View style={styles.stripe} />}
 
       <View style={styles.topRow}>
-        <Text style={styles.time}>
-          {lesson.start} – {lesson.end}
+        <Text style={[styles.time, cancelled && styles.timeCancelled]}>
+          {inSlotGroup ? `Підгрупа ${lesson.subgroup}` : `${lesson.start} – ${lesson.end}`}
         </Text>
-        {sub ? (
-          <View style={[styles.badge, cancelled ? styles.badgeDanger : styles.badgeWarning]}>
-            <Text style={[styles.badgeText, cancelled ? styles.badgeDangerText : styles.badgeWarningText]}>
-              {substitutionBadge(sub)}
-            </Text>
+        {badge ? (
+          <View style={[styles.badge, styles.badgeWarning]}>
+            <Text style={[styles.badgeText, styles.badgeWarningText]}>{badge}</Text>
           </View>
-        ) : isNow ? (
+        ) : cancelled ? null : isNow ? (
           <View style={[styles.badge, styles.badgeNow]}>
             <Text style={[styles.badgeText, styles.badgeNowText]}>ЗАРАЗ</Text>
           </View>
@@ -141,6 +147,7 @@ const useStyles = makeStyles((colors) =>
   stripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: colors.warning },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   time: { fontSize: 13, lineHeight: 18, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
+  timeCancelled: { color: colors.textMuted, textDecorationLine: 'line-through' },
   subject: { fontSize: 16, lineHeight: 20, fontWeight: '700', color: colors.text },
   subjectCancelled: { color: colors.textMuted, textDecorationLine: 'line-through' },
   meta: { fontSize: 13, lineHeight: 18, color: colors.textMuted },
@@ -164,8 +171,6 @@ const useStyles = makeStyles((colors) =>
   badgeNextText: { color: colors.textSecondary },
   badgeWarning: { backgroundColor: colors.warningBadge },
   badgeWarningText: { color: colors.warningText },
-  badgeDanger: { backgroundColor: colors.dangerBg },
-  badgeDangerText: { color: colors.danger },
   progressBlock: { marginTop: 6, gap: 8 },
   progressTrack: { height: 5, borderRadius: 3, backgroundColor: colors.surfaceTint, overflow: 'hidden' },
   progressFill: { height: 5, backgroundColor: colors.accent },

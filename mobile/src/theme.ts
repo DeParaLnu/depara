@@ -32,6 +32,7 @@ export const lightColors = {
   success: '#166534',
   successBg: '#DCFCE7',
   danger: '#B3261E',
+  alertDot: '#E5352B', // крапка «у цей день є заміна» в смузі днів
   dangerBg: '#FDECEA', // ~
   dangerSurface: '#FFF7F6', // кнопка виходу
   dangerBorder: '#F5B5B0',
@@ -74,6 +75,7 @@ export const darkColors: Colors = {
   success: '#86EFAC',
   successBg: '#14361F',
   danger: '#FF8A80',
+  alertDot: '#FF5A4F',
   dangerBg: '#3A1D1B',
   dangerSurface: '#2A1816',
   dangerBorder: '#6E2F2A',

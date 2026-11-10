@@ -1,6 +1,6 @@
 import { config } from '../../config';
 import { prisma } from '../../db';
-import { toRoom } from '../rooms';
+import { roomTitle } from '../rooms';
 import { sendExpoPush, type PushMessage, type SendResult } from './expo';
 import { substitutionMessage } from './substitutionMessage';
 
@@ -48,7 +48,7 @@ export async function deliverSubstitutionPush(
     startTime: lesson.pair.startTime,
     comment: sub.comment,
     newTeacherName: sub.newTeacher?.fullName,
-    newRoom: sub.newClassroom ? toRoom(sub.newClassroom).label : null,
+    newRoom: sub.newClassroom ? roomTitle(sub.newClassroom) : null,
     newDate: sub.newDate,
     newPairNumber: sub.newPairNumber,
     newStartTime: sub.newPair?.startTime,

@@ -21,6 +21,9 @@ export function normalizeRoom(raw: string): { number: string; code: string } {
   return { number: normalizeRoomNumber(raw.slice(0, i)), code: normalizeBuildingCode(raw.slice(i + 1)) };
 }
 
+// Підпис аудиторії для людей: той самий рядок мобільний застосунок складає в mobile/src/features/rooms/format.ts
+export const roomTitle = (c: { number: string; building: { code: string } }) => `Корпус ${c.building.code} · ауд. ${c.number}`;
+
 type ClassroomWithBuilding = { id: string; number: string; building: { code: string; name: string; address: string } };
 
 // Аудиторія у відповідях API: той самий вигляд у пошуку, розкладі й замінах

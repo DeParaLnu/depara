@@ -8,10 +8,13 @@ import { clock, toIsoDate, weekdayFull, weekDays, weekRangeLabel } from '../../l
 import { makeStyles, useColors } from '../theme/useTheme';
 import { errorText } from '../../theme';
 import { LessonDetailsSheet } from './components/LessonDetailsSheet';
-import { withNext, type LessonStatus } from './lesson';
+import { groupBySlot, roomLabel, withNext, type LessonStatus } from './lesson';
 import type { TodayState } from './TodayView';
 
-type Row = { kind: 'lesson'; lesson: Lesson; status: LessonStatus } | { kind: 'empty'; key: string };
+// slot: місце пари в блоці двох підгруп на одну пару (час показує лише перший рядок блоку)
+type Row =
+  | { kind: 'lesson'; lesson: Lesson; status: LessonStatus; slot: 'single' | 'first' | 'next' }
+  | { kind: 'empty'; key: string };
 type DaySection = { key: string; day: Date; isToday: boolean; changes: number; data: Row[] };
 
 // Скорочення типу пари для компактного рядка (макет «Розклад тижня»)
@@ -23,11 +26,11 @@ const TYPE_SHORT: Record<Lesson['type'], { label: string; style: 'filled' | 'acc
   OTHER: { label: '–', style: 'neutral' },
 };
 
-// Куди перенесено пару: «Перенесено на 14.05, 3-а пара». Без цього рядок тижня виглядає так,
+// Куди перенесено пару: «на 14.05, 3-а пара». Без цього рядок тижня виглядає так,
 // ніби пара лишилась у старому слоті
 const movedLabel = (sub: NonNullable<Lesson['substitution']>) =>
   sub.kind === 'MOVED' && sub.newDate
-    ? `Перенесено на ${sub.newDate.slice(8, 10)}.${sub.newDate.slice(5, 7)}${sub.newPairNumber ? `, ${sub.newPairNumber}-а пара` : ''}`
+    ? `перенесено на ${sub.newDate.slice(8, 10)}.${sub.newDate.slice(5, 7)}${sub.newPairNumber ? `, ${sub.newPairNumber}-а пара` : ''}`
     : null;
 
 const changesLabel = (n: number) => {
@@ -38,30 +41,34 @@ const changesLabel = (n: number) => {
   return `${n} замін`;
 };
 
-function WeekRow({ lesson, onPress }: { lesson: Lesson; onPress: () => void }) {
+function WeekRow({ lesson, slot, onPress }: { lesson: Lesson; slot: 'single' | 'first' | 'next'; onPress: () => void }) {
   const styles = useStyles();
   const sub = lesson.substitution;
   const cancelled = sub?.kind === 'CANCELLED';
   const type = TYPE_SHORT[lesson.type];
-  const room = sub?.newRoom ?? lesson.room;
+  const room = cancelled ? null : roomLabel(sub?.newRoom ?? lesson.room);
   const moved = sub ? movedLabel(sub) : null;
+  const inGroup = slot !== 'single';
+  // Підгрупа й аудиторія окремим рядком під назвою: у вузькій колонці праворуч повний підпис не вміщався
+  const meta = [inGroup ? `Підгрупа ${lesson.subgroup}` : null, room].filter(Boolean).join(' · ');
   return (
     <Pressable
       onPress={onPress}
       testID={`lesson-card-${lesson.date}-${lesson.pairNumber}-${lesson.id}`}
       accessibilityRole="button"
       accessibilityHint="Відкрити деталі пари"
-      accessibilityLabel={`${lesson.start}, ${lesson.subject}${cancelled ? ', скасовано' : moved ? `, ${moved.toLowerCase()}` : sub ? ', заміна' : ''}`}
-      style={[styles.row, sub && !cancelled && styles.rowChanged]}
+      accessibilityLabel={`${lesson.start}, ${lesson.subject}${inGroup ? `, підгрупа ${lesson.subgroup}` : ''}${cancelled ? ', скасовано' : moved ? `, заміна, ${moved}` : sub ? ', заміна' : ''}${room ? `, ${room}` : ''}`}
+      style={[styles.row, slot === 'first' && styles.rowGroupFirst, sub && !cancelled && styles.rowChanged]}
     >
-      <Text style={styles.rowTime} numberOfLines={1}>
-        {lesson.start}
+      <Text style={[styles.rowTime, cancelled && styles.rowTimeCancelled]} numberOfLines={1}>
+        {slot === 'next' ? '' : lesson.start}
       </Text>
       <View style={styles.rowMain}>
-        <Text style={[styles.rowSubject, cancelled && styles.rowSubjectCancelled]} numberOfLines={2}>
+        <Text style={[styles.rowSubject, cancelled && styles.rowSubjectCancelled]} numberOfLines={3}>
           {lesson.subject}
         </Text>
-        {moved && <Text style={styles.rowMoved}>{moved}</Text>}
+        {meta ? <Text style={styles.rowMeta}>{meta}</Text> : null}
+        {sub && !cancelled ? <Text style={styles.rowMoved}>{moved ? `Заміна · ${moved}` : 'Заміна'}</Text> : null}
       </View>
       <View
         style={[
@@ -83,7 +90,6 @@ function WeekRow({ lesson, onPress }: { lesson: Lesson; onPress: () => void }) {
           {type.label}
         </Text>
       </View>
-      <Text style={styles.rowRoom}>{room && !cancelled ? room.label : ''}</Text>
     </Pressable>
   );
 }
@@ -140,9 +146,17 @@ export function WeekView({
     const todayIso = toIsoDate(now);
     return weekDays(weekStart).map((day) => {
       const iso = toIsoDate(day);
-      const rows: Row[] = withStatus
-        .filter((x) => x.lesson.date === iso)
-        .map((x) => ({ kind: 'lesson', lesson: x.lesson, status: x.status }));
+      const rows: Row[] = groupBySlot(
+        withStatus.filter((x) => x.lesson.date === iso),
+        (x) => x.lesson,
+      ).flatMap((group) =>
+        group.items.map((x, i): Row => ({
+          kind: 'lesson',
+          lesson: x.lesson,
+          status: x.status,
+          slot: group.items.length === 1 ? 'single' : i === 0 ? 'first' : 'next',
+        })),
+      );
       const changes = rows.filter((r) => r.kind === 'lesson' && r.lesson.substitution).length;
       return {
         key: iso,
@@ -268,7 +282,7 @@ export function WeekView({
             </View>
           )}
           renderItem={({ item }) =>
-            item.kind === 'lesson' ? <WeekRow lesson={item.lesson} onPress={() => setOpenLesson(item.lesson)} /> : <Text style={styles.emptyDay}>Пар немає</Text>
+            item.kind === 'lesson' ? <WeekRow lesson={item.lesson} slot={item.slot} onPress={() => setOpenLesson(item.lesson)} /> : <Text style={styles.emptyDay}>Пар немає</Text>
           }
           renderSectionFooter={() => <View style={styles.sectionGap} />}
         />
@@ -333,6 +347,10 @@ const useStyles = makeStyles((colors) =>
     borderBottomColor: colors.border,
   },
   rowChanged: { borderLeftWidth: 3, borderLeftColor: colors.warning, paddingLeft: 9 },
+  // Перший рядок блоку двох підгруп без нижньої лінії: обидві пари читаються як один слот
+  rowGroupFirst: { borderBottomWidth: 0, paddingBottom: 2 },
+  rowTimeCancelled: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  rowMeta: { fontSize: 13, lineHeight: 17, color: colors.textMuted },
   rowTime: { width: 50, fontSize: 15, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
   rowMain: { flex: 1, gap: 2 },
   rowMoved: { fontSize: 13, lineHeight: 17, fontWeight: '700', color: colors.warningText },
@@ -347,6 +365,5 @@ const useStyles = makeStyles((colors) =>
   typeTextLight: { color: colors.onPrimary },
   typeTextSoft: { color: colors.tagBlueText },
   typeTextNeutral: { color: colors.textMuted },
-  rowRoom: { width: 54, textAlign: 'right', fontSize: 15, color: colors.textMuted },
 }),
 );

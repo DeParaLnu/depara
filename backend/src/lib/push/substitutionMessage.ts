@@ -10,7 +10,7 @@ export interface SubstitutionPushInput {
   startTime?: Date | null; // pair_time.start_time (1970-01-01THH:MM)
   comment?: string | null;
   newTeacherName?: string | null;
-  newRoom?: string | null; // «406/Т»
+  newRoom?: string | null; // «Корпус Т · ауд. 406» (roomTitle)
   newDate?: Date | null;
   newPairNumber?: number | null;
   newStartTime?: Date | null;
@@ -34,7 +34,7 @@ const slot = (d: Date, pair: number, start?: Date | null) =>
 
 export function substitutionMessage(i: SubstitutionPushInput): { title: string; body: string } {
   const when = slot(i.date, i.pairNumber, i.startTime);
-  const room = i.newRoom ? ` Аудиторія ${i.newRoom}.` : '';
+  const room = i.newRoom ? ` ${i.newRoom}.` : '';
   let body: string;
   switch (i.kind) {
     case 'CANCELLED':

@@ -58,6 +58,7 @@ const useStyles = makeStyles((colors) =>
   weekday: { fontSize: 13, lineHeight: 16, color: colors.textWeekday },
   date: { fontSize: 17, lineHeight: 20, fontWeight: '700', color: colors.text },
   textSelected: { color: colors.onPrimary },
-  dot: { position: 'absolute', top: 6, right: 12, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.warning },
+  // Червона: день із заміною має бути помітний одразу (жовтогаряча губилась на тлі чипа)
+  dot: { position: 'absolute', top: 6, right: 12, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.alertDot },
 }),
 );

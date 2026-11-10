@@ -7,7 +7,7 @@ import { dayMonth, fromIsoDate, weekdayShort } from '../../../lib/date';
 import { openRoute } from '../../../lib/maps';
 import { makeStyles, useColors } from '../../theme/useTheme';
 import { SubstitutionActions } from '../../substitutions/SubstitutionActions';
-import { audienceLabel, lessonDetails, lessonTypeLabel, substitutionBadge } from '../lesson';
+import { audienceLabel, lessonDetails, lessonTypeLabel, substitutionStatus } from '../lesson';
 
 type Props = { lesson: Lesson | null; onClose: () => void };
 
@@ -67,7 +67,7 @@ export function LessonDetailsSheet({ lesson, onClose }: Props) {
               {sub && (
                 <View style={[styles.tag, d.cancelled ? styles.tagDanger : styles.tagWarning]}>
                   <Text style={[styles.tagText, d.cancelled ? styles.tagDangerText : styles.tagWarningText]}>
-                    {substitutionBadge(sub)}
+                    {substitutionStatus(sub)}
                   </Text>
                 </View>
               )}

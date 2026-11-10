@@ -10,7 +10,7 @@ import { errorText } from '../../theme';
 import { DayStrip } from './components/DayStrip';
 import { LessonCard } from './components/LessonCard';
 import { LessonDetailsSheet } from './components/LessonDetailsSheet';
-import { withNext } from './lesson';
+import { groupBySlot, withNext } from './lesson';
 
 export type TodayState =
   | { kind: 'loading' }
@@ -53,8 +53,9 @@ export function TodayView({
     () => new Set(allLessons.filter((l) => l.substitution).map((l) => l.date)),
     [allLessons],
   );
+  // Пари двох підгруп на один слот ідуть одним блоком під спільним часом
   const dayLessons = useMemo(
-    () => withNext(allLessons.filter((l) => l.date === toIsoDate(selected)), now),
+    () => groupBySlot(withNext(allLessons.filter((l) => l.date === toIsoDate(selected)), now), (x) => x.lesson),
     [allLessons, selected, now],
   );
 
@@ -127,12 +128,27 @@ export function TodayView({
       ) : (
         <FlatList
           data={dayLessons}
-          keyExtractor={(item) => item.lesson.id}
+          keyExtractor={(group) => group.key}
           contentContainerStyle={[styles.list, onAddSubstitution && styles.listWithFab]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          renderItem={({ item }) => (
-            <LessonCard lesson={item.lesson} status={item.status} onPress={() => setOpenLesson(item.lesson)} />
-          )}
+          renderItem={({ item: group }) =>
+            group.items.length === 1 ? (
+              <LessonCard
+                lesson={group.items[0].lesson}
+                status={group.items[0].status}
+                onPress={() => setOpenLesson(group.items[0].lesson)}
+              />
+            ) : (
+              <View style={styles.slotGroup} testID={`today-slot-${group.items[0].lesson.date}-${group.items[0].lesson.pairNumber}`}>
+                <Text style={styles.slotTime} accessibilityRole="header">
+                  {group.items[0].lesson.start} – {group.items[0].lesson.end} · {group.items.length} підгрупи
+                </Text>
+                {group.items.map((x) => (
+                  <LessonCard key={x.lesson.id} lesson={x.lesson} status={x.status} inSlotGroup onPress={() => setOpenLesson(x.lesson)} />
+                ))}
+              </View>
+            )
+          }
           ListEmptyComponent={
             <StateView
               icon="cafe-outline"
@@ -195,6 +211,8 @@ const useStyles = makeStyles((colors) =>
   offlineText: { flex: 1, fontSize: 14, lineHeight: 18, color: colors.textSecondary },
   offlineBold: { fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  slotGroup: { gap: 6, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: colors.border },
+  slotTime: { fontSize: 13, lineHeight: 18, fontWeight: '700', color: colors.textTime, fontVariant: ['tabular-nums'] },
   list: { paddingHorizontal: 21, paddingBottom: 24, gap: 11, flexGrow: 1 },
   listWithFab: { paddingBottom: 96 },
   fab: {

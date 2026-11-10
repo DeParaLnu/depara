@@ -16,6 +16,7 @@ import { StateView } from '../../components/StateView';
 import { openRoute } from '../../lib/maps';
 import { makeStyles, useColors } from '../theme/useTheme';
 import { errorText } from '../../theme';
+import { roomTitle } from './format';
 
 export type RoomsState =
   | { kind: 'loading' }
@@ -181,16 +182,16 @@ export function RoomsView({
                       style={styles.roomRow}
                       activeOpacity={0.7}
                       accessibilityRole="button"
-                      accessibilityLabel={`Аудиторія ${room.number}, корпус ${room.building.code}, ${room.building.address}`}
+                      accessibilityLabel={`${roomTitle(room)}, ${room.building.address}`}
                     >
                       <View testID="room-item" style={styles.roomItemInner}>
                         <View style={styles.iconBox}>
                           <Ionicons name="enter-outline" size={20} color={colors.primary} />
                         </View>
                         <View style={styles.itemInfo}>
-                          <Text style={styles.itemTitle}>ауд. {room.number}</Text>
+                          <Text style={styles.itemTitle}>{roomTitle(room)}</Text>
                           <Text testID={`room-building-${idStr}`} style={styles.itemSubtitle}>
-                            Корпус {room.building.code} · {room.building.address}
+                            {room.building.address}
                           </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={colors.chevron} />

@@ -80,7 +80,7 @@ describe('substitutionMessage', () => {
   it('інший викладач і аудиторія', () => {
     expect(substitutionMessage({ ...base, kind: 'REPLACED', newTeacherName: 'Іваненко І. І.' }).body)
       .toBe('пт, 06.11, 2 пара о 10:10. Веде Іваненко І. І.');
-    expect(substitutionMessage({ ...base, kind: 'ROOM_CHANGED', newRoom: '406/Т' }).body).toBe('пт, 06.11, 2 пара о 10:10. Аудиторія 406/Т.');
+    expect(substitutionMessage({ ...base, kind: 'ROOM_CHANGED', newRoom: 'Корпус Т · ауд. 406' }).body).toBe('пт, 06.11, 2 пара о 10:10. Корпус Т · ауд. 406.');
   });
 
   it('перенесення показує звідки і куди, з часом нової пари', () => {

@@ -18,6 +18,7 @@ import { addDays, dayMonth, fromIsoDate, mondayOf, toIsoDate, weekdayShort, week
 import { errorCode, reportError } from '../../lib/errors';
 import { makeStyles, useColors } from '../theme/useTheme';
 import { errorText } from '../../theme';
+import { roomTitle } from '../rooms/format';
 import { useClassrooms, useDebounce } from '../rooms/hooks';
 import { useGroups, useMe, useWeek } from '../schedule/hooks';
 import { lessonTypeLabel } from '../schedule/lesson';
@@ -153,7 +154,7 @@ export function SubstitutionScreen({ date, lessonId, onClose }: Props) {
   }));
   const roomItems: PickerItem[] = (classrooms.data ?? []).map((r) => ({
     key: r.id,
-    title: `Корпус ${r.building.code} · ${r.number}`,
+    title: roomTitle(r),
     subtitle: r.building.address,
   }));
 
@@ -243,7 +244,7 @@ export function SubstitutionScreen({ date, lessonId, onClose }: Props) {
               <Select
                 testID="substitution-classroom"
                 placeholder="Оберіть аудиторію"
-                title={current.classroom ? `Корпус ${current.classroom.building.code} · ${current.classroom.number}` : undefined}
+                title={current.classroom ? roomTitle(current.classroom) : undefined}
                 onPress={() => setPicker('classroom')}
               />
             </>
