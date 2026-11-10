@@ -1,5 +1,5 @@
 {
- "label": "base-strict",
+ "label": "baseline",
  "smoke": false,
  "set": null,
  "cases": [

@@ -113,7 +113,7 @@ class ReviewTests(unittest.TestCase):
         self._saved = (review.RETRY_WAIT, os.environ.get("AI_REVIEW_WORKERS"), os.environ.get("AI_REVIEW_TWO_STAGE"))
         review.RETRY_WAIT = 0  # без пауз між повторами запитів
         os.environ["AI_REVIEW_WORKERS"] = "1"  # відповіді заглушки видаються по черзі, тож паралельність вимикаємо
-        os.environ["AI_REVIEW_TWO_STAGE"] = "0"  # ці тести про однокроковий конвеєр; двоетапний у test_stage2.py
+        os.environ["AI_REVIEW_TWO_STAGE"] = "0"  # ці тести про однокроковий конвеєр; двоетапний у test_reasoning_and_format.py
         Stub.state = {"comments": [], "chat_requests": [], "replies": []}
         self.server = HTTPServer(("127.0.0.1", 0), Stub)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()

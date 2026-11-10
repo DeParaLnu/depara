@@ -1,4 +1,4 @@
-"""Етап 4: перевірки без моделі (секрети, формат помилки, маршрут без E2E, нові залежності). Без мережі й без ключа.
+"""Перевірки без моделі (секрети, формат помилки, маршрут без E2E, нові залежності). Без мережі й без ключа.
 Рядки, схожі на секрети, тут складаються з частин: справжніх значень у тестах немає."""
 
 import io
@@ -11,7 +11,7 @@ from unittest import mock
 
 import checks
 import review
-from test_stage2 import FakeApi, http_error, no_network, ok
+from fakes import FakeApi, diff_of, http_error, no_network, ok
 
 FAKE_GH = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6"  # формат токена GitHub, значення вигадане
 FAKE_VALUE = "q7Zx9" + "Lm2Kp4Rt8Vw3Ny6Bd1Hs5"
@@ -25,12 +25,6 @@ def setUpModule():
 
 def tearDownModule():
     _guard.stop()
-
-
-def diff_of(path, added, removed=(), new_file=False, start=1):
-    head = f"diff --git a/{path} b/{path}\n" + ("new file mode 100644\n" if new_file else "") + f"--- a/{path}\n+++ b/{path}\n"
-    body = "".join(f"-{x}\n" for x in removed) + "".join(f"+{x}\n" for x in added)
-    return f"{head}@@ -{start},{len(removed)} +{start},{len(added)} @@\n{body}"
 
 
 def run(*diffs, files=None):

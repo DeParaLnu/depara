@@ -1,4 +1,4 @@
-"""Етап 5: відповідність спеці. Правило без моделі (новий код помилки чи маршрут має бути в specs/) і, за бажанням,
+"""Відповідність спеці. Правило без моделі (новий код помилки чи маршрут має бути в specs/) і, за бажанням,
 специфікація фічі й наявні тести в контексті шматка для моделі (вимкнено за вимірюванням eval). Без мережі й без ключа."""
 
 import io
@@ -10,8 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 import review
-from test_stage2 import FakeApi, no_network, ok
-from test_stage4 import diff_of
+from fakes import FakeApi, diff_of, no_network, ok
 
 SPEC9 = "# F9. Профіль\n\n## API\n| `PATCH /me` | 403 `HEADMAN_GROUP_LOCKED` |\n\n## Критерії приймання\n- [ ] Староста не може сам змінити групу.\n"
 SPEC8 = "# F8. Сповіщення\n\n## Критерії приймання\n- [ ] Пуш про заміну приходить групі.\n"

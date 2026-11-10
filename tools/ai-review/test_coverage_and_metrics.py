@@ -1,4 +1,4 @@
-"""Етап 7: прозорість коментаря (що не переглянуто і чому) і метрики роботи в журналі. Без мережі й без ключа."""
+"""Прозорість коментаря (що не переглянуто і чому) і метрики роботи в журналі. Без мережі й без ключа."""
 
 import io
 import json
@@ -10,8 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 import review
-from test_stage2 import FakeApi, http_error, no_network, ok
-from test_stage4 import diff_of
+from fakes import FakeApi, diff_of, http_error, no_network, ok
 
 
 def setUpModule():
