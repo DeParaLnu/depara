@@ -1,4 +1,4 @@
-"""Етап 3: вузькі проходи (коректність і тести, безпека й авторизація, контракт API) замість одного загального запиту.
+"""Вузькі проходи (коректність і тести, безпека й авторизація, контракт API) замість одного загального запиту.
 За вимірюванням eval вимкнено за замовчуванням, вмикаються через AI_REVIEW_PASSES. Без мережі й без ключа."""
 
 import io
@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 import review
-from test_stage2 import A_TS, DIFF, FakeApi, finding, http_error, no_network, ok
+from fakes import A_TS, DIFF, FakeApi, finding, http_error, no_network, ok
 
 
 def setUpModule():

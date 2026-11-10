@@ -330,7 +330,7 @@ class CompareMissing(unittest.TestCase):
     def test_missing_run_is_a_message_not_a_traceback(self):
         err = io.StringIO()
         with redirect_stderr(err):
-            self.assertEqual(run_eval.main(["--compare", "base", "немає-такого-прогону"], env={}), 2)
+            self.assertEqual(run_eval.main(["--compare", "current", "немає-такого-прогону"], env={}), 2)
         self.assertIn("немає-такого-прогону", err.getvalue())
 
 
