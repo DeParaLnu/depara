@@ -36,7 +36,10 @@ import score  # noqa: E402
 CASES = HERE / "cases"
 RESULTS = HERE / "results"
 CACHE = HERE / ".cache"
-PRICE_IN, PRICE_OUT = 0.17, 0.25  # $ за 1 млн токенів, Qwen/Qwen3.5-9B у каталозі Together
+# $ за 1 млн токенів (вхід, вихід) у каталозі Together. Невідома модель рахується за найдорожчою з відомих,
+# щоб межа витрат спрацювала раніше, а не пізніше.
+PRICES = {"Qwen/Qwen3.5-9B": (0.17, 0.25), "deepseek-ai/DeepSeek-V4.1-Flash": (0.30, 1.20)}
+PRICE_IN, PRICE_OUT = PRICES.get(os.environ.get("TOGETHER_MODEL") or review.Config.model, max(PRICES.values()))
 BUDGET_USD = 19.0  # ліміт ключа 20 $: лишаємо запас на прогін, що вже йде
 RESERVE_USD = 0.25  # стільки має лишатись до межі, щоб почати ще один кейс
 CASE_TIMEOUT = review.Config.budget_seconds + 180  # бюджет ревʼю плюс запас; довше означає, що процес завис
