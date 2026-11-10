@@ -1,0 +1,73 @@
+{
+ "label": "stage5-reasoning-on",
+ "smoke": false,
+ "set": null,
+ "cases": [
+  100,
+  68,
+  71,
+  73,
+  80,
+  81,
+  83,
+  86,
+  87,
+  90,
+  93,
+  97,
+  99
+ ],
+ "runs": [
+  {
+   "cases": 13,
+   "real_total": 21,
+   "found": 0,
+   "recall": 0.0,
+   "killed": 0,
+   "false_known": 1,
+   "false_upper": 14,
+   "findings": 17,
+   "static": 3,
+   "not_reviewed_share": 0.5714285714285714,
+   "failed_cases": 3,
+   "seconds_max": 389.6,
+   "seconds_total": 3353.7,
+   "cost_usd": 0.4442,
+   "truncated": 65
+  }
+ ],
+ "summary": {
+  "runs": 1,
+  "found": {
+   "mean": 0.0,
+   "min": 0.0,
+   "max": 0.0
+  },
+  "false_known": {
+   "mean": 1.0,
+   "min": 1.0,
+   "max": 1.0
+  },
+  "false_upper": {
+   "mean": 14.0,
+   "min": 14.0,
+   "max": 14.0
+  },
+  "not_reviewed_share": {
+   "mean": 0.5714285714285714,
+   "min": 0.5714285714285714,
+   "max": 0.5714285714285714
+  },
+  "seconds_max": {
+   "mean": 389.6,
+   "min": 389.6,
+   "max": 389.6
+  },
+  "cost_usd": {
+   "mean": 0.4442,
+   "min": 0.4442,
+   "max": 0.4442
+  }
+ },
+ "partial": false
+}

@@ -1,0 +1,50 @@
+{
+  "pr": 83,
+  "title": "fix(backend): староста не може сам перейти в іншу групу",
+  "body": "## Що і навіщо\nПрава старости на заміни прив'язані до його групи: `POST /substitutions` порівнює групу пари з `user.groupId`. Але `PATCH /me` дозволяв будь-кому змінити свою групу. Тож староста міг сам перейти в чужу групу і скасовувати чи переносити їй пари. Знайшов це, коли робив зміну групи з профілю (F9): з кнопкою в профілі це стало б зовсім легко.\n\nЗадача: closes #82\n\n## Що змінилось\n- `PATCH /me`: староста, у якого вже є група, при спробі змінити групу отримує 403 `HEADMAN_GROUP_LOCKED`. Підгрупу (з тією самою `groupId`) змінює сам.\n- Групу старості змінює адмін через `PATCH /admin/users/:id/group` (без змін).\n- Староста без групи (новий, онбординг) обирає групу як звичайно.\n- Відсутній користувач і далі дає 401 (перевірку перенесено перед оновленням).\n- E2E у `f9-profile.test.ts`: студент змінює групу й підгрупу; староста отримує 403 на іншу групу і 200 на підгрупу; адмін змінює групу старості.\n- Спека F9: рядок API і критерій.\n\n## Спека\n[specs/f9-profile.md](specs/f9-profile.md)\n\n## Як перевірити\n1. CI `backend-e2e`.\n2. Вручну: староста робить `PATCH /me` з чужою `groupId` і отримує 403 `HEADMAN_GROUP_LOCKED`.\n\nЛокально пройшли `npm run lint` і `npm run typecheck`. E2E локально не запускав, бо Docker не запущений. Юніт-тести дають ті самі 9 падінь, що й на чистому `develop` (їм потрібен Redis).\n\n## Чеклист\n- [ ] CI зелений\n- [x] E2E-сценарій додано\n- [x] Немає секретів і `.env` у коміті\n- [x] Документація API оновлена (спека F9)\n\n## На що звернути увагу ревʼюеру\n- Мобільний профіль (наступний PR) для старости показує групу без можливості змінити її і пояснює, що групу змінює адмін.\n- Адмін не обмежений: він може змінювати заміни будь-якої групи і так.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n\n<!-- coderabbit-ai-generated:v1 -->\n\n## Summary by CodeRabbit\n\n* **Bug Fixes**\n  * Prevented headmen from changing their own group, while allowing them to update their subgroup. Administrators can still change a headman’s group.\n* **Documentation**\n  * Clarified the group-change restrictions and administrator process in the API documentation.\n\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "e7a3970d8a6bf880a63d3cb333080f4a07570ce9",
+  "head": "266d8b4cce3a5c40dd6118397f14ba37178da550",
+  "head_ref": "fix/backend-headman-group-lock",
+  "base_ref": "develop",
+  "set": "dev",
+  "smoke": true,
+  "note": "",
+  "issues": [
+    {
+      "id": "r83-1",
+      "real": true,
+      "file": "backend/src/routes/profile.ts",
+      "lines": [
+        57,
+        57
+      ],
+      "severity": "minor",
+      "summary": "Compare UUIDs case-insensitively.",
+      "keywords": [
+        "регістр",
+        "lowercase",
+        "case-insens",
+        "uuid"
+      ],
+      "source": "CodeRabbit, підтверджено вручну"
+    },
+    {
+      "id": "r83-2",
+      "real": true,
+      "file": "backend/test/e2e/f9-profile.test.ts",
+      "lines": [
+        90,
+        90
+      ],
+      "severity": "important",
+      "summary": "Create `ТЕСТ-32` in the E2E seed.",
+      "keywords": [
+        "тест-32",
+        "seed",
+        "сід"
+      ],
+      "source": "CodeRabbit, підтверджено вручну"
+    }
+  ],
+  "known_false": []
+}

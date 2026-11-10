@@ -1,0 +1,558 @@
+diff --git a/mobile/src/app/(tabs)/profile.tsx b/mobile/src/app/(tabs)/profile.tsx
+index cc5e78b..c049b72 100644
+--- a/mobile/src/app/(tabs)/profile.tsx
++++ b/mobile/src/app/(tabs)/profile.tsx
+@@ -1,9 +1,14 @@
++import { Ionicons } from '@expo/vector-icons';
++import { router } from 'expo-router';
+ import { useState } from 'react';
+ import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { api } from '../../api';
+ import { config } from '../../config';
+ import { useSession } from '../../features/auth/session';
++import { canChangeOwnGroup, subgroupLabel } from '../../features/profile/group';
++import { useSetGroup } from '../../features/profile/hooks';
++import { SubgroupSheet } from '../../features/profile/SubgroupSheet';
+ import { useGroups, useMe } from '../../features/schedule/hooks';
+ import { reportError } from '../../lib/errors';
+ import { colors, errorText } from '../../theme';
+@@ -16,7 +21,7 @@ const initials = (name: string) =>
+     .map((p) => p[0].toUpperCase())
+     .join('');
+ 
+-// F9 (початок): дані користувача, група, вихід і видалення акаунта. Налаштування сповіщень і теми зʼявляться пізніше
++// F9: дані користувача, зміна групи й підгрупи, вихід і видалення акаунта. Налаштування сповіщень і теми зʼявляться пізніше
+ export default function ProfileRoute() {
+   const insets = useSafeAreaInsets();
+   const signOut = useSession((s) => s.signOut);
+@@ -27,7 +32,27 @@ export default function ProfileRoute() {
+   const groups = useGroups();
+   const group = groups.data?.find((g) => g.id === me.data?.groupId);
+   const displayName = me.data?.fullName ?? me.data?.email ?? '';
+-  const subgroup = me.data ? (me.data.subgroup === 0 ? 'Усі' : String(me.data.subgroup)) : '';
++  const subgroup = me.data ? subgroupLabel(me.data.subgroup) : '';
++  // Староста не змінює групу сам (бекенд: HEADMAN_GROUP_LOCKED), лише підгрупу
++  const groupEditable = canChangeOwnGroup(me.data);
++
++  const [subgroupOpen, setSubgroupOpen] = useState(false);
++  const [subgroupError, setSubgroupError] = useState<string | null>(null);
++  const setGroup = useSetGroup();
++  const changeSubgroup = async (value: number) => {
++    if (!me.data?.groupId) return;
++    if (value === me.data.subgroup) {
++      setSubgroupOpen(false);
++      return;
++    }
++    setSubgroupError(null);
++    try {
++      await setGroup.mutateAsync({ groupId: me.data.groupId, subgroup: value });
++      setSubgroupOpen(false);
++    } catch (e) {
++      setSubgroupError(errorText(reportError('profile', e)));
++    }
++  };
+ 
+   // Видалення акаунта (вимога Google Play і App Store): підтвердження, виклик API, потім звичайний вихід
+   const deleteAccount = async () => {
+@@ -61,16 +86,55 @@ export default function ProfileRoute() {
+       </View>
+ 
+       <View>
+-        <View style={styles.row}>
++        <Pressable
++          testID="profile-group"
++          accessibilityRole="button"
++          accessibilityLabel={`Група ${group?.code ?? 'не обрана'}`}
++          accessibilityHint={groupEditable ? 'Відкриває вибір групи' : undefined}
++          accessibilityState={{ disabled: !groupEditable }}
++          disabled={!groupEditable}
++          onPress={() => router.push('/change-group')}
++          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
++        >
+           <Text style={styles.rowLabel}>Група</Text>
+-          <Text style={styles.rowValue}>{group?.code ?? '—'}</Text>
+-        </View>
+-        <View style={styles.row}>
++          <View style={styles.rowRight}>
++            <Text style={styles.rowValue}>{group?.code ?? '—'}</Text>
++            {groupEditable ? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} /> : null}
++          </View>
++        </Pressable>
++        {!groupEditable ? (
++          <Text style={styles.rowHint}>Групу старости змінює адміністратор.</Text>
++        ) : null}
++        <Pressable
++          testID="profile-subgroup"
++          accessibilityRole="button"
++          accessibilityLabel={`Підгрупа ${subgroup || 'не обрана'}`}
++          accessibilityHint="Відкриває вибір підгрупи"
++          accessibilityState={{ disabled: !me.data?.groupId }}
++          disabled={!me.data?.groupId}
++          onPress={() => {
++            setSubgroupError(null);
++            setSubgroupOpen(true);
++          }}
++          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
++        >
+           <Text style={styles.rowLabel}>Підгрупа</Text>
+-          <Text style={styles.rowValue}>{subgroup || '—'}</Text>
+-        </View>
++          <View style={styles.rowRight}>
++            <Text style={styles.rowValue}>{subgroup || '—'}</Text>
++            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
++          </View>
++        </Pressable>
+       </View>
+ 
++      <SubgroupSheet
++        visible={subgroupOpen}
++        value={me.data?.subgroup ?? 0}
++        saving={setGroup.isPending}
++        error={subgroupError}
++        onSelect={(value) => void changeSubgroup(value)}
++        onClose={() => setSubgroupOpen(false)}
++      />
++
+       <View style={styles.footer}>
+         {deleteError ? <Text style={styles.error}>{deleteError}</Text> : null}
+         {config.privacyUrl ? (
+@@ -135,6 +199,9 @@ const styles = StyleSheet.create({
+   },
+   rowLabel: { fontSize: 17, color: colors.text },
+   rowValue: { fontSize: 17, fontWeight: '700', color: colors.text },
++  rowPressed: { backgroundColor: colors.chip },
++  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
++  rowHint: { fontSize: 13, lineHeight: 18, color: colors.textMuted, paddingTop: 6, paddingBottom: 4 },
+   footer: { marginTop: 'auto', alignItems: 'center', gap: 6, paddingBottom: 12 },
+   error: { color: colors.error, fontSize: 15, textAlign: 'center' },
+   link: { color: colors.textMuted, fontSize: 15, textDecorationLine: 'underline', paddingVertical: 8 },
+diff --git a/mobile/src/app/_layout.tsx b/mobile/src/app/_layout.tsx
+index de3b236..b5b29e8 100644
+--- a/mobile/src/app/_layout.tsx
++++ b/mobile/src/app/_layout.tsx
+@@ -93,6 +93,7 @@ export default function RootLayout() {
+             <Stack.Screen name="onboarding" />
+           </Stack.Protected>
+           <Stack.Protected guard={signedIn && !onboarding}>
++            <Stack.Screen name="change-group" />
+             <Stack.Screen name="(tabs)" />
+             <Stack.Screen name="substitution" />
+           </Stack.Protected>
+diff --git a/mobile/src/app/change-group.tsx b/mobile/src/app/change-group.tsx
+new file mode 100644
+index 0000000..b547034
+--- /dev/null
++++ b/mobile/src/app/change-group.tsx
+@@ -0,0 +1,8 @@
++import { router } from 'expo-router';
++import { OnboardingScreen } from '../features/onboarding/OnboardingScreen';
++
++// F9: зміна групи й підгрупи з профілю (той самий вибір, що й в онбордингу)
++export default function ChangeGroupRoute() {
++  const close = () => (router.canGoBack() ? router.back() : router.replace('/profile'));
++  return <OnboardingScreen mode="change" onDone={close} onCancel={close} />;
++}
+diff --git a/mobile/src/features/onboarding/OnboardingScreen.tsx b/mobile/src/features/onboarding/OnboardingScreen.tsx
+index d0650b1..435ce45 100644
+--- a/mobile/src/features/onboarding/OnboardingScreen.tsx
++++ b/mobile/src/features/onboarding/OnboardingScreen.tsx
+@@ -1,13 +1,14 @@
+ import { Ionicons } from '@expo/vector-icons';
+-import { useMutation, useQueryClient } from '@tanstack/react-query';
+ import { useMemo, useState } from 'react';
+ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+-import { api, type Group } from '../../api';
++import type { Group } from '../../api';
+ import { errorCode } from '../../lib/errors';
+ import { colors, errorText } from '../../theme';
+ import { useSession } from '../auth/session';
+-import { useGroups } from '../schedule/hooks';
++import { SUBGROUPS } from '../profile/group';
++import { useSetGroup } from '../profile/hooks';
++import { useGroups, useMe } from '../schedule/hooks';
+ 
+ type Faculty = { name: string; groups: number };
+ 
+@@ -28,25 +29,31 @@ const groupsLabel = (n: number) => {
+   return `${n} груп`;
+ };
+ 
+-const SUBGROUPS = [
+-  { value: 0, label: 'Усі' },
+-  { value: 1, label: '1' },
+-  { value: 2, label: '2' },
+-] as const;
++type Props =
++  | { mode?: 'onboarding' }
++  /** F9: зміна групи з профілю. Починає з поточної групи; «Назад» зі списку факультетів закриває екран */
++  | { mode: 'change'; onDone: () => void; onCancel: () => void };
+ 
+ // F2: факультет → група і підгрупа. Крок «спеціальність», код старости і дозвіл на сповіщення
+-// додамо, коли для них зʼявиться підтримка в API.
+-export function OnboardingScreen() {
++// додамо, коли для них зʼявиться підтримка в API. Той самий екран змінює групу з профілю (F9, mode="change").
++export function OnboardingScreen(props: Props) {
++  const changing = props.mode === 'change';
+   const insets = useSafeAreaInsets();
+-  const token = useSession((s) => s.session?.accessToken ?? '');
+   const finishOnboarding = useSession((s) => s.finishOnboarding);
+-  const queryClient = useQueryClient();
+   const groups = useGroups();
++  const me = useMe();
++  // Поточна група: при зміні з профілю з неї починається вибір
++  const current = changing ? groups.data?.find((g) => g.id === me.data?.groupId) : undefined;
+ 
+-  const [faculty, setFaculty] = useState<string | null>(null);
+-  const [groupId, setGroupId] = useState<string | null>(null);
+-  const [subgroup, setSubgroup] = useState<number>(0);
+-  const [course, setCourse] = useState<number | null>(null);
++  // undefined = ще не обирали, тоді діє поточне значення профілю (при онбордингу його немає)
++  const [chosenFaculty, setFaculty] = useState<string | null | undefined>(undefined);
++  const [chosenGroupId, setGroupId] = useState<string | null | undefined>(undefined);
++  const [chosenSubgroup, setSubgroup] = useState<number | undefined>(undefined);
++  const [chosenCourse, setCourse] = useState<number | null | undefined>(undefined);
++  const faculty = chosenFaculty === undefined ? (current?.faculty ?? null) : chosenFaculty;
++  const groupId = chosenGroupId === undefined ? (current?.id ?? null) : chosenGroupId;
++  const subgroup = chosenSubgroup ?? (changing ? (me.data?.subgroup ?? 0) : 0);
++  const course = chosenCourse === undefined ? (current?.faculty === faculty ? (current?.course ?? null) : null) : chosenCourse;
+ 
+   const faculties = useMemo(() => toFaculties(groups.data ?? []), [groups.data]);
+   const facultyGroups = useMemo(
+@@ -63,14 +70,17 @@ export function OnboardingScreen() {
+     [facultyGroups, activeCourse],
+   );
+ 
+-  const save = useMutation({
+-    mutationKey: ['setGroup'],
+-    mutationFn: () => api.setGroup(token, groupId!, subgroup),
+-    onSuccess: async () => {
+-      await queryClient.invalidateQueries({ queryKey: ['me'] });
+-      finishOnboarding();
+-    },
+-  });
++  const setGroup = useSetGroup();
++  const save = {
++    ...setGroup,
++    mutate: () =>
++      setGroup.mutate(
++        { groupId: groupId!, subgroup },
++        { onSuccess: () => (props.mode === 'change' ? props.onDone() : finishOnboarding()) },
++      ),
++  };
++  const unchanged = changing && groupId === me.data?.groupId && subgroup === me.data?.subgroup;
++  const saveDisabled = !groupId || save.isPending || unchanged;
+ 
+   const error = groups.isError ? groups.error : save.isError ? save.error : null;
+   const errorMessageCode = error ? errorCode(error) : null;
+@@ -81,6 +91,7 @@ export function OnboardingScreen() {
+     setCourse(null);
+     save.reset();
+   };
++  const onCancel = props.mode === 'change' ? props.onCancel : null;
+ 
+   return (
+     <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
+@@ -95,15 +106,26 @@ export function OnboardingScreen() {
+           >
+             <Ionicons name="chevron-back" size={28} color={colors.primary} />
+           </Pressable>
++        ) : onCancel ? (
++          <Pressable
++            testID="change-group-cancel"
++            accessibilityRole="button"
++            accessibilityLabel="Назад до профілю"
++            onPress={onCancel}
++            hitSlop={12}
++            style={styles.back}
++          >
++            <Ionicons name="chevron-back" size={28} color={colors.primary} />
++          </Pressable>
+         ) : (
+           <View style={styles.back} />
+         )}
+         <Text style={styles.title} accessibilityRole="header">
+-          {faculty ? 'Оберіть групу' : 'Ваш факультет'}
++          {faculty ? (changing ? 'Змінити групу' : 'Оберіть групу') : changing ? 'Факультет' : 'Ваш факультет'}
+         </Text>
+       </View>
+       <Text style={styles.subtitle}>
+-        {faculty ? faculty : 'Далі оберете свою групу, щоб бачити розклад'}
++        {faculty ? faculty : changing ? 'Оберіть факультет нової групи' : 'Далі оберете свою групу, щоб бачити розклад'}
+       </Text>
+ 
+       {errorMessageCode && (
+@@ -136,7 +158,12 @@ export function OnboardingScreen() {
+             <Pressable
+               accessibilityRole="button"
+               accessibilityLabel={item.name}
+-              onPress={() => setFaculty(item.name)}
++              onPress={() => {
++                // Новий факультет: група й курс обираються заново (поточна група лишилась би непоміченою)
++                setFaculty(item.name);
++                setGroupId(null);
++                setCourse(null);
++              }}
+               style={({ pressed }) => [styles.option, pressed && styles.optionSelected]}
+             >
+               <View style={styles.radio} />
+@@ -212,7 +239,7 @@ export function OnboardingScreen() {
+                     accessibilityRole="radio"
+                     accessibilityState={{ selected, checked: selected }}
+                     aria-checked={selected}
+-                    accessibilityLabel={s.value === 0 ? 'Усі підгрупи' : `Підгрупа ${s.label}`}
++                    accessibilityLabel={s.a11y}
+                     onPress={() => setSubgroup(s.value)}
+                     style={[styles.segment, selected && styles.segmentSelected]}
+                   >
+@@ -222,22 +249,22 @@ export function OnboardingScreen() {
+               })}
+             </View>
+             <Pressable
+-              testID="onboarding-continue"
++              testID={changing ? 'change-group-save' : 'onboarding-continue'}
+               accessibilityRole="button"
+-              accessibilityLabel="Продовжити"
+-              accessibilityState={{ disabled: !groupId || save.isPending }}
+-              disabled={!groupId || save.isPending}
++              accessibilityLabel={changing ? 'Зберегти' : 'Продовжити'}
++              accessibilityState={{ disabled: saveDisabled }}
++              disabled={saveDisabled}
+               onPress={() => save.mutate()}
+               style={({ pressed }) => [
+                 styles.primary,
+-                (!groupId || save.isPending) && styles.primaryDisabled,
++                saveDisabled && styles.primaryDisabled,
+                 pressed && styles.primaryPressed,
+               ]}
+             >
+               {save.isPending ? (
+                 <ActivityIndicator color={colors.surface} />
+               ) : (
+-                <Text style={styles.primaryText}>Продовжити</Text>
++                <Text style={styles.primaryText}>{changing ? 'Зберегти' : 'Продовжити'}</Text>
+               )}
+             </Pressable>
+           </View>
+diff --git a/mobile/src/features/profile/SubgroupSheet.tsx b/mobile/src/features/profile/SubgroupSheet.tsx
+new file mode 100644
+index 0000000..d0fb1f0
+--- /dev/null
++++ b/mobile/src/features/profile/SubgroupSheet.tsx
+@@ -0,0 +1,92 @@
++import { Ionicons } from '@expo/vector-icons';
++import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { colors } from '../../theme';
++import { SUBGROUPS } from './group';
++
++type Props = {
++  visible: boolean;
++  value: number;
++  saving: boolean;
++  error: string | null;
++  onSelect: (subgroup: number) => void;
++  onClose: () => void;
++};
++
++// F9: вибір підгрупи з профілю (нижній лист)
++export function SubgroupSheet({ visible, value, saving, error, onSelect, onClose }: Props) {
++  const insets = useSafeAreaInsets();
++  return (
++    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
++      <View style={styles.root}>
++        <Pressable
++          style={StyleSheet.absoluteFill}
++          onPress={onClose}
++          accessibilityRole="button"
++          accessibilityLabel="Закрити вибір підгрупи"
++        />
++        <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]} testID="subgroup-sheet">
++          <View style={styles.handle} />
++          <Text style={styles.title} accessibilityRole="header">
++            Підгрупа
++          </Text>
++          <Text style={styles.hint}>Розклад покаже пари всієї групи й обраної підгрупи.</Text>
++          <View accessibilityRole="radiogroup">
++            {SUBGROUPS.map((s) => {
++              const selected = s.value === value;
++              return (
++                <Pressable
++                  key={s.value}
++                  testID={`subgroup-option-${s.value}`}
++                  accessibilityRole="radio"
++                  accessibilityState={{ selected, checked: selected, disabled: saving }}
++                  aria-checked={selected}
++                  accessibilityLabel={s.a11y}
++                  disabled={saving}
++                  onPress={() => onSelect(s.value)}
++                  style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
++                >
++                  <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{s.a11y}</Text>
++                  {selected ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
++                </Pressable>
++              );
++            })}
++          </View>
++          {saving ? <ActivityIndicator style={styles.state} color={colors.primary} accessibilityLabel="Збереження" /> : null}
++          {error ? (
++            <Text style={[styles.state, styles.error]} accessibilityRole="alert">
++              {error}
++            </Text>
++          ) : null}
++        </View>
++      </View>
++    </Modal>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.45)' },
++  sheet: {
++    backgroundColor: colors.surface,
++    borderTopLeftRadius: 28,
++    borderTopRightRadius: 28,
++    paddingHorizontal: 21,
++    paddingTop: 12,
++  },
++  handle: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: colors.border, marginBottom: 12 },
++  title: { fontSize: 20, lineHeight: 26, fontWeight: '700', color: colors.text },
++  hint: { fontSize: 14, lineHeight: 19, color: colors.textMuted, marginTop: 4, marginBottom: 8 },
++  option: {
++    minHeight: 52,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'space-between',
++    borderBottomWidth: 1,
++    borderBottomColor: colors.border,
++  },
++  optionPressed: { backgroundColor: colors.chip },
++  optionText: { fontSize: 17, color: colors.text },
++  optionTextSelected: { fontWeight: '700', color: colors.primary },
++  state: { paddingTop: 14 },
++  error: { color: colors.error, fontSize: 15, textAlign: 'center' },
++});
+diff --git a/mobile/src/features/profile/group.test.ts b/mobile/src/features/profile/group.test.ts
+new file mode 100644
+index 0000000..67fbdb4
+--- /dev/null
++++ b/mobile/src/features/profile/group.test.ts
+@@ -0,0 +1,25 @@
++import { describe, expect, it } from 'vitest';
++import { canChangeOwnGroup, subgroupLabel } from './group';
++
++describe('canChangeOwnGroup', () => {
++  it('студент і адмін змінюють групу самі, староста з групою ні', () => {
++    expect(canChangeOwnGroup({ role: 'STUDENT', groupId: 'g' })).toBe(true);
++    expect(canChangeOwnGroup({ role: 'ADMIN', groupId: 'g' })).toBe(true);
++    expect(canChangeOwnGroup({ role: 'HEADMAN', groupId: 'g' })).toBe(false);
++  });
++
++  it('староста без групи (онбординг) обирає її сам', () => {
++    expect(canChangeOwnGroup({ role: 'HEADMAN', groupId: null })).toBe(true);
++  });
++
++  it('без профілю нічого не дозволяємо', () => {
++    expect(canChangeOwnGroup(undefined)).toBe(false);
++  });
++});
++
++describe('subgroupLabel', () => {
++  it('0 = усі підгрупи', () => {
++    expect(subgroupLabel(0)).toBe('Усі');
++    expect(subgroupLabel(2)).toBe('2');
++  });
++});
+diff --git a/mobile/src/features/profile/group.ts b/mobile/src/features/profile/group.ts
+new file mode 100644
+index 0000000..307efba
+--- /dev/null
++++ b/mobile/src/features/profile/group.ts
+@@ -0,0 +1,14 @@
++import type { Me } from '../../api';
++
++// F9: хто може сам змінити групу. Староста з групою не може: його права на заміни прив'язані до групи,
++// і бекенд відповідає 403 HEADMAN_GROUP_LOCKED. Групу старості змінює адмін. Підгрупу можуть змінювати всі.
++export const canChangeOwnGroup = (me: Pick<Me, 'role' | 'groupId'> | undefined): boolean =>
++  !!me && !(me.role === 'HEADMAN' && !!me.groupId);
++
++export const SUBGROUPS = [
++  { value: 0, label: 'Усі', a11y: 'Усі підгрупи' },
++  { value: 1, label: '1', a11y: 'Підгрупа 1' },
++  { value: 2, label: '2', a11y: 'Підгрупа 2' },
++] as const;
++
++export const subgroupLabel = (subgroup: number) => (subgroup === 0 ? 'Усі' : String(subgroup));
+diff --git a/mobile/src/features/profile/hooks.ts b/mobile/src/features/profile/hooks.ts
+new file mode 100644
+index 0000000..48d9595
+--- /dev/null
++++ b/mobile/src/features/profile/hooks.ts
+@@ -0,0 +1,21 @@
++import { useMutation, useQueryClient } from '@tanstack/react-query';
++import { api } from '../../api';
++import { useSession } from '../auth/session';
++
++/**
++ * Зберегти групу й підгрупу (PATCH /me): онбординг і профіль.
++ * Розклад залежить від групи й підгрупи, тож збережені тижні (і в памʼяті, і на диску) скидаємо,
++ * інакше офлайн показав би розклад попередньої групи. Активні екрани завантажать тиждень заново.
++ */
++export function useSetGroup() {
++  const token = useSession((s) => s.session?.accessToken ?? '');
++  const queryClient = useQueryClient();
++  return useMutation({
++    mutationKey: ['setGroup'],
++    mutationFn: ({ groupId, subgroup }: { groupId: string; subgroup: number }) => api.setGroup(token, groupId, subgroup),
++    onSuccess: async () => {
++      await queryClient.invalidateQueries({ queryKey: ['me'] });
++      await queryClient.resetQueries({ queryKey: ['week'] });
++    },
++  });
++}
+diff --git a/mobile/src/theme.ts b/mobile/src/theme.ts
+index 51f33e6..4570d6a 100644
+--- a/mobile/src/theme.ts
++++ b/mobile/src/theme.ts
+@@ -38,6 +38,9 @@ export const errorMessages: Record<string, string> = {
+   TEMPORARILY_UNAVAILABLE: 'Сервер тимчасово недоступний. Спробуйте за хвилину.',
+   RATE_LIMITED: 'Забагато запитів. Зачекайте хвилину і спробуйте ще раз.',
+   LAST_ADMIN: 'Ви останній адміністратор: спершу призначте іншого.',
++  HEADMAN_GROUP_LOCKED: 'Групу старости змінює адміністратор.',
++  GROUP_NOT_FOUND: 'Групу не знайдено. Оновіть список.',
++  INVALID_SUBGROUP: 'Оберіть підгрупу: усі, 1 або 2.',
+   ACCOUNT_CONFLICT: 'Цей акаунт уже пов’язано з іншим входом. Зверніться до підтримки.',
+   // F6: заміни (коди з форми і з POST /substitutions)
+   LESSON_REQUIRED: 'Оберіть пару.',
+diff --git a/specs/README.md b/specs/README.md
+index 370ef6c..468472c 100644
+--- a/specs/README.md
++++ b/specs/README.md
+@@ -21,7 +21,7 @@
+ | [f6-substitutions.md](f6-substitutions.md) | Заміни пар (староста) | Бекенд і UI готові: староста додає й скасовує заміну, група бачить її в розкладі. Пушів немає (F8) |
+ | [f7-admin.md](f7-admin.md) | Адмінка: ролі, імпорт розкладу | Бекенд є (група, CORS), веб-сторінка в плані |
+ | [f8-notifications.md](f8-notifications.md) | Сповіщення і нагадування | Не реалізовано |
+-| [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, група, вихід, видалення акаунта, посилання на політику конфіденційності. Зміни групи з профілю, теми й нагадувань немає |
++| [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, зміна групи й підгрупи, вихід, видалення акаунта, посилання на політику конфіденційності. Теми й нагадувань немає |
+ | [v2-backlog.md](v2-backlog.md) | Не для MVP | Ідеї |
+ 
+ Нумерація F1–F9 збігається з назвами E2E-тестів у `backend/test/e2e/`.
+diff --git a/specs/f9-profile.md b/specs/f9-profile.md
+index 5590527..ad9819a 100644
+--- a/specs/f9-profile.md
++++ b/specs/f9-profile.md
+@@ -1,10 +1,12 @@
+ # F9. Профіль і налаштування
+ 
+-**Стан:** частково (дані, група, вихід, видалення акаунта; зміни групи, теми й нагадувань немає) · **Відповідальні:** мобільний, бекенд
++**Стан:** частково (дані, зміна групи й підгрупи, вихід, видалення акаунта; теми й нагадувань немає) · **Відповідальні:** мобільний, бекенд
+ 
+ ## Як це працює
+ Екран показує ім'я і пошту, групу, підгрупу, перемикач «Зміни та скасування», час нагадування (вимк, 10 хв, 15 хв), тему (системна, світла, темна) і кнопку «Вийти з акаунту».
+ 
++«Група ›» відкриває той самий вибір факультету й групи, що й онбординг (починає з поточної групи), «Підгрупа ›» відкриває нижній лист «Усі / 1 / 2». Після збереження збережені тижні розкладу скидаються (і на диску), екрани завантажують розклад нової групи. Староста бачить групу без стрілки й підпис «Групу старости змінює адміністратор», підгрупу змінює сам.
++
+ ## API
+ | Метод і шлях | Для чого |
+ |---|---|

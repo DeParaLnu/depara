@@ -1,0 +1,942 @@
+diff --git a/.env.example b/.env.example
+index be23b9b..05be992 100644
+--- a/.env.example
++++ b/.env.example
+@@ -6,7 +6,7 @@ DIRECT_URL=postgresql://postgres:postgres@localhost:5432/depara
+ JWT_SECRET=change-me-locally
+ PORT=3000
+ 
+-# Redis: кеш розкладу, refresh-сесії, черга BullMQ (використовується з наступних кроків).
++# Redis: refresh-сесії, ліміти запитів, черга пушів про заміни (F8).
+ REDIS_URL=redis://localhost:6379
+ 
+ # Вхід через Microsoft Entra (F1). Поки тенант не зареєстровано, лишіть порожніми: POST /auth/microsoft
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 84b8197..ab11886 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -85,6 +85,9 @@ jobs:
+       RATE_LIMIT_IMPORT_PER_MINUTE: 1000
+       RATE_LIMIT_AUTH_PER_MINUTE: 5000
+       JWT_SECRET: ci-only-secret
++      # Підставний Expo Push піднімає сам тест F8; повтори невдалої відправки швидкі
++      EXPO_PUSH_URL: http://localhost:4010/push
++      PUSH_RETRY_DELAY_MS: 200
+     steps:
+       - uses: actions/checkout@v4
+       - uses: actions/setup-node@v4
+diff --git a/README.md b/README.md
+index 1dc2df9..6960703 100644
+--- a/README.md
++++ b/README.md
+@@ -28,11 +28,12 @@ npm run dev                          # http://localhost:3000/health
+ cd backend
+ export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=e2e.admin@lnu.edu.ua CORS_ORIGINS=http://localhost:5173
+ export RATE_LIMIT_IMPORT_PER_MINUTE=1000 RATE_LIMIT_AUTH_PER_MINUTE=5000   # E2E робить багато імпортів і входів з одного IP
++export EXPO_PUSH_URL=http://localhost:4010/push PUSH_RETRY_DELAY_MS=200     # підставний Expo Push для тестів F8
+ npm run seed -- --shift-to-current-week
+ npm run test:e2e
+ ```
+ 
+-`ADMIN_EMAILS` потрібен для тестів адмін-ендпоінтів, `CORS_ORIGINS` для тестів CORS веб-адмінки. `AUTH_MODE=fake` вмикає вхід за фейковим токеном `test:<email>` і працює лише при `NODE_ENV=test`.
++`ADMIN_EMAILS` потрібен для тестів адмін-ендпоінтів, `CORS_ORIGINS` для тестів CORS веб-адмінки, `EXPO_PUSH_URL` для тестів пушів (підставний Expo піднімає сам тест; у тестовому режимі без цієї змінної пуші вимкнені). `AUTH_MODE=fake` вмикає вхід за фейковим токеном `test:<email>` і працює лише при `NODE_ENV=test`.
+ 
+ ## Мобільний застосунок: запуск
+ 
+diff --git a/backend/prisma/migrations/20261104100000_notification_push_token/migration.sql b/backend/prisma/migrations/20261104100000_notification_push_token/migration.sql
+new file mode 100644
+index 0000000..2716adb
+--- /dev/null
++++ b/backend/prisma/migrations/20261104100000_notification_push_token/migration.sql
+@@ -0,0 +1,4 @@
++-- F8: пуші йдуть через Expo Push, тож у таблиці зберігається Expo push-токен (ExponentPushToken[...]), а не токен FCM.
++-- Таблиця досі не використовувалась, перейменування лише змінює метадані.
++ALTER TABLE "notification_token" RENAME COLUMN "fcm_token" TO "push_token";
++ALTER INDEX "notification_token_fcm_token_key" RENAME TO "notification_token_push_token_key";
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 46da2c4..ea12d54 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -86,7 +86,7 @@ model User {
+ model NotificationToken {
+   id         String   @id @default(uuid()) @db.Uuid
+   userId     String   @map("user_id") @db.Uuid
+-  fcmToken   String   @unique @map("fcm_token")
++  pushToken  String   @unique @map("push_token") // Expo push-токен пристрою (F8)
+   lastSeenAt DateTime @default(now()) @map("last_seen_at")
+   createdAt  DateTime @default(now()) @map("created_at")
+   updatedAt  DateTime @updatedAt @map("updated_at")
+diff --git a/backend/src/app.ts b/backend/src/app.ts
+index 7edc9b8..d04f0b2 100644
+--- a/backend/src/app.ts
++++ b/backend/src/app.ts
+@@ -11,6 +11,7 @@ import { authRoutes } from './routes/auth';
+ import { classroomRoutes } from './routes/classrooms';
+ import { legalRoutes } from './routes/legal';
+ import { profileRoutes } from './routes/profile';
++import { pushTokenRoutes } from './routes/pushTokens';
+ import { scheduleRoutes } from './routes/schedule';
+ import { substitutionRoutes } from './routes/substitutions';
+ import { teacherRoutes } from './routes/teachers';
+@@ -173,6 +174,7 @@ export function buildApp(
+ 
+   app.register(authRoutes, { authPerMinute: opts.rateLimit?.authPerMinute });
+   app.register(profileRoutes);
++  app.register(pushTokenRoutes);
+   app.register(legalRoutes);
+   app.register(scheduleRoutes);
+   app.register(classroomRoutes);
+diff --git a/backend/src/config.ts b/backend/src/config.ts
+index 4909d60..c7634c9 100644
+--- a/backend/src/config.ts
++++ b/backend/src/config.ts
+@@ -42,6 +42,15 @@ export const config = {
+     .map((o) => o.trim().replace(/\/$/, ''))
+     .filter(Boolean),
+   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
++  // Пуші про заміни (F8) через Expo Push. EXPO_PUSH_URL міняють лише E2E (підставний сервер). У тестовому режимі без
++  // EXPO_PUSH_URL пуші вимкнені, щоб тести не ходили в справжній Expo. PUSH_ENABLED=false вимикає їх завжди.
++  pushEnabled:
++    process.env.PUSH_ENABLED !== 'false' && !(process.env.NODE_ENV === 'test' && !process.env.EXPO_PUSH_URL),
++  expoPushUrl: process.env.EXPO_PUSH_URL || 'https://exp.host/--/api/v2/push/send',
++  // Потрібен, лише якщо в проєкті Expo увімкнено «Enhanced Security for Push Notifications»
++  expoAccessToken: (process.env.EXPO_ACCESS_TOKEN ?? '').trim(),
++  // Перша пауза перед повтором невдалої відправки, далі вдвічі довша
++  pushRetryDelayMs: positiveInt(process.env.PUSH_RETRY_DELAY_MS, 30_000),
+   // Пошти, які отримують роль ADMIN при вході (перший адмін; далі ролі міняє PATCH /admin/users/:id/role).
+   adminEmails: (process.env.ADMIN_EMAILS ?? '')
+     .split(',')
+diff --git a/backend/src/lib/push/expo.ts b/backend/src/lib/push/expo.ts
+new file mode 100644
+index 0000000..8e9ee74
+--- /dev/null
++++ b/backend/src/lib/push/expo.ts
+@@ -0,0 +1,82 @@
++// Клієнт Expo Push API: https://docs.expo.dev/push-notifications/sending-notifications/
++// Лише відправка (tickets). Квитанції доставки (receipts) не перевіряємо: для MVP досить того, що
++// DeviceNotRegistered у ticket прибирає мертвий токен.
++
++export const EXPO_CHUNK = 100; // максимум повідомлень в одному запиті до Expo
++
++const TOKEN_RE = /^Expo(?:nent)?PushToken\[[^[\]\s]{8,200}\]$/;
++export const isExpoPushToken = (v: unknown): v is string => typeof v === 'string' && TOKEN_RE.test(v);
++
++export interface PushMessage {
++  to: string;
++  title: string;
++  body: string;
++  data?: Record<string, unknown>;
++}
++
++export interface SendResult {
++  sent: string[]; // Expo прийняв
++  invalid: string[]; // пристрій більше не зареєстрований: токен видаляємо
++  retry: string[]; // тимчасовий збій (мережа, 429, 5xx): повторимо пізніше
++  failed: string[]; // інша помилка, повтор не допоможе
++  errors: string[]; // опис помилок для журналу (без токенів)
++}
++
++export interface ExpoOptions {
++  url: string;
++  accessToken?: string;
++  fetchImpl?: typeof fetch;
++  timeoutMs?: number;
++}
++
++type Ticket = { status?: string; message?: string; details?: { error?: string } };
++
++export async function sendExpoPush(messages: PushMessage[], opts: ExpoOptions): Promise<SendResult> {
++  const result: SendResult = { sent: [], invalid: [], retry: [], failed: [], errors: [] };
++  const doFetch = opts.fetchImpl ?? fetch;
++  for (let i = 0; i < messages.length; i += EXPO_CHUNK) {
++    const chunk = messages.slice(i, i + EXPO_CHUNK);
++    const tokens = chunk.map((m) => m.to);
++    let res: Response;
++    try {
++      res = await doFetch(opts.url, {
++        method: 'POST',
++        headers: {
++          accept: 'application/json',
++          'content-type': 'application/json',
++          ...(opts.accessToken ? { authorization: `Bearer ${opts.accessToken}` } : {}),
++        },
++        body: JSON.stringify(chunk.map((m) => ({ ...m, sound: 'default', priority: 'high' }))),
++        signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
++      });
++    } catch (err) {
++      result.retry.push(...tokens);
++      result.errors.push(`мережа: ${(err as Error).message}`);
++      continue;
++    }
++    if (res.status === 429 || res.status >= 500) {
++      result.retry.push(...tokens);
++      result.errors.push(`Expo HTTP ${res.status}`);
++      continue;
++    }
++    const payload = (await res.json().catch(() => null)) as { data?: unknown; errors?: unknown } | null;
++    const tickets = payload?.data;
++    if (!res.ok || !Array.isArray(tickets) || tickets.length !== chunk.length) {
++      result.failed.push(...tokens);
++      result.errors.push(`Expo HTTP ${res.status}: ${JSON.stringify(payload?.errors ?? payload).slice(0, 200)}`);
++      continue;
++    }
++    tickets.forEach((t: Ticket, k) => {
++      const token = tokens[k];
++      if (t?.status === 'ok') return void result.sent.push(token);
++      const code = t?.details?.error ?? 'unknown';
++      if (code === 'DeviceNotRegistered') result.invalid.push(token);
++      else if (code === 'MessageRateExceeded') result.retry.push(token);
++      else {
++        result.failed.push(token);
++        result.errors.push(`ticket ${code}: ${t?.message ?? ''}`.trim());
++      }
++    });
++  }
++  return result;
++}
+diff --git a/backend/src/lib/push/queue.ts b/backend/src/lib/push/queue.ts
+new file mode 100644
+index 0000000..1d31141
+--- /dev/null
++++ b/backend/src/lib/push/queue.ts
+@@ -0,0 +1,122 @@
++import { randomUUID } from 'node:crypto';
++import type { FastifyBaseLogger } from 'fastify';
++import { config } from '../../config';
++import { redis } from '../../redis';
++import { deliverSubstitutionPush } from './substitutionPush';
++
++// Невелика черга пушів у Redis (на проді з appendonly, тож переживає перезапуск). Розрахована на один екземпляр
++// бекенду: задача на час обробки лежить у PROCESSING, а при старті все звідти повертається в чергу.
++// Повтори з паузою лежать у DELAYED (sorted set, оцінка це час, коли повторити).
++export const QUEUE = 'push:queue';
++export const PROCESSING = 'push:processing';
++export const DELAYED = 'push:delayed';
++export const MAX_ATTEMPTS = 4; // перша спроба і три повтори: 30 с, 1 хв, 2 хв
++const POLL_MS = 1000;
++const BATCH = 20;
++
++export interface PushJob {
++  id: string;
++  substitutionId: string;
++  attempt: number;
++  tokens?: string[]; // повтор лише для токенів, яким не вдалося відправити
++}
++
++export async function enqueueSubstitutionPush(substitutionId: string): Promise<void> {
++  const job: PushJob = { id: randomUUID(), substitutionId, attempt: 0 };
++  await redis.lpush(QUEUE, JSON.stringify(job));
++}
++
++type Deliver = typeof deliverSubstitutionPush;
++
++async function scheduleRetry(job: PushJob, tokens: string[] | undefined, log: FastifyBaseLogger): Promise<void> {
++  const attempt = job.attempt + 1;
++  if (attempt >= MAX_ATTEMPTS) {
++    log.warn({ substitutionId: job.substitutionId, tokens: tokens?.length }, 'пуш про заміну не відправлено: вичерпано спроби');
++    return;
++  }
++  const next: PushJob = { id: randomUUID(), substitutionId: job.substitutionId, attempt, ...(tokens ? { tokens } : {}) };
++  await redis.zadd(DELAYED, Date.now() + config.pushRetryDelayMs * 2 ** job.attempt, JSON.stringify(next));
++}
++
++export async function processJob(raw: string, log: FastifyBaseLogger, deliver: Deliver = deliverSubstitutionPush): Promise<void> {
++  let job: PushJob;
++  try {
++    job = JSON.parse(raw) as PushJob;
++  } catch {
++    log.error('зіпсована задача в черзі пушів, пропущено');
++    return;
++  }
++  try {
++    const result = await deliver(job.substitutionId, job.tokens);
++    if (!result) return;
++    if (result.errors.length > 0) {
++      log.warn({ substitutionId: job.substitutionId, errors: result.errors.slice(0, 5) }, 'помилки відправки пушу');
++    }
++    log.info(
++      { substitutionId: job.substitutionId, sent: result.sent.length, invalid: result.invalid.length, retry: result.retry.length, failed: result.failed.length },
++      'пуш про заміну',
++    );
++    if (result.retry.length > 0) await scheduleRetry(job, result.retry, log);
++  } catch (err) {
++    // база чи мережа впали посеред обробки: повторюємо задачу цілком
++    log.warn({ err, substitutionId: job.substitutionId }, 'пуш про заміну: збій, повторимо');
++    await scheduleRetry(job, job.tokens, log);
++  }
++}
++
++// Повтори, час яких настав, повертаються в чергу
++async function promoteDue(): Promise<void> {
++  const due = await redis.zrangebyscore(DELAYED, 0, Date.now(), 'LIMIT', 0, BATCH);
++  for (const raw of due) {
++    if ((await redis.zrem(DELAYED, raw)) === 1) await redis.lpush(QUEUE, raw);
++  }
++}
++
++export function startPushWorker(log: FastifyBaseLogger, deliver: Deliver = deliverSubstitutionPush): { stop: () => Promise<void> } {
++  let stopped = false;
++  let timer: NodeJS.Timeout | undefined;
++  let running: Promise<void> = Promise.resolve();
++  let lastError = 0;
++
++  const tick = async () => {
++    try {
++      await promoteDue();
++      for (let i = 0; i < BATCH && !stopped; i++) {
++        const raw = await redis.lmove(QUEUE, PROCESSING, 'RIGHT', 'LEFT');
++        if (!raw) break;
++        await processJob(raw, log, deliver);
++        await redis.lrem(PROCESSING, 1, raw);
++      }
++    } catch (err) {
++      // Redis недоступний: пробуємо далі, у журнал не частіше ніж раз на хвилину
++      if (Date.now() - lastError > 60_000) {
++        lastError = Date.now();
++        log.warn({ err }, 'черга пушів недоступна');
++      }
++    }
++  };
++  const loop = () => {
++    if (stopped) return;
++    running = tick().finally(() => {
++      if (!stopped) timer = setTimeout(loop, POLL_MS);
++    });
++  };
++
++  // Задачі, які оброблялись під час минулої зупинки, повертаються в чергу (можливий повторний пуш, але не втрачений)
++  const recover = async () => {
++    try {
++      while (await redis.lmove(PROCESSING, QUEUE, 'LEFT', 'RIGHT'));
++    } catch (err) {
++      log.warn({ err }, 'черга пушів: не вдалося повернути незавершені задачі');
++    }
++  };
++  running = recover().then(loop);
++
++  return {
++    stop: async () => {
++      stopped = true;
++      clearTimeout(timer);
++      await running;
++    },
++  };
++}
+diff --git a/backend/src/lib/push/substitutionMessage.ts b/backend/src/lib/push/substitutionMessage.ts
+new file mode 100644
+index 0000000..ce98490
+--- /dev/null
++++ b/backend/src/lib/push/substitutionMessage.ts
+@@ -0,0 +1,59 @@
++import type { SubstitutionKind } from '@prisma/client';
++
++// Текст пушу про заміну (F8): «що, коли і що змінилось» так, щоб вмістилось на заблокованому екрані.
++
++export interface SubstitutionPushInput {
++  kind: SubstitutionKind;
++  subject: string;
++  date: Date; // дата пари (UTC-північ, як у базі)
++  pairNumber: number;
++  startTime?: Date | null; // pair_time.start_time (1970-01-01THH:MM)
++  comment?: string | null;
++  newTeacherName?: string | null;
++  newRoom?: string | null; // «406/Т»
++  newDate?: Date | null;
++  newPairNumber?: number | null;
++  newStartTime?: Date | null;
++}
++
++const TITLES: Record<SubstitutionKind, string> = {
++  CANCELLED: 'Скасовано',
++  REPLACED: 'Інший викладач',
++  MOVED: 'Перенесено',
++  ROOM_CHANGED: 'Інша аудиторія',
++};
++const WEEKDAYS = ['нд', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
++
++const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
++// Крапка в кінці речення, але без другої після ініціалів («Іваненко І. І.»)
++const sentence = (s: string) => (s.endsWith('.') ? s : `${s}.`);
++const day = (d: Date) =>
++  `${WEEKDAYS[d.getUTCDay()]}, ${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
++const slot = (d: Date, pair: number, start?: Date | null) =>
++  `${day(d)}, ${pair} пара${start ? ` о ${start.toISOString().slice(11, 16)}` : ''}`;
++
++export function substitutionMessage(i: SubstitutionPushInput): { title: string; body: string } {
++  const when = slot(i.date, i.pairNumber, i.startTime);
++  const room = i.newRoom ? ` Аудиторія ${i.newRoom}.` : '';
++  let body: string;
++  switch (i.kind) {
++    case 'CANCELLED':
++      body = `${when}: пари не буде.`;
++      break;
++    case 'REPLACED':
++      body = `${when}. Веде ${sentence(i.newTeacherName ?? 'інший викладач')}${room}`;
++      break;
++    case 'ROOM_CHANGED':
++      body = `${when}.${room || ' Аудиторію змінено.'}`;
++      break;
++    case 'MOVED': {
++      const startChanged = i.newPairNumber != null && i.newPairNumber !== i.pairNumber;
++      const target = slot(i.newDate ?? i.date, i.newPairNumber ?? i.pairNumber, startChanged ? i.newStartTime : i.startTime);
++      body = `${when} → ${target}.${room}`;
++      break;
++    }
++  }
++  const comment = i.comment?.trim();
++  if (comment) body += ` ${cut(comment.replace(/\s+/g, ' '), 120)}`;
++  return { title: cut(`${TITLES[i.kind]}: ${i.subject}`, 80), body: cut(body, 300) };
++}
+diff --git a/backend/src/lib/push/substitutionPush.ts b/backend/src/lib/push/substitutionPush.ts
+new file mode 100644
+index 0000000..b7a6e3f
+--- /dev/null
++++ b/backend/src/lib/push/substitutionPush.ts
+@@ -0,0 +1,63 @@
++import { config } from '../../config';
++import { prisma } from '../../db';
++import { sendExpoPush, type PushMessage, type SendResult } from './expo';
++import { substitutionMessage } from './substitutionMessage';
++
++// Кому і що відправити про заміну. Отримувачі рахуються в момент відправки, а не створення заміни: якщо заміну
++// вже скасовано, пуш не йде; хто встиг вимкнути сповіщення, теж не отримає.
++export async function deliverSubstitutionPush(
++  substitutionId: string,
++  onlyTokens?: string[],
++  send: (messages: PushMessage[]) => Promise<SendResult> = (m) =>
++    sendExpoPush(m, { url: config.expoPushUrl, accessToken: config.expoAccessToken }),
++): Promise<SendResult | null> {
++  const sub = await prisma.substitution.findUnique({
++    where: { id: substitutionId },
++    include: {
++      lesson: { include: { pair: true } },
++      newTeacher: true,
++      newClassroom: { include: { building: true } },
++      newPair: true,
++    },
++  });
++  if (!sub) return null; // заміну скасували раніше, ніж черга дійшла до пушу
++
++  const { lesson } = sub;
++  const rows = await prisma.notificationToken.findMany({
++    where: {
++      ...(onlyTokens ? { pushToken: { in: onlyTokens } } : {}),
++      user: {
++        groupId: lesson.groupId,
++        notifySubstitutions: true,
++        // автор заміни (староста) знає про неї і без пушу
++        ...(sub.createdById ? { id: { not: sub.createdById } } : {}),
++        // як у розкладі: пара підгрупи N видна студентам підгрупи N і тим, хто бачить усі (0)
++        ...(lesson.subgroup === 0 ? {} : { subgroup: { in: [0, lesson.subgroup] } }),
++      },
++    },
++    select: { pushToken: true },
++  });
++  if (rows.length === 0) return { sent: [], invalid: [], retry: [], failed: [], errors: [] };
++
++  const { title, body } = substitutionMessage({
++    kind: sub.kind,
++    subject: lesson.subject,
++    date: lesson.date,
++    pairNumber: lesson.pairNumber,
++    startTime: lesson.pair.startTime,
++    comment: sub.comment,
++    newTeacherName: sub.newTeacher?.fullName,
++    newRoom: sub.newClassroom ? `${sub.newClassroom.number}/${sub.newClassroom.building.code}` : null,
++    newDate: sub.newDate,
++    newPairNumber: sub.newPairNumber,
++    newStartTime: sub.newPair?.startTime,
++  });
++  // Застосунок за data відкриває потрібну пару (дата тижня й id пари)
++  const data = { type: 'substitution', substitutionId: sub.id, lessonId: lesson.id, date: lesson.date.toISOString().slice(0, 10) };
++  const result = await send(rows.map((r) => ({ to: r.pushToken, title, body, data })));
++
++  if (result.invalid.length > 0) {
++    await prisma.notificationToken.deleteMany({ where: { pushToken: { in: result.invalid } } });
++  }
++  return result;
++}
+diff --git a/backend/src/routes/pushTokens.ts b/backend/src/routes/pushTokens.ts
+new file mode 100644
+index 0000000..df2db09
+--- /dev/null
++++ b/backend/src/routes/pushTokens.ts
+@@ -0,0 +1,44 @@
++import type { FastifyInstance } from 'fastify';
++import { prisma } from '../db';
++import { isExpoPushToken } from '../lib/push/expo';
++import { requireAuth } from '../plugins/auth';
++
++// Скільки пристроїв одного користувача отримують пуші: старіші токени відкидаються
++export const MAX_DEVICES = 10;
++
++const tokenOf = (body: unknown) => (body && typeof body === 'object' ? (body as { token?: unknown }).token : undefined);
++
++// F8: застосунок реєструє Expo push-токен пристрою після дозволу на сповіщення і прибирає його при виході
++export async function pushTokenRoutes(app: FastifyInstance) {
++  app.post('/me/push-token', { preHandler: requireAuth }, async (req, reply) => {
++    const token = tokenOf(req.body);
++    if (!isExpoPushToken(token)) return reply.code(400).send({ error: 'INVALID_PUSH_TOKEN' });
++    const userId = req.userId!; // requireAuth гарантує
++    // Access-токен ще дійсний після видалення акаунта: відсутній користувач це 401, а не 500 через зовнішній ключ
++    if (!(await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }))) {
++      return reply.code(401).send({ error: 'UNAUTHORIZED' });
++    }
++    // Той самий пристрій під іншим акаунтом: токен переходить до нового власника, старий пушів більше не отримує
++    await prisma.notificationToken.upsert({
++      where: { pushToken: token },
++      create: { userId, pushToken: token },
++      update: { userId, lastSeenAt: new Date() },
++    });
++    const extra = await prisma.notificationToken.findMany({
++      where: { userId },
++      orderBy: { lastSeenAt: 'desc' },
++      skip: MAX_DEVICES,
++      select: { id: true },
++    });
++    if (extra.length > 0) await prisma.notificationToken.deleteMany({ where: { id: { in: extra.map((t) => t.id) } } });
++    return reply.code(204).send();
++  });
++
++  // Ідемпотентно: чужий чи вже видалений токен теж дає 204, але чужий не видаляється
++  app.delete('/me/push-token', { preHandler: requireAuth }, async (req, reply) => {
++    const token = tokenOf(req.body);
++    if (!isExpoPushToken(token)) return reply.code(400).send({ error: 'INVALID_PUSH_TOKEN' });
++    await prisma.notificationToken.deleteMany({ where: { pushToken: token, userId: req.userId } });
++    return reply.code(204).send();
++  });
++}
+diff --git a/backend/src/routes/substitutions.ts b/backend/src/routes/substitutions.ts
+index 5e94213..029ebec 100644
+--- a/backend/src/routes/substitutions.ts
++++ b/backend/src/routes/substitutions.ts
+@@ -1,6 +1,8 @@
+ import { SubstitutionKind } from '@prisma/client';
+ import type { FastifyInstance } from 'fastify';
++import { config } from '../config';
+ import { prisma } from '../db';
++import { enqueueSubstitutionPush } from '../lib/push/queue';
+ import { isIsoDate, isUuid } from '../lib/validation';
+ import { requireRole } from '../plugins/roles';
+ 
+@@ -79,6 +81,12 @@ export async function substitutionRoutes(app: FastifyInstance) {
+     const sub = await prisma.substitution.create({
+       data: { lessonId: lesson.id, kind, comment: (b.comment as string | null | undefined) ?? null, createdById: user.id, ...data },
+     });
++    // F8: пуш групі. Збій черги (Redis) не скасовує заміну: вона вже в розкладі, пушу просто не буде
++    if (config.pushEnabled) {
++      await enqueueSubstitutionPush(sub.id).catch((err) =>
++        req.log.warn({ err, substitutionId: sub.id }, 'пуш про заміну не поставлено в чергу'),
++      );
++    }
+ 
+     return reply.code(201).send({
+       id: sub.id,
+diff --git a/backend/src/server.ts b/backend/src/server.ts
+index 93bcfa9..6a3ba73 100644
+--- a/backend/src/server.ts
++++ b/backend/src/server.ts
+@@ -1,8 +1,16 @@
+ import { buildApp } from './app';
++import { config } from './config';
++import { startPushWorker } from './lib/push/queue';
+ 
+ const port = Number(process.env.PORT ?? 3000);
+ const app = buildApp();
+ 
++// Воркер пушів (F8) у тому ж процесі: бекенд працює одним екземпляром
++if (config.pushEnabled) {
++  const worker = startPushWorker(app.log);
++  app.addHook('onClose', () => worker.stop());
++}
++
+ app.listen({ port, host: '0.0.0.0' }).catch((err) => {
+   app.log.error(err);
+   process.exit(1);
+diff --git a/backend/test/e2e/f8-notifications.test.ts b/backend/test/e2e/f8-notifications.test.ts
+new file mode 100644
+index 0000000..e1ce8a5
+--- /dev/null
++++ b/backend/test/e2e/f8-notifications.test.ts
+@@ -0,0 +1,141 @@
++import { createServer, type Server } from 'node:http';
++import { afterAll, beforeAll, describe, expect, it } from 'vitest';
++import { adminToken, API, emptyGroup, loginToken, send, setupStudent, uniqueSlot, userId, weekLessons } from './helpers';
++
++// Підставний Expo Push: сервер E2E запущено з EXPO_PUSH_URL на нього (див. ci.yml). Токени з «GONE» відповідають
++// DeviceNotRegistered, перший запит з «FLAKY» отримує 503 (тимчасовий збій, має бути повтор).
++const PUSH_URL = new URL(process.env.EXPO_PUSH_URL ?? 'http://localhost:4010/push');
++type Pushed = { to: string; title: string; body: string; data: { lessonId: string; type: string } };
++const received: Pushed[] = [];
++let flakyFailed = false;
++let stub: Server;
++
++beforeAll(async () => {
++  stub = createServer((req, res) => {
++    let raw = '';
++    req.on('data', (c) => (raw += c));
++    req.on('end', () => {
++      const messages = JSON.parse(raw) as Pushed[];
++      if (!flakyFailed && messages.some((m) => m.to === token('FLAKY'))) {
++        flakyFailed = true;
++        res.writeHead(503).end();
++        return;
++      }
++      received.push(...messages);
++      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
++        data: messages.map((m) => (m.to.includes('GONE')
++          ? { status: 'error', message: 'not registered', details: { error: 'DeviceNotRegistered' } }
++          : { status: 'ok', id: 'ticket' })),
++      }));
++    });
++  });
++  await new Promise<void>((resolve) => stub.listen(Number(PUSH_URL.port), resolve));
++});
++afterAll(() => new Promise<void>((resolve) => stub.close(() => resolve())));
++
++const run = Date.now();
++const token = (name: string) => `ExponentPushToken[e2e-${name}-${run}]`;
++const register = (access: string, t: string) => send('POST', '/me/push-token', access, { token: t });
++const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
++
++// Пуші про пару lessonId, що дійшли до Expo: чекаємо, поки прийде очікуване, і ще трохи, щоб зайве теж встигло прийти
++async function pushesFor(lessonId: string, expected: string[], timeoutMs = 10_000): Promise<Pushed[]> {
++  const started = Date.now();
++  // лише токени цього запуску: локально в групі лишаються користувачі з попередніх запусків
++  const mine = () => received.filter((m) => m.data?.lessonId === lessonId && m.to.endsWith(`-${run}]`));
++  while (Date.now() - started < timeoutMs && !expected.every((t) => mine().some((m) => m.to === t))) await sleep(200);
++  await sleep(1500);
++  return mine();
++}
++
++async function importLessonFor(admin: string, subject: string, subgroup: number) {
++  const slot = uniqueSlot(2);
++  const res = await send('POST', '/admin/schedule/import', admin, {
++    faculties: [{ name: 'Тестовий факультет', short_name: 'ТФ' }],
++    groups: [{ code: 'ТЕСТ-31', course: 3, faculty: 'ТФ' }],
++    lessons: [{ group: 'ТЕСТ-31', date: slot.date, pair: slot.pair, subject, type: 'PRACTICE', subgroup }],
++  });
++  expect(res.status).toBe(200);
++  return slot;
++}
++
++async function headman(admin: string, name: string) {
++  const t = await setupStudent(`f8.${name}.${run}@lnu.edu.ua`);
++  expect((await send('PATCH', `/admin/users/${await userId(t)}/role`, admin, { role: 'HEADMAN' })).status).toBe(200);
++  return t;
++}
++
++describe('F8: токен пристрою', () => {
++  it('без входу 401, некоректний токен 400, коректний 204; видалення ідемпотентне', async () => {
++    const res = await fetch(`${API}/me/push-token`, {
++      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: token('anon') }),
++    });
++    expect(res.status).toBe(401);
++    const access = await loginToken(`f8.token.${run}@lnu.edu.ua`);
++    for (const bad of [{}, { token: 'abc' }, { token: 'fcm:123' }]) {
++      const r = await send('POST', '/me/push-token', access, bad);
++      expect([r.status, ((await r.json()) as { error: string }).error]).toEqual([400, 'INVALID_PUSH_TOKEN']);
++    }
++    expect((await register(access, token('ok'))).status).toBe(204);
++    expect((await register(access, token('ok'))).status).toBe(204); // повторна реєстрація не помилка
++    expect((await send('DELETE', '/me/push-token', access, { token: token('ok') })).status).toBe(204);
++    expect((await send('DELETE', '/me/push-token', access, { token: token('ok') })).status).toBe(204);
++  });
++});
++
++describe('F8: пуш про заміну', () => {
++  it('йде студентам групи з урахуванням підгрупи й перемикача, але не автору і не іншій групі', async () => {
++    const admin = await adminToken();
++    const head = await headman(admin, 'head');
++    const sub1 = await setupStudent(`f8.sub1.${run}@lnu.edu.ua`, 1);
++    const sub2 = await setupStudent(`f8.sub2.${run}@lnu.edu.ua`, 2);
++    const all = await setupStudent(`f8.all.${run}@lnu.edu.ua`, 0);
++    const off = await setupStudent(`f8.off.${run}@lnu.edu.ua`, 0);
++    const left = await setupStudent(`f8.left.${run}@lnu.edu.ua`, 0);
++    const other = await setupStudent(`f8.other.${run}@lnu.edu.ua`, 0);
++    expect((await send('PATCH', '/me', off, { notifySubstitutions: false })).status).toBe(200);
++    expect((await send('PATCH', '/me', other, { groupId: await emptyGroup(admin, `F8-${run}`) })).status).toBe(200);
++
++    for (const [t, name] of [[head, 'head'], [sub2, 'sub2'], [all, 'all'], [off, 'off'], [left, 'left'], [other, 'other']] as const) {
++      expect((await register(t, token(name))).status).toBe(204);
++    }
++    // пристрій перейшов від студента підгрупи 2 до студента підгрупи 1: пуш іде новому власнику
++    expect((await register(sub2, token('moved'))).status).toBe(204);
++    expect((await register(sub1, token('moved'))).status).toBe(204);
++    // вийшов з акаунта: токен прибрано
++    expect((await send('DELETE', '/me/push-token', left, { token: token('left') })).status).toBe(204);
++
++    const subject = `E2E пуш ${run}`;
++    const slot = await importLessonFor(admin, subject, 1);
++    const lesson = (await weekLessons(head, slot.date)).find((l) => l.date === slot.date && l.pairNumber === slot.pair)!;
++    expect((await send('POST', '/substitutions', head, { lessonId: lesson.id, kind: 'CANCELLED', comment: 'Хвороба' })).status).toBe(201);
++
++    const pushes = await pushesFor(lesson.id, [token('moved'), token('all')]);
++    expect(pushes.map((p) => p.to).sort()).toEqual([token('all'), token('moved')].sort());
++    expect(pushes[0].title).toBe(`Скасовано: ${subject}`);
++    expect(pushes[0].body).toContain('пари не буде. Хвороба');
++    expect(pushes[0].data).toMatchObject({ type: 'substitution', lessonId: lesson.id });
++  });
++
++  it('мертвий токен видаляється, а тимчасовий збій Expo повторюється', async () => {
++    const admin = await adminToken();
++    const head = await headman(admin, 'head2');
++    const gone = await setupStudent(`f8.gone.${run}@lnu.edu.ua`);
++    const flaky = await setupStudent(`f8.flaky.${run}@lnu.edu.ua`);
++    expect((await register(gone, token('GONE'))).status).toBe(204);
++    expect((await register(flaky, token('FLAKY'))).status).toBe(204);
++
++    const first = await importLessonFor(admin, `E2E мертвий токен ${run}`, 0);
++    const lesson1 = (await weekLessons(head, first.date)).find((l) => l.date === first.date && l.pairNumber === first.pair)!;
++    expect((await send('POST', '/substitutions', head, { lessonId: lesson1.id, kind: 'CANCELLED' })).status).toBe(201);
++    const pushes1 = await pushesFor(lesson1.id, [token('GONE'), token('FLAKY')], 15_000);
++    expect(flakyFailed).toBe(true);
++    expect(pushes1.map((p) => p.to)).toContain(token('FLAKY')); // дійшов після повтору
++
++    const second = await importLessonFor(admin, `E2E після видалення ${run}`, 0);
++    const lesson2 = (await weekLessons(head, second.date)).find((l) => l.date === second.date && l.pairNumber === second.pair)!;
++    expect((await send('POST', '/substitutions', head, { lessonId: lesson2.id, kind: 'CANCELLED' })).status).toBe(201);
++    const pushes2 = await pushesFor(lesson2.id, [token('FLAKY')]);
++    expect(pushes2.map((p) => p.to)).not.toContain(token('GONE'));
++  });
++});
+diff --git a/backend/test/unit/push.test.ts b/backend/test/unit/push.test.ts
+new file mode 100644
+index 0000000..3552bf5
+--- /dev/null
++++ b/backend/test/unit/push.test.ts
+@@ -0,0 +1,104 @@
++import { describe, expect, it } from 'vitest';
++import { EXPO_CHUNK, isExpoPushToken, sendExpoPush, type PushMessage } from '../../src/lib/push/expo';
++import { substitutionMessage } from '../../src/lib/push/substitutionMessage';
++
++const tok = (i: number | string) => `ExponentPushToken[token-${i}-abcdefgh]`;
++const msg = (to: string): PushMessage => ({ to, title: 't', body: 'b' });
++const json = (status: number, body: unknown) =>
++  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
++
++describe('isExpoPushToken', () => {
++  it('приймає токени Expo і відкидає решту', () => {
++    expect(isExpoPushToken('ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]')).toBe(true);
++    expect(isExpoPushToken('ExpoPushToken[xxxxxxxxxxxxxxxxxxxxxx]')).toBe(true);
++    for (const bad of ['', 'abc', 'ExponentPushToken[]', 'ExponentPushToken[a b c d e f g h]', 'fcm:xyz', 42, null]) {
++      expect(isExpoPushToken(bad)).toBe(false);
++    }
++  });
++});
++
++describe('sendExpoPush', () => {
++  it('ділить на запити по 100 і розкладає квитанції за типом помилки', async () => {
++    const calls: unknown[][] = [];
++    const fetchImpl = (async (_url: string, init: RequestInit) => {
++      const body = JSON.parse(String(init.body)) as { to: string }[];
++      calls.push(body);
++      return json(200, {
++        data: body.map((m) =>
++          m.to.includes('gone') ? { status: 'error', details: { error: 'DeviceNotRegistered' } }
++          : m.to.includes('slow') ? { status: 'error', details: { error: 'MessageRateExceeded' } }
++          : m.to.includes('big') ? { status: 'error', message: 'too big', details: { error: 'MessageTooBig' } }
++          : { status: 'ok', id: 'x' }),
++      });
++    }) as typeof fetch;
++    const messages = [...Array.from({ length: EXPO_CHUNK + 1 }, (_, i) => msg(tok(i))), msg(tok('gone')), msg(tok('slow')), msg(tok('big'))];
++    const r = await sendExpoPush(messages, { url: 'http://x', fetchImpl });
++    expect(calls.map((c) => c.length)).toEqual([EXPO_CHUNK, 4]);
++    expect(r.sent).toHaveLength(EXPO_CHUNK + 1);
++    expect(r.invalid).toEqual([tok('gone')]);
++    expect(r.retry).toEqual([tok('slow')]);
++    expect(r.failed).toEqual([tok('big')]);
++    expect(r.errors[0]).toContain('MessageTooBig');
++    expect(r.errors.join()).not.toContain('token-'); // токени пристроїв у журнал не потрапляють
++  });
++
++  it('мережа, 429 і 5xx це повтор, 4xx і чудна відповідь це провал без повтору', async () => {
++    const run = (impl: () => Promise<Response>) => sendExpoPush([msg(tok(1))], { url: 'http://x', fetchImpl: impl as unknown as typeof fetch });
++    expect((await run(async () => { throw new Error('ECONNREFUSED'); })).retry).toEqual([tok(1)]);
++    expect((await run(async () => json(429, {}))).retry).toEqual([tok(1)]);
++    expect((await run(async () => json(503, {}))).retry).toEqual([tok(1)]);
++    expect((await run(async () => json(400, { errors: [{ code: 'VALIDATION_ERROR' }] }))).failed).toEqual([tok(1)]);
++    expect((await run(async () => json(200, { data: [] }))).failed).toEqual([tok(1)]);
++  });
++
++  it('передає токен доступу Expo, якщо він заданий', async () => {
++    let auth: string | undefined;
++    const fetchImpl = (async (_u: string, init: RequestInit) => {
++      auth = (init.headers as Record<string, string>).authorization;
++      return json(200, { data: [{ status: 'ok' }] });
++    }) as typeof fetch;
++    await sendExpoPush([msg(tok(1))], { url: 'http://x', accessToken: 'secret', fetchImpl });
++    expect(auth).toBe('Bearer secret');
++  });
++});
++
++describe('substitutionMessage', () => {
++  const base = {
++    subject: 'Програмування',
++    date: new Date('2026-11-06T00:00:00Z'), // пʼятниця
++    pairNumber: 2,
++    startTime: new Date('1970-01-01T10:10:00Z'),
++  };
++
++  it('скасування: предмет у заголовку, день, пара й час у тексті', () => {
++    expect(substitutionMessage({ ...base, kind: 'CANCELLED' })).toEqual({
++      title: 'Скасовано: Програмування',
++      body: 'пт, 06.11, 2 пара о 10:10: пари не буде.',
++    });
++  });
++
++  it('інший викладач і аудиторія', () => {
++    expect(substitutionMessage({ ...base, kind: 'REPLACED', newTeacherName: 'Іваненко І. І.' }).body)
++      .toBe('пт, 06.11, 2 пара о 10:10. Веде Іваненко І. І.');
++    expect(substitutionMessage({ ...base, kind: 'ROOM_CHANGED', newRoom: '406/Т' }).body).toBe('пт, 06.11, 2 пара о 10:10. Аудиторія 406/Т.');
++  });
++
++  it('перенесення показує звідки і куди, з часом нової пари', () => {
++    const m = substitutionMessage({
++      ...base, kind: 'MOVED', newDate: new Date('2026-11-07T00:00:00Z'), newPairNumber: 3,
++      newStartTime: new Date('1970-01-01T11:50:00Z'),
++    });
++    expect(m.body).toBe('пт, 06.11, 2 пара о 10:10 → сб, 07.11, 3 пара о 11:50.');
++    // лише інша дата: час той самий
++    expect(substitutionMessage({ ...base, kind: 'MOVED', newDate: new Date('2026-11-09T00:00:00Z') }).body)
++      .toBe('пт, 06.11, 2 пара о 10:10 → пн, 09.11, 2 пара о 10:10.');
++  });
++
++  it('коментар додається і обрізається, довгий предмет теж', () => {
++    const m = substitutionMessage({ ...base, kind: 'CANCELLED', subject: 'П'.repeat(200), comment: `Хвороба\n${'x'.repeat(300)}` });
++    expect(m.title.length).toBeLessThanOrEqual(80);
++    expect(m.title.endsWith('…')).toBe(true);
++    expect(m.body).toContain('пари не буде. Хвороба x');
++    expect(m.body.length).toBeLessThanOrEqual(300);
++  });
++});
+diff --git a/deploy/.env.example b/deploy/.env.example
+index 08819d8..c627277 100644
+--- a/deploy/.env.example
++++ b/deploy/.env.example
+@@ -22,6 +22,10 @@ CORS_ORIGINS=
+ PRIVACY_CONTACT_EMAIL=
+ # Хто обробляє дані (порожньо = «команда проєкту ДеПара»)
+ PRIVACY_OPERATOR=
++# Пуші про заміни через Expo Push (F8). Токен потрібен, лише якщо в проєкті Expo увімкнено Enhanced Security for Push
++EXPO_ACCESS_TOKEN=
++# false вимикає пуші
++PUSH_ENABLED=true
+ 
+ # Моніторинг (необов'язково, але рекомендовано). URL перевірок з healthchecks.io або схожого сервісу:
+ # сервіс сповіщає, коли ping перестають надходити. Див. docs/deploy-vps.md, розділи 6 і 8.
+diff --git a/deploy/docker-compose.prod.yml b/deploy/docker-compose.prod.yml
+index c32c4f8..a4ab1cb 100644
+--- a/deploy/docker-compose.prod.yml
++++ b/deploy/docker-compose.prod.yml
+@@ -52,6 +52,8 @@ services:
+       REFRESH_REUSE_GRACE_SECONDS: ${REFRESH_REUSE_GRACE_SECONDS:-30}
+       PRIVACY_CONTACT_EMAIL: ${PRIVACY_CONTACT_EMAIL:-}
+       PRIVACY_OPERATOR: ${PRIVACY_OPERATOR:-}
++      EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
++      PUSH_ENABLED: ${PUSH_ENABLED:-true}
+       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+       RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-300}
+       RATE_LIMIT_IMPORT_PER_MINUTE: ${RATE_LIMIT_IMPORT_PER_MINUTE:-30}
+diff --git a/docs/deploy.md b/docs/deploy.md
+index 167bec5..c268033 100644
+--- a/docs/deploy.md
++++ b/docs/deploy.md
+@@ -38,6 +38,8 @@ Docker або Node (Render, Railway, Fly.io тощо). Нижче загальн
+ | `PRIVACY_OPERATOR` | ні | Хто обробляє дані (за замовчуванням «команда проєкту ДеПара») |
+ | `CORS_ORIGINS` | для веб-адмінки | Origin веб-адмінки через кому, без слеша в кінці. Порожньо = CORS вимкнений (мобільному застосунку він не потрібен) |
+ | `ADMIN_EMAILS` | для першого адміна | Пошти через кому, які отримують роль ADMIN при вході |
++| `PUSH_ENABLED` | ні | `false` вимикає пуші про заміни (F8). За замовчуванням увімкнено: черга в Redis, відправка через Expo Push |
++| `EXPO_ACCESS_TOKEN` | ні | Токен доступу Expo, потрібен лише якщо в проєкті Expo увімкнено «Enhanced Security for Push Notifications» |
+ 
+ **У проді не задавати `NODE_ENV=test` і `AUTH_MODE=fake`.** Образ сам ставить `NODE_ENV=production`,
+ а фейковий вхід і демо-консоль (`/dev`) працюють лише в тестовому режимі.
+diff --git a/specs/README.md b/specs/README.md
+index f20c679..eadb710 100644
+--- a/specs/README.md
++++ b/specs/README.md
+@@ -20,7 +20,7 @@
+ | [f5-search.md](f5-search.md) | Пошук аудиторій і викладачів | Аудиторії й корпуси готові (бекенд і UI, фільтр, маршрут). Пошук викладачів відкладено до V2 |
+ | [f6-substitutions.md](f6-substitutions.md) | Заміни пар (староста) | Бекенд і UI готові: староста додає й скасовує заміну, група бачить її в розкладі. Пушів немає (F8) |
+ | [f7-admin.md](f7-admin.md) | Адмінка: ролі, імпорт розкладу | Бекенд є (група, CORS), веб-сторінка в плані |
+-| [f8-notifications.md](f8-notifications.md) | Сповіщення і нагадування | Локальні нагадування перед парою є; пушів про заміни немає |
++| [f8-notifications.md](f8-notifications.md) | Сповіщення і нагадування | Локальні нагадування перед парою є. Пуші про заміни: бекенд готовий (токен пристрою, Expo Push), у застосунку не реалізовано |
+ | [f9-profile.md](f9-profile.md) | Профіль і налаштування | Частково: дані користувача, зміна групи й підгрупи, вихід, видалення акаунта, посилання на політику конфіденційності. Нагадування перед парою в UI; перемикач «Зміни та скасування» чекає на пуші F8, теми немає |
+ | [v2-backlog.md](v2-backlog.md) | Не для MVP | Ідеї |
+ 
+diff --git a/specs/f6-substitutions.md b/specs/f6-substitutions.md
+index a2c98aa..d3bd7d9 100644
+--- a/specs/f6-substitutions.md
++++ b/specs/f6-substitutions.md
+@@ -35,4 +35,4 @@
+ - [ ] Після створення заміни розклад групи оновлюється без перезапуску.
+ 
+ ## Відкриті питання
+-- Сповіщення групі після створення заміни: чекає на F8.
++- Сповіщення групі після створення заміни: бекенд відправляє (F8), у застосунку реєстрації токена ще немає.
+diff --git a/specs/f8-notifications.md b/specs/f8-notifications.md
+index 0e9d799..e9a4d3f 100644
+--- a/specs/f8-notifications.md
++++ b/specs/f8-notifications.md
+@@ -1,6 +1,6 @@
+ # F8. Сповіщення та нагадування
+ 
+-**Стан:** локальні нагадування перед парою є в застосунку; пушів про заміни немає · **Відповідальні:** бекенд, мобільний
++**Стан:** локальні нагадування перед парою є в застосунку; пуші про заміни: бекенд готовий (токен пристрою, Expo Push), у застосунку не реалізовано · **Відповідальні:** бекенд, мобільний
+ 
+ ## Навіщо
+ Студент дізнається про заміну одразу і не пропускає пару.
+@@ -11,23 +11,43 @@
+ - **Налаштування:** окремий перемикач «Зміни та скасування» і час нагадування в профілі.
+ - Дозвіл на сповіщення питається на останньому кроці онбордингу (F2) або коли користувач вмикає нагадування в профілі; «Пізніше» нічого не вмикає.
+ 
+-## Стан бекенду
+-У схемі є таблиця `NotificationToken` (токен пристрою і користувач), але немає ендпоінтів для реєстрації токена і немає відправки. Налаштування вже зберігаються: `reminderMinutes` і перемикач `notifySubstitutions` змінюються через `PATCH /me` (F9).
++## Сервіс доставки
++**Expo Push.** Застосунок на Expo, тож один токен (`ExponentPushToken[...]`) працює і на Android, і на iOS без окремого
++налаштування FCM і APNs у бекенді. У таблиці `notification_token` поле `push_token`.
+ 
+-## Що потрібно
++## API
++| Метод і шлях | Для чого |
++|---|---|
++| `POST /me/push-token` | Зберегти Expo push-токен пристрою: `{ "token": "ExponentPushToken[...]" }` → 204. Повторна реєстрація оновлює час; токен, що був в іншого користувача (інший акаунт на тому ж пристрої), переходить до поточного. До 10 пристроїв на користувача, старіші відкидаються |
++| `DELETE /me/push-token` | Прибрати токен цього пристрою (перед виходом з акаунта) → 204, ідемпотентно. Чужий токен не видаляється |
++
++Помилки: `INVALID_PUSH_TOKEN` (400), `UNAUTHORIZED` (401).
++
++## Як відправляється пуш
++- `POST /substitutions` ставить задачу в чергу (Redis). Збій черги не скасовує заміну.
++- Воркер у процесі бекенду (раз на секунду) рахує отримувачів у момент відправки: користувачі групи пари з
++  `notifySubstitutions = true`, крім автора заміни; для пари підгрупи N це підгрупа N і ті, хто бачить усі (0). Якщо
++  заміну вже скасовано, пуш не йде.
++- Текст: заголовок «Скасовано / Інший викладач / Перенесено / Інша аудиторія: предмет», тіло «пт, 06.11, 2 пара о 10:10»
++  і що змінилось, плюс коментар старости (обрізаний). `data`: `type: "substitution"`, `substitutionId`, `lessonId`, `date`
++  (застосунок відкриває тиждень з цією парою).
++- `DeviceNotRegistered` від Expo видаляє токен. Мережа, 429, 5xx і `MessageRateExceeded` повторюються для тих самих
++  токенів через 30 с, 1 хв і 2 хв, потім задача відкидається з записом у журнал.
++- Квитанції доставки Expo (receipts) не перевіряються: це наступний крок, якщо пуші губитимуться.
++- Пуш про скасування самої заміни (`DELETE /substitutions/:id`) не відправляється.
++
++## Що лишилось
+ | Що | Хто |
+ |---|---|
+-| Ендпоінт реєстрації токена пристрою | Бекенд |
+-| Відправка пушу групі при створенні заміни, черга | Бекенд |
+-| Вибір сервісу доставки (FCM чи Expo Push) і узгодження з назвою поля `fcmToken` | Техлід, бекенд |
+-| Запит дозволу, реєстрація токена, локальні нагадування | Мобільний |
++| Запит дозволу, `POST /me/push-token` після входу, `DELETE /me/push-token` перед виходом, відкриття пари з пушу | Мобільний |
+ 
+ ## Критерії приймання
+ - [ ] Після дозволу токен пристрою зберігається на сервері.
+-- [ ] Створення заміни ставить пуш у чергу для всіх користувачів групи (з урахуванням підгрупи).
++- [ ] Створення заміни ставить пуш у чергу для всіх користувачів групи (з урахуванням підгрупи) крім автора (E2E `f8-notifications`).
+ - [ ] Пуш приходить на заблокований екран з текстом заміни.
+-- [ ] Вимкнені «Зміни та скасування» не отримують пуш.
++- [ ] Вимкнені «Зміни та скасування» не отримують пуш (E2E `f8-notifications`).
+ - [ ] Нагадування спрацьовує за обраний час перед парою.
+ 
+ ## Відкриті питання
+-- FCM чи Expo Push і як це відтворити в E2E.
++- Як перевірити доставку на справжньому пристрої в мобільних E2E (у бекенд-E2E Expo підставний).
++- Чи потрібен пуш, коли староста скасовує заміну.

@@ -1,0 +1,82 @@
+diff --git a/backend/src/routes/profile.ts b/backend/src/routes/profile.ts
+index 9c1923e..c544245 100644
+--- a/backend/src/routes/profile.ts
++++ b/backend/src/routes/profile.ts
+@@ -49,6 +49,14 @@ export async function profileRoutes(app: FastifyInstance) {
+       return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
+     }
+     // Access-токен живе 15 хв і після видалення акаунта ще дійсний: відсутній користувач це 401, а не 500
++    const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { role: true, groupId: true } });
++    if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
++    // Права старости прив'язані до його групи (F6: заміни лише своєї групи). Якби староста міг сам перейти
++    // в іншу групу, він отримав би право змінювати її розклад. Тому групу старості змінює адмін
++    // (PATCH /admin/users/:id/group), а сам він може змінити лише підгрупу.
++    if (user.role === 'HEADMAN' && user.groupId && user.groupId !== groupId) {
++      return reply.code(403).send({ error: 'HEADMAN_GROUP_LOCKED' });
++    }
+     const updated = await prisma.user.updateMany({
+       where: { id: req.userId },
+       data: { groupId, subgroup: (subgroup as number | undefined) ?? 0 },
+diff --git a/backend/test/e2e/f9-profile.test.ts b/backend/test/e2e/f9-profile.test.ts
+index d9d879f..1b26146 100644
+--- a/backend/test/e2e/f9-profile.test.ts
++++ b/backend/test/e2e/f9-profile.test.ts
+@@ -79,3 +79,37 @@ describe('F9: видалення акаунта', () => {
+     expect((await send('DELETE', '/me', b)).status).toBe(204);
+   });
+ });
++
++describe('F9: зміна групи', () => {
++  const groupsOf = async (token: string) =>
++    (await (await fetch(`${API}/groups`, { headers: authHeaders(token) })).json()) as { id: string; code: string }[];
++
++  it('студент змінює групу й підгрупу сам', async () => {
++    const student = await setupStudent(`f9.student.${run}@lnu.edu.ua`);
++    const groups = await groupsOf(student);
++    const other = groups.find((g) => g.code === 'ТЕСТ-32')!;
++    const res = await send('PATCH', '/me', student, { groupId: other.id, subgroup: 2 });
++    expect(res.status).toBe(200);
++    const me = (await (await fetch(`${API}/me`, { headers: authHeaders(student) })).json()) as { groupId: string; subgroup: number };
++    expect(me).toMatchObject({ groupId: other.id, subgroup: 2 });
++  });
++
++  it('староста не може сам перейти в іншу групу (403), підгрупу змінює, групу йому змінює адмін', async () => {
++    const admin = await adminToken();
++    const headman = await setupStudent(`f9.headman.${run}@lnu.edu.ua`);
++    await send('PATCH', `/admin/users/${await userId(headman)}/role`, admin, { role: 'HEADMAN' });
++    const groups = await groupsOf(headman);
++    const own = groups.find((g) => g.code === 'ТЕСТ-31')!;
++    const other = groups.find((g) => g.code === 'ТЕСТ-32')!;
++
++    const moved = await send('PATCH', '/me', headman, { groupId: other.id });
++    expect(moved.status).toBe(403);
++    expect(await errorOf(moved)).toBe('HEADMAN_GROUP_LOCKED');
++
++    expect((await send('PATCH', '/me', headman, { groupId: own.id, subgroup: 1 })).status).toBe(200);
++
++    expect((await send('PATCH', `/admin/users/${await userId(headman)}/group`, admin, { groupId: other.id })).status).toBe(200);
++    const me = (await (await fetch(`${API}/me`, { headers: authHeaders(headman) })).json()) as { groupId: string };
++    expect(me.groupId).toBe(other.id);
++  });
++});
+diff --git a/specs/f9-profile.md b/specs/f9-profile.md
+index 5590527..9de6b81 100644
+--- a/specs/f9-profile.md
++++ b/specs/f9-profile.md
+@@ -9,7 +9,7 @@
+ | Метод і шлях | Для чого |
+ |---|---|
+ | `GET /me` | `id`, `email`, `fullName`, `role`, `groupId`, `subgroup`, `reminderMinutes` |
+-| `PATCH /me` | Зараз змінює лише `groupId` і `subgroup` |
++| `PATCH /me` | Зараз змінює лише `groupId` і `subgroup`. Староста не може сам перейти в іншу групу: 403 `HEADMAN_GROUP_LOCKED` (права на заміни прив'язані до групи), групу йому змінює адмін через `PATCH /admin/users/:id/group`; підгрупу староста змінює сам |
+ | `POST /auth/logout` | Вихід |
+ | `DELETE /me` | Видалити свій акаунт (204). `LAST_ADMIN` (409): останнього адміна видалити не можна |
+ 
+@@ -20,6 +20,7 @@
+ 
+ ## Критерії приймання
+ - [ ] Зміна групи й підгрупи зберігається і одразу змінює розклад.
++- [ ] Староста не може сам змінити групу (403 `HEADMAN_GROUP_LOCKED`), підгрупу змінює; адмін змінює групу старості.
+ - [ ] Вихід очищає токени на пристрої і знищує сесію.
+ - [ ] Видалення акаунта: 204, старі токени дають 401 (не 500), refresh відхиляється, новий вхід створює порожній акаунт.
+ - [ ] Староста з замінами видаляється, заміни лишаються в розкладі групи.

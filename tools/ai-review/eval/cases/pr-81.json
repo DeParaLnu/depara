@@ -1,0 +1,32 @@
+{
+  "pr": 81,
+  "title": "feat(tools): ШІ-ревʼюер не губить файли і краще відсіює хибні пункти",
+  "body": "## Навіщо\r\nУ коментарях ШІ-ревʼюера в PR #67–#80 видно три проблеми:\r\n- майже в кожному PR частина файлів не переглянута з приміткою «модель не повернула коректний JSON» (у #71 так пропало 3 шматки з 7);\r\n- підсумок склеюється без крапки, тобто запит на підсумок повертав порожню відповідь;\r\n- до коментаря доходили хибні пункти: «`enabled = true` може призвести до зайвих запитів» без сценарію (#80), «виклик видалено», хоча цитата це доданий рядок із цим викликом (#71).\r\n\r\nНайімовірніша причина перших двох: Qwen3.5 спершу міркує, і ці токени входять у `max_tokens`, а ліміти були 3000 / 1200 / 300. Це висновок із симптомів: у журналі Actions скрипт нічого не логував.\r\n\r\n## Що змінено\r\n**Файли не губляться**\r\n- ліміт відповіді 8000 токенів (`AI_REVIEW_MAX_TOKENS`);\r\n- `<think>` прибирається і незакритий, і без відкривного тега;\r\n- з кількох JSON-обʼєктів береться той, що з потрібним ключем (`findings` / `verdict`);\r\n- з обрізаної відповіді рятуються повні пункти;\r\n- обрізання лімітом і відповіді без JSON пишуться в журнал Actions.\r\n\r\n**Менше хибних пунктів**\r\n- друга перевірка бачить шматок diff біля рядка і вид рядка цитати (доданий / видалений / контекст);\r\n- вона може сама читати файли (до 3 звернень, `AI_REVIEW_VERIFY_STEPS`, `0` вертає стару поведінку);\r\n- спекулятивне «може призвести» без конкретного сценарію вважається спростованим;\r\n- непевний пункт знижується на рівень («важливо» йде в згорнуті дрібниці);\r\n- модель бачить список усіх файлів PR, промпт вимагає сценарію і не плутати `+` і `-`.\r\n\r\n**Інше**\r\n- підсумок-запаска склеюється з крапками;\r\n- `AI_REVIEW_EXTRA_BODY`: JSON із додатковими параметрами запиту (наприклад, вимкнення міркувань, якщо модель це підтримує). За замовчуванням порожній;\r\n- `rules.md`: Expo SDK 58; `docs/ai-review.md` оновлено.\r\n\r\n## Перевірка\r\n- `python3 -m unittest discover -s tools/ai-review`: 56 тестів OK, 10 нових, зокрема регресії з #71 і #80.\r\n- На справжній моделі Together локально не запускалось (немає ключа): ефект буде видно в коментарі ревʼюера до цього PR.\r\n\r\n## Варто знати\r\nДруга перевірка з інструментами робить до 4 запитів на пункт замість одного. Загальний час, як і раніше, обмежує бюджет у 7 хв. Якщо в ментора ліміт запитів, задайте `AI_REVIEW_VERIFY_STEPS=0`.\r\n\r\nСкрипт ревʼюера береться з гілки PR, тому зміни в `tools/ai-review/` потребують ревʼю людини.\r\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n\n<!-- coderabbit-ai-generated:v1 -->\n\n## Summary by CodeRabbit\n\n* **Improvements**\n  * AI review findings are checked against nearby changes and can be verified using related repository files. Uncertain findings receive a lower severity or are omitted.\n  * Review context now includes the pull request’s changed files and CI status.\n  * Reviews better handle incomplete or multiple model responses, with notices when output reaches the token limit.\n  * Additional settings let you configure verification steps, response limits, and request options.\n* **Documentation**\n  * Updated the documented mobile app SDK version to Expo SDK 58.\n\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "2accec7efbaff24f642850172b7f39cafdce3917",
+  "head": "6c8ead5cbd6f2454ed41d83bdb590c70e2a541d2",
+  "head_ref": "feat/ai-review-smarter",
+  "base_ref": "develop",
+  "set": "holdout",
+  "smoke": false,
+  "note": "",
+  "issues": [
+    {
+      "id": "r81-1",
+      "real": true,
+      "file": "tools/ai-review/review.py",
+      "lines": [
+        592,
+        592
+      ],
+      "severity": "minor",
+      "summary": "Return the salvaged result only when it contains at least one finding.",
+      "keywords": [
+        "salvage",
+        "порожн",
+        "жодного пункт"
+      ],
+      "source": "CodeRabbit, перевірено вручну"
+    }
+  ],
+  "known_false": []
+}

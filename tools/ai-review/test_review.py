@@ -110,9 +110,10 @@ class ReviewTests(unittest.TestCase):
         (self.root / ".github" / "workflows" / "x.yml").write_text("name: x\non: push\n")
         (self.root / "tools" / "ai-review").mkdir(parents=True)
         (self.root / "tools" / "ai-review" / "rules.md").write_text("ПРАВИЛО-ПРОЄКТУ")
-        self._saved = (review.RETRY_WAIT, os.environ.get("AI_REVIEW_WORKERS"))
+        self._saved = (review.RETRY_WAIT, os.environ.get("AI_REVIEW_WORKERS"), os.environ.get("AI_REVIEW_TWO_STAGE"))
         review.RETRY_WAIT = 0  # без пауз між повторами запитів
         os.environ["AI_REVIEW_WORKERS"] = "1"  # відповіді заглушки видаються по черзі, тож паралельність вимикаємо
+        os.environ["AI_REVIEW_TWO_STAGE"] = "0"  # ці тести про однокроковий конвеєр; двоетапний у test_stage2.py
         Stub.state = {"comments": [], "chat_requests": [], "replies": []}
         self.server = HTTPServer(("127.0.0.1", 0), Stub)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -122,10 +123,11 @@ class ReviewTests(unittest.TestCase):
 
     def tearDown(self):
         review.RETRY_WAIT = self._saved[0]
-        if self._saved[1] is None:
-            os.environ.pop("AI_REVIEW_WORKERS", None)
-        else:
-            os.environ["AI_REVIEW_WORKERS"] = self._saved[1]
+        for name, value in (("AI_REVIEW_WORKERS", self._saved[1]), ("AI_REVIEW_TWO_STAGE", self._saved[2])):
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         self.server.shutdown()
         self.tmp.cleanup()
 
@@ -175,7 +177,9 @@ class ReviewTests(unittest.TestCase):
         self.assertNotIn("review: success", first[1]["content"])
         self.assertNotIn("package-lock.json b/", first[1]["content"].split("<diff>")[1])
         self.assertNotIn("службовий файл", first[1]["content"])  # у запит до моделі службові файли не попадають
-        self.assertIn("Службових файлів пропущено: 1", posted)
+        self.assertIn("Службових файлів (лок-файли, зображення, дані вимірювання) не переглядаємо: 1.", posted)
+        self.assertIn("### Охоплення\nПереглянуто всі файли: 1.", posted)
+        self.assertNotIn("⚠️", posted)  # усе переглянуто: попередження зверху немає
         # результат інструмента повернувся до моделі
         tool_msgs = [m for m in Stub.state["chat_requests"][1]["messages"] if m["role"] == "tool"]
         self.assertIn("1: # Привіт", tool_msgs[0]["content"])
@@ -536,7 +540,7 @@ class ReviewTests(unittest.TestCase):
     def test_request_gets_only_the_remaining_time(self):
         seen = []
 
-        def fake_request(method, url, headers, body=None, timeout=60):
+        def fake_request(method, url, headers, body=None, timeout=60, deadline=None):
             seen.append(timeout)
             return json.dumps({"choices": [{"message": {"content": "{}"}}]}), {}
 
@@ -604,7 +608,10 @@ class ReviewTests(unittest.TestCase):
             del os.environ["AI_REVIEW_BUDGET_SECONDS"], os.environ["AI_REVIEW_CHUNK_CHARS"]
         posted = Stub.state["posted"]
         self.assertEqual(len(Stub.state["chat_requests"]), 1)
-        self.assertIn("вичерпано часовий бюджет. Пропущено: backend/src/b.ts", posted)
+        self.assertIn("- **Не вистачило часу** (1): `backend/src/b.ts`", posted)
+        self.assertIn("> ⚠️ **Переглянуто 1 з 2 файлів.**", posted)
+        self.assertLess(posted.index("⚠️"), posted.index("### Підсумок"))  # попередження вище за «проблем не знайдено»
+        self.assertIn("У переглянутих файлах суттєвих проблем не знайдено.", posted)
 
     # ---------- швидкість: паралельність і повтори ----------
 
@@ -696,8 +703,8 @@ class ReviewTests(unittest.TestCase):
         finally:
             del os.environ["AI_REVIEW_CHUNK_CHARS"]
         posted = Stub.state["posted"]
-        self.assertIn("не переглянуто: модель не повернула коректний JSON", posted)
-        self.assertIn("backend/src/b.ts", posted.split("не повернула коректний JSON")[0].split("Частину файлів")[-1])
+        self.assertIn("- **Модель не дала придатної відповіді** (1): `backend/src/b.ts`", posted)
+        self.assertIn("Переглянуто 1 з 2 файлів.", posted)
         self.assertIn("перший шматок", posted)
 
     def test_missing_ci_permission_does_not_break_review(self):

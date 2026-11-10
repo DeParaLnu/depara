@@ -1,0 +1,299 @@
+diff --git a/docs/mobile-e2e-runner.md b/docs/mobile-e2e-runner.md
+index f400469..185a0a6 100644
+--- a/docs/mobile-e2e-runner.md
++++ b/docs/mobile-e2e-runner.md
+@@ -2,9 +2,13 @@
+ 
+ ## Коротко
+ 
+-- Сценарії: `mobile/e2e/specs/` (F1 вхід, F3 «відкрити тиждень», F5 «знайти аудиторію N1»).
++- Сценарії: `mobile/e2e/specs/` (F1 вхід, F3 «відкрити тиждень» і деталі пари, F5 «знайти аудиторію N1»,
++  F6 заміни старостою і студент без кнопок заміни, F9 підгрупа й вибір групи в профілі).
+ - Дані: бекенд з `NODE_ENV=test AUTH_MODE=fake` і `npm run seed -- --shift-to-current-week`.
+-  Застосунок зібраний з `E2E=1` і входить фейковим токеном `test:student@lnu.edu.ua`.
++  Застосунок зібраний з `E2E=1` і входить фейковим токеном `test:student@lnu.edu.ua`; друга кнопка
++  «Увійти як староста (E2E)» входить `test:headman@lnu.edu.ua`. Роль і групу старості сценарій F6 призначає
++  сам через API бекенда (`mobile/e2e/api.ts`: адмін з `ADMIN_EMAILS`, за замовчуванням `e2e.admin@lnu.edu.ua`,
++  API на `E2E_API_URL`, за замовчуванням `http://localhost:3000`).
+ - На PR мобільні E2E стартують лише після зеленого `backend-e2e` (job `mobile-e2e` у `ci.yml`).
+ - Вмикаються змінною репозиторію `MOBILE_E2E_ON_PR=true`. Доки сценарії не зеленіють стабільно
+   (орієнтир: 5 запусків поспіль без падінь), змінна не задана і на PR бігає лише бекенд.
+diff --git a/mobile/e2e/api.ts b/mobile/e2e/api.ts
+new file mode 100644
+index 0000000..cdbe54c
+--- /dev/null
++++ b/mobile/e2e/api.ts
+@@ -0,0 +1,38 @@
++// Підготовка даних для мобільних E2E через API бекенда (з машини, де бігає Appium, а не з емулятора).
++// Бекенд у CI слухає localhost:3000 на тій самій машині (емулятор ходить на нього як 10.0.2.2).
++// Вхід фейковим токеном test:<email> працює лише з AUTH_MODE=fake, адмін задається ADMIN_EMAILS.
++const API = process.env.E2E_API_URL ?? 'http://localhost:3000';
++const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'e2e.admin@lnu.edu.ua';
++// Той самий акаунт, яким входить кнопка «Увійти як староста (E2E)» (src/config.ts)
++export const HEADMAN_EMAIL = 'headman@lnu.edu.ua';
++
++async function call<T>(method: string, path: string, token?: string, body?: unknown): Promise<T> {
++  const res = await fetch(`${API}${path}`, {
++    method,
++    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
++    body: body === undefined ? undefined : JSON.stringify(body),
++  });
++  const text = await res.text();
++  if (!res.ok) throw new Error(`${method} ${path} → ${res.status} ${text}`);
++  return (text ? JSON.parse(text) : {}) as T;
++}
++
++const login = async (email: string) =>
++  (await call<{ accessToken: string }>('POST', '/auth/microsoft', undefined, { idToken: `test:${email}`, deviceId: 'e2e-setup' }))
++    .accessToken;
++
++/**
++ * Тестовий староста групи ТЕСТ-31: акаунт створюється входом, група обирається, роль призначає адмін.
++ * Повторний запуск на тій самій базі нічого не ламає (та сама група дозволена й старості).
++ */
++export async function ensureHeadman(groupCode = 'ТЕСТ-31'): Promise<void> {
++  const headman = await login(HEADMAN_EMAIL);
++  const groups = await call<{ id: string; code: string }[]>('GET', '/groups', headman);
++  const group = groups.find((g) => g.code === groupCode);
++  if (!group) throw new Error(`Немає групи ${groupCode}: чи виконано npm run seed?`);
++  await call('PATCH', '/me', headman, { groupId: group.id, subgroup: 0 });
++  const me = await call<{ id: string }>('GET', '/me', headman);
++
++  const admin = await login(ADMIN_EMAIL);
++  await call('PATCH', `/admin/users/${me.id}/role`, admin, { role: 'HEADMAN' });
++}
+diff --git a/mobile/e2e/helpers.ts b/mobile/e2e/helpers.ts
+index 7832ac7..7817ce8 100644
+--- a/mobile/e2e/helpers.ts
++++ b/mobile/e2e/helpers.ts
+@@ -78,3 +78,21 @@ export function weekDay(offset: number): string {
+   d.setUTCDate(d.getUTCDate() + offset);
+   return d.toISOString().slice(0, 10);
+ }
++
++/**
++ * Вхід тестовим старостою (кнопка «Увійти як староста (E2E)»). Групу й роль йому заздалегідь
++ * призначає ensureHeadman() з e2e/api.ts, тож онбордингу немає і відкриваються вкладки.
++ */
++export async function loginAsHeadman(): Promise<void> {
++  await byTestId('login-headman-button').click();
++  await byTestId('tab-today').waitForDisplayed({ timeout: 20000 });
++}
++
++// Елемент у прокручуваному списку: прокручує, доки не знайде resource-id, що закінчується на suffix
++export const scrollToTestIdSuffix = (suffix: string) =>
++  $(
++    `android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceIdMatches(".*${suffix}$"))`,
++  );
++
++// Кнопка підтвердження в системному Alert Android (остання кнопка в Alert.alert, наприклад «Скасувати заміну»)
++export const alertConfirm = () => $('android=new UiSelector().resourceId("android:id/button1")');
+diff --git a/mobile/e2e/specs/f6-student.e2e.ts b/mobile/e2e/specs/f6-student.e2e.ts
+new file mode 100644
+index 0000000..11d80f9
+--- /dev/null
++++ b/mobile/e2e/specs/f6-student.e2e.ts
+@@ -0,0 +1,17 @@
++import { byTestId, loginAsStudent, openTab } from '../helpers';
++
++// F6: студент не бачить кнопок заміни (specs/f6-substitutions.md, «Студент не бачить кнопки „Додати заміну“»)
++describe('F6: студент без кнопок заміни', () => {
++  before(async () => {
++    await loginAsStudent();
++  });
++
++  it('на «Сьогодні» немає «Додати заміну»', async () => {
++    await byTestId('tab-today').waitForDisplayed({ timeout: 20000 });
++    // Розклад завантажився (кнопка оновлення є завжди, тож чекаємо на вкладку «Тиждень» з даними нижче)
++    await openTab('week');
++    await byTestId('week-screen').waitForDisplayed({ timeout: 20000 });
++    await openTab('today');
++    expect(await byTestId('add-substitution-fab').isExisting()).toBe(false);
++  });
++});
+diff --git a/mobile/e2e/specs/f6-substitutions.e2e.ts b/mobile/e2e/specs/f6-substitutions.e2e.ts
+new file mode 100644
+index 0000000..65ef21d
+--- /dev/null
++++ b/mobile/e2e/specs/f6-substitutions.e2e.ts
+@@ -0,0 +1,65 @@
++import { ensureHeadman } from '../api';
++import { alertConfirm, allByTestIdPrefix, byTestId, byText, loginAsHeadman, openTab, scrollToTestIdSuffix } from '../helpers';
++
++// F6, «Заміни пар» (specs/f6-substitutions.md): староста створює заміну своєї групи, бачить її в розкладі
++// без перезапуску і скасовує. Студент кнопки «Додати заміну» не бачить (f6-student.e2e.ts).
++// Дані: seed з --shift-to-current-week; старосту ТЕСТ-31 готує ensureHeadman() через API.
++//
++// Контракт testID:
++//   add-substitution-fab          «Додати заміну» на «Сьогодні»
++//   substitution-lesson           поле «Пара» у формі; lesson-picker-item-<id> пари в списку вибору
++//   substitution-kind-<KIND>      тип зміни; substitution-comment, substitution-submit
++//   substitution-saved            екран «Заміну збережено»; substitution-done «До розкладу»
++//   cancel-substitution-button    «Скасувати заміну» в деталях пари; add-substitution-button «Додати заміну»
++describe('F6: заміни старостою', () => {
++  let lessonId = '';
++
++  before(async () => {
++    await ensureHeadman();
++    await loginAsHeadman();
++  });
++
++  it('староста бачить «Додати заміну» і відкриває форму', async () => {
++    await byTestId('add-substitution-fab').waitForDisplayed({ timeout: 20000 });
++    await byTestId('add-substitution-fab').click();
++    await byTestId('substitution-lesson').waitForDisplayed({ timeout: 15000 });
++  });
++
++  it('скасування пари зберігається і показує «Заміну збережено»', async () => {
++    await byTestId('substitution-lesson').click();
++    await byTestId('lesson-picker').waitForDisplayed({ timeout: 10000 });
++    const [first] = await allByTestIdPrefix('lesson-picker-item-');
++    lessonId = String(await first.getAttribute('resource-id')).replace(/^.*lesson-picker-item-/, '');
++    expect(lessonId).not.toBe('');
++    await first.click();
++    await byTestId('lesson-picker').waitForDisplayed({ reverse: true, timeout: 10000 });
++
++    await byTestId('substitution-kind-CANCELLED').click();
++    await byTestId('substitution-comment').setValue('E2E скасування');
++    await byTestId('substitution-submit').click();
++    await byTestId('substitution-saved').waitForDisplayed({ timeout: 15000 });
++    await byTestId('substitution-done').click();
++  });
++
++  it('заміну видно в розкладі тижня без перезапуску', async () => {
++    await openTab('week');
++    await byTestId('week-screen').waitForDisplayed({ timeout: 20000 });
++    const card = await scrollToTestIdSuffix(`-${lessonId}`);
++    await card.click();
++    await byTestId('lesson-details').waitForDisplayed({ timeout: 10000 });
++    await byText('Скасовано').waitForDisplayed({ timeout: 10000 });
++    await byTestId('cancel-substitution-button').waitForDisplayed();
++  });
++
++  it('скасування заміни повертає пару до звичайного вигляду', async () => {
++    await byTestId('cancel-substitution-button').click();
++    await alertConfirm().waitForDisplayed({ timeout: 10000 });
++    await alertConfirm().click();
++    await byTestId('lesson-details').waitForDisplayed({ reverse: true, timeout: 15000 });
++
++    const card = await scrollToTestIdSuffix(`-${lessonId}`);
++    await card.click();
++    await byTestId('add-substitution-button').waitForDisplayed({ timeout: 15000 });
++    await byTestId('lesson-details-backdrop').click();
++  });
++});
+diff --git a/mobile/e2e/specs/f9-profile.e2e.ts b/mobile/e2e/specs/f9-profile.e2e.ts
+new file mode 100644
+index 0000000..7ef6e05
+--- /dev/null
++++ b/mobile/e2e/specs/f9-profile.e2e.ts
+@@ -0,0 +1,40 @@
++import { byTestId, byText, loginAsStudent, openTab } from '../helpers';
++
++// F9, «Профіль» (specs/f9-profile.md): зміна підгрупи й вибір групи з профілю.
++// У seed лише одна група (ТЕСТ-31), тож перевіряємо підгрупу і що вибір групи відкривається з поточної.
++// Контракт testID: profile-group, profile-subgroup, subgroup-sheet, subgroup-option-<0|1|2>,
++//   group-list, change-group-save
++describe('F9: профіль', () => {
++  before(async () => {
++    await loginAsStudent();
++    await openTab('profile');
++    await byTestId('profile-subgroup').waitForDisplayed({ timeout: 20000 });
++  });
++
++  it('підгрупа змінюється з профілю і повертається назад', async () => {
++    await byTestId('profile-subgroup').click();
++    await byTestId('subgroup-sheet').waitForDisplayed({ timeout: 10000 });
++    await byTestId('subgroup-option-1').click();
++    await byTestId('subgroup-sheet').waitForDisplayed({ reverse: true, timeout: 15000 });
++    await byTestId('profile-subgroup').waitForDisplayed();
++    expect(await byTestId('profile-subgroup').getAttribute('content-desc')).toBe('Підгрупа 1');
++
++    // Назад до «усіх підгруп», щоб не впливати на інші сценарії на тій самій базі
++    await byTestId('profile-subgroup').click();
++    await byTestId('subgroup-option-0').click();
++    await byTestId('subgroup-sheet').waitForDisplayed({ reverse: true, timeout: 15000 });
++    expect(await byTestId('profile-subgroup').getAttribute('content-desc')).toBe('Підгрупа Усі');
++  });
++
++  it('«Група» відкриває вибір з поточною групою, без змін зберегти не можна', async () => {
++    await byTestId('profile-group').click();
++    await byTestId('group-list').waitForDisplayed({ timeout: 15000 });
++    await byText('ТЕСТ-31').waitForDisplayed();
++    expect(await byTestId('change-group-save').isEnabled()).toBe(false);
++
++    // Системне «Назад» повертає в профіль без змін
++    await browser.back();
++    await byTestId('profile-group').waitForDisplayed({ timeout: 15000 });
++    expect(await byTestId('profile-group').getAttribute('content-desc')).toBe('Група ТЕСТ-31');
++  });
++});
+diff --git a/mobile/src/config.ts b/mobile/src/config.ts
+index 3cc4578..8b316ca 100644
+--- a/mobile/src/config.ts
++++ b/mobile/src/config.ts
+@@ -11,4 +11,6 @@ export const config = {
+   // Посилання на політику конфіденційності (PRIVACY_URL при збірці); без нього підпис на екрані входу не показуємо
+   privacyUrl: extra.privacyUrl,
+   e2eIdToken: 'test:student@lnu.edu.ua',
++  // Друга кнопка входу в E2E-збірці: староста (роль і групу йому призначає сценарій через API, e2e/api.ts)
++  e2eHeadmanIdToken: 'test:headman@lnu.edu.ua',
+ };
+diff --git a/mobile/src/features/auth/LoginScreen.tsx b/mobile/src/features/auth/LoginScreen.tsx
+index df455e4..4d5e887 100644
+--- a/mobile/src/features/auth/LoginScreen.tsx
++++ b/mobile/src/features/auth/LoginScreen.tsx
+@@ -16,7 +16,7 @@ export function LoginScreen() {
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+-  const login = async () => {
++  const login = async (idToken: string = config.e2eIdToken) => {
+     setError(null);
+     if (!config.e2e && !config.mock) {
+       // Справжній вхід через Microsoft Entra підключимо окремою задачею
+@@ -26,7 +26,7 @@ export function LoginScreen() {
+     setLoading(true);
+     try {
+       const deviceId = await getOrCreateDeviceId();
+-      setSession(await api.loginWithMicrosoft(config.e2eIdToken, deviceId));
++      setSession(await api.loginWithMicrosoft(idToken, deviceId));
+     } catch (e) {
+       setError(errorText(reportError('auth', e)));
+     } finally {
+@@ -48,7 +48,7 @@ export function LoginScreen() {
+           testID="login-button"
+           accessibilityRole="button"
+           accessibilityLabel="Увійти через корпоративну пошту ЛНУ"
+-          onPress={login}
++          onPress={() => void login()}
+           disabled={loading}
+           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+         >
+@@ -63,6 +63,19 @@ export function LoginScreen() {
+             </>
+           )}
+         </Pressable>
++        {config.e2e ? (
++          // Лише в E2E-збірці: вхід тестовим старостою для сценаріїв F6 (e2e/specs/f6-substitutions.e2e.ts)
++          <Pressable
++            testID="login-headman-button"
++            accessibilityRole="button"
++            accessibilityLabel="Увійти як староста (E2E)"
++            onPress={() => void login(config.e2eHeadmanIdToken)}
++            disabled={loading}
++            style={styles.e2eButton}
++          >
++            <Text style={styles.e2eButtonText}>Увійти як староста (E2E)</Text>
++          </Pressable>
++        ) : null}
+ 
+         <View style={styles.info}>
+           <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
+@@ -134,4 +147,6 @@ const styles = StyleSheet.create({
+   },
+   infoText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.textMuted },
+   privacy: { fontSize: 14, color: colors.textMuted, textAlign: 'center' },
++  e2eButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
++  e2eButtonText: { color: colors.textMuted, fontSize: 15, textDecorationLine: 'underline' },
+ });

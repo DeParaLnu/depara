@@ -1,0 +1,34 @@
+{
+  "pr": 87,
+  "title": "feat(mobile): зміна групи й підгрупи з профілю (F9)",
+  "body": "## Що і навіщо\r\nУ профілі група й підгрупа лише показувалися, змінити їх було не можна. Тепер рядки «Група ›» і «Підгрупа ›» працюють, як у макеті 19.\r\n\r\nЗамінює #85: там перший коміт помилково видаляв код F6 з #80 (+318 −1335). Тут один коміт від свіжого `develop`, лише 11 файлів F9: +304 −44.\r\n\r\nЗадача: closes #84\r\n\r\n## Що змінилось\r\n- **«Група ›»** відкриває `/change-group`: той самий вибір факультету, курсу, групи й підгрупи, що в онбордингу (`OnboardingScreen mode=\"change\"`). Вибір починається з поточної групи, «Назад» зі списку факультетів повертає в профіль, «Зберегти» неактивна, поки нічого не змінено.\r\n- **«Підгрупа ›»** відкриває нижній лист «Усі підгрупи / 1 / 2» і зберігає одразу.\r\n- `useSetGroup` (`features/profile/hooks.ts`) спільний для онбордингу й профілю. Після збереження оновлюється профіль, а збережені тижні скидаються (`resetQueries(['week'])`, разом із кешем на диску), щоб офлайн не показував розклад попередньої групи.\r\n- **Староста:** група без стрілки й підпис «Групу старости змінює адміністратор». Підгрупу змінює сам. Це узгоджено з бекенд-PR #83 (`HEADMAN_GROUP_LOCKED`).\r\n- В онбордингу поведінка й testID ті самі. Новий факультет тепер скидає вибрану групу й курс.\r\n- Тексти помилок `HEADMAN_GROUP_LOCKED`, `GROUP_NOT_FOUND`, `INVALID_SUBGROUP`.\r\n- Спека F9 і таблиця стану.\r\n\r\n## Спека\r\n[specs/f9-profile.md](specs/f9-profile.md), критерій «Зміна групи й підгрупи зберігається і одразу змінює розклад».\r\n\r\n## Як перевірити\r\n1. `cd mobile && npm ci && npm test` (+4 тести у `features/profile/group.test.ts`).\r\n2. `MOCK=1 npx expo start --clear`: увійти (мок-користувач староста) → Профіль. У групи немає стрілки, «Підгрупа ›» → 1: пари підгрупи 2 зникнуть з розкладу.\r\n3. Студентом (реальний бекенд): «Група ›» → інша група → «Зберегти», і «Сьогодні» показує розклад нової групи.\r\n\r\nПеревірено: `npm test` (54/54), `npm run typecheck`, `expo export -p android`. Видалених рядків, пов'язаних із замінами, у diff немає. Пробне злиття з #83 без конфліктів. На пристрої не запускав.\r\n\r\n## Чеклист\r\n- [ ] CI зелений\r\n- [x] Юніт-тести додано\r\n- [ ] E2E-сценарій: ні (онбординг-E2E не змінився)\r\n- [x] Немає секретів і `.env` у коміті\r\n- [x] Контракт API не змінювався (обмеження для старости в #83)\r\n\r\n## На що звернути увагу ревʼюеру\r\n- Зливається незалежно від #83. Без #83 староста все одно не бачить кнопки зміни групи, але API ще дозволяє зміну.\r\n- У моку (#80) користувач староста, тож вибір групи з профілю в `MOCK=1` видно лише після зміни ролі в `src/mock/fixtures.ts`.\r\n\r\n\r\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\r\n\r\n<!-- coderabbit-ai-generated:v1 -->\r\n\r\n## Summary by CodeRabbit\r\n\r\n* **New Features**\r\n  * Change your group from your profile using the group-selection flow, which starts with your current group.\r\n  * Choose a subgroup from a selection sheet. Your schedule refreshes after saving group or subgroup changes.\r\n  * Group changes are unavailable to headmen who already have a group; they can still change their subgroup.\r\n* **Improvements**\r\n  * Clearer messages appear when a group or subgroup change cannot be saved.\r\n\r\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "dda12eeccc0690f0e2a77f9327b3fe9af510ce03",
+  "head": "f9418a61407f1ecdb95d0b0059c13afa04597444",
+  "head_ref": "feat/mobile-profile-group-v2",
+  "base_ref": "develop",
+  "set": "holdout",
+  "smoke": true,
+  "note": "",
+  "issues": [
+    {
+      "id": "r87-1",
+      "real": true,
+      "file": "mobile/src/features/profile/hooks.ts",
+      "lines": [
+        17,
+        17
+      ],
+      "severity": "minor",
+      "summary": "Write the saved group and subgroup into `['me']` on success.",
+      "keywords": [
+        "кеш",
+        "setquerydata",
+        "['me']",
+        "invalidate",
+        "інвалід"
+      ],
+      "source": "CodeRabbit, підтверджено вручну"
+    }
+  ],
+  "known_false": []
+}

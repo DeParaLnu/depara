@@ -1,0 +1,31 @@
+{
+  "pr": 68,
+  "title": "chore(mobile): EAS-профілі preview і preview-mock для APK (I5)",
+  "body": "## Що і навіщо\r\nПрофілі EAS Build, щоб збирати APK для встановлення напряму на телефон: з прод API і з вбудованими даними для демо.\r\n\r\nЗадача: #26 (не закриває: «готово, коли APK показує дані з проду», а це можливо лише після входу через Microsoft, #37)\r\n\r\n## Що змінилось\r\n- `mobile/eas.json`: профіль `preview` (APK, internal distribution, `API_URL=https://api.depara.me`), перенесений з гілки `chore/eas-preview-build`, яка була відгалужена від старої історії\r\n- Профіль `preview-mock` (`extends: preview`, `MOCK=1`): APK на вбудованих даних, бо збірка з прод API поки зупиняється на екрані входу\r\n- README: розділ «APK для команди (EAS Build)»\r\n\r\n## Спека\r\nНе стосується.\r\n\r\n## Як перевірити\r\n1. `cd mobile && npx eas-cli@latest login && npx eas-cli@latest init` (вперше; додасть `extra.eas.projectId` в `app.json`, його треба закомітити)\r\n2. `npx eas-cli@latest build -p android --profile preview-mock`\r\n3. Встановити APK за посиланням або QR-кодом з EAS: вхід одним дотиком, розклад `ТЕСТ-31`\r\n\r\n## Чеклист\r\n- [x] CI зелений\r\n- [ ] E2E-сценарій додано або оновлено (не стосується)\r\n- [x] Немає секретів і `.env` у коміті\r\n- [ ] Документація API оновлена (не стосується)\r\n\r\n## На що звернути увагу ревʼюеру\r\n- Збірку не запускали: EAS CLI потребує акаунта Expo (`eas login`). JSON валідний, профіль `preview` без змін з попереднього коміту.\r\n- Документація EAS не уточнює, чи `env` при `extends` зливається чи замінюється. Для `preview-mock` це не важливо: у режимі `MOCK=1` застосунок не звертається до `API_URL`.\r\n- В `android/app/src/main/AndroidManifest.xml` стоїть `android:allowBackup=\"true\"`: дані застосунку (зокрема сесія) потрапляють у бекап Android. Варто вимкнути окремим PR перед реальним входом.\r\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n\n<!-- coderabbit-ai-generated:v1 -->\n\n## Summary by CodeRabbit\n\n* **New Features**\n  * Android preview builds are now available in two profiles: one connects to the production service, and the other provides a mock experience without requiring sign-in.\n  * The production-connected preview currently stops at the sign-in screen.\n* **Documentation**\n  * Added instructions for setting up Android builds and creating each preview profile.\n\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "base": "a33f9c12d50396d5adef3dfd7e8f21c38a396374",
+  "head": "fdf18d0888f3e9ca3616ec3164500118b335111d",
+  "head_ref": "chore/eas-preview",
+  "base_ref": "develop",
+  "set": "dev",
+  "smoke": false,
+  "note": "",
+  "issues": [
+    {
+      "id": "r68-1",
+      "real": true,
+      "file": "README.md",
+      "lines": [
+        58,
+        58
+      ],
+      "severity": "minor",
+      "summary": "Commit the EAS projectId so every builder uses one project.",
+      "keywords": [
+        "projectid",
+        "project id"
+      ],
+      "source": "CodeRabbit, перевірено вручну"
+    }
+  ],
+  "known_false": []
+}
