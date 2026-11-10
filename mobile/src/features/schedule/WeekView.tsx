@@ -5,9 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../api';
 import { StateView } from '../../components/StateView';
 import { clock, toIsoDate, weekdayFull, weekDays, weekRangeLabel } from '../../lib/date';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 import { LessonDetailsSheet } from './components/LessonDetailsSheet';
-import { parseRoom, withNext, type LessonStatus } from './lesson';
+import { withNext, type LessonStatus } from './lesson';
 import type { TodayState } from './TodayView';
 
 type Row = { kind: 'lesson'; lesson: Lesson; status: LessonStatus } | { kind: 'empty'; key: string };
@@ -38,10 +39,11 @@ const changesLabel = (n: number) => {
 };
 
 function WeekRow({ lesson, onPress }: { lesson: Lesson; onPress: () => void }) {
+  const styles = useStyles();
   const sub = lesson.substitution;
   const cancelled = sub?.kind === 'CANCELLED';
   const type = TYPE_SHORT[lesson.type];
-  const room = parseRoom(sub?.newRoom ?? lesson.room);
+  const room = sub?.newRoom ?? lesson.room;
   const moved = sub ? movedLabel(sub) : null;
   return (
     <Pressable
@@ -81,7 +83,7 @@ function WeekRow({ lesson, onPress }: { lesson: Lesson; onPress: () => void }) {
           {type.label}
         </Text>
       </View>
-      <Text style={styles.rowRoom}>{room && !cancelled ? `${room.number}${room.building ? `/${room.building}` : ''}` : ''}</Text>
+      <Text style={styles.rowRoom}>{room && !cancelled ? room.label : ''}</Text>
     </Pressable>
   );
 }
@@ -121,6 +123,8 @@ export function WeekView({
   refreshing,
   onRefresh,
 }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
 
@@ -274,7 +278,8 @@ export function WeekView({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   unpublished: { flexGrow: 1, justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 21, gap: 12 },
@@ -283,7 +288,7 @@ const styles = StyleSheet.create({
   subtitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   subtitle: { fontSize: 15, lineHeight: 20, color: colors.textMuted },
   roleBadge: { height: 22, justifyContent: 'center', backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 9 },
-  roleBadgeText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  roleBadgeText: { color: colors.onPrimary, fontSize: 12, lineHeight: 16, fontWeight: '700' },
   nav: { flexDirection: 'row', gap: 8 },
   navButton: {
     width: 40,
@@ -339,8 +344,9 @@ const styles = StyleSheet.create({
   typeSoft: { backgroundColor: colors.tagBlue },
   typeNeutral: { backgroundColor: colors.chip },
   typeText: { fontSize: 13, fontWeight: '700' },
-  typeTextLight: { color: '#FFFFFF' },
+  typeTextLight: { color: colors.onPrimary },
   typeTextSoft: { color: colors.tagBlueText },
   typeTextNeutral: { color: colors.textMuted },
   rowRoom: { width: 54, textAlign: 'right', fontSize: 15, color: colors.textMuted },
-});
+}),
+);

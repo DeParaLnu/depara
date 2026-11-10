@@ -8,6 +8,8 @@ import { ApiError } from '../api';
 import { AppErrorBoundary } from '../components/AppErrorBoundary';
 import { config } from '../config';
 import { useSession } from '../features/auth/session';
+import { useThemeSettings } from '../features/theme/settings';
+import { useColors } from '../features/theme/useTheme';
 import { registerCacheReset } from '../lib/cacheReset';
 import { log } from '../lib/logger';
 import { clearPersistedQueries, queryPersister } from '../lib/queryPersist';
@@ -38,9 +40,14 @@ export default function RootLayout() {
   const initSession = useSession((s) => s.initSession);
   const isHydrated = useSession((s) => s.isHydrated);
 
+  const hydrateTheme = useThemeSettings((s) => s.hydrate);
+  const themeReady = useThemeSettings((s) => s.hydrated);
+  const colors = useColors();
+
   useEffect(() => {
     void initSession();
-  }, [initSession]);
+    void hydrateTheme();
+  }, [initSession, hydrateTheme]);
 
   const [queryClient] = useState(
     () =>
@@ -77,7 +84,8 @@ export default function RootLayout() {
     return () => clearTimeout(timer);
   }, [restored]);
 
-  if (!isHydrated) {
+  // Чекаємо й на тему: інакше користувач темної спершу побачив би світлий екран
+  if (!isHydrated || !themeReady) {
     return null;
   }
 
@@ -85,7 +93,7 @@ export default function RootLayout() {
     <>
       <StatusBar style="auto" />
       <AppErrorBoundary>
-        <Stack screenOptions={{ headerShown: false }}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="sign-in" />
           </Stack.Protected>

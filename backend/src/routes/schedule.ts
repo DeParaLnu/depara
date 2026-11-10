@@ -2,14 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { prisma } from '../db';
 import { mondayOf } from '../lib/dates';
+import { toRoom } from '../lib/rooms';
 import { isIsoDate } from '../lib/validation';
 import { requireAuth } from '../plugins/auth';
-
-type RoomWithBuilding = { building: { code: string; name: string; address: string } } | null;
-
-// Корпус аудиторії для екрана деталей пари (назва, адреса, маршрут)
-const buildingOf = (room: RoomWithBuilding) =>
-  room ? { code: room.building.code, name: room.building.name, address: room.building.address } : null;
 
 // F3: розклад на тиждень з ETag
 export async function scheduleRoutes(app: FastifyInstance) {
@@ -59,18 +54,14 @@ export async function scheduleRoutes(app: FastifyInstance) {
         audience: l.audience,
         subgroup: l.subgroup,
         teacher: l.teacher?.fullName ?? null,
-        room: l.classroom ? `${l.classroom.number}/${l.classroom.building.code}` : null,
-        building: buildingOf(l.classroom),
+        room: l.classroom ? toRoom(l.classroom) : null,
         substitution: l.substitution
           ? {
               id: l.substitution.id,
               kind: l.substitution.kind,
               comment: l.substitution.comment,
               newTeacher: l.substitution.newTeacher?.fullName ?? null,
-              newRoom: l.substitution.newClassroom
-                ? `${l.substitution.newClassroom.number}/${l.substitution.newClassroom.building.code}`
-                : null,
-              newBuilding: buildingOf(l.substitution.newClassroom),
+              newRoom: l.substitution.newClassroom ? toRoom(l.substitution.newClassroom) : null,
               newDate: l.substitution.newDate?.toISOString().slice(0, 10) ?? null,
               newPairNumber: l.substitution.newPairNumber,
             }

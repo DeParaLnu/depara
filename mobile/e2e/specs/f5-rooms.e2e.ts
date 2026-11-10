@@ -1,7 +1,7 @@
 import { allByTestId, byTestId, loginAsStudent, openTab } from '../helpers';
 
 // F5, сценарій «знайти аудиторію N1» (specs/f5-search.md, критерії приймання).
-// У seed є аудиторії N10/Б і N11/Б (латинська N) і №9/Б, №5/Б (знак номера), тож запит N1
+// У seed є аудиторії N10/Б, N11/Б, N9/Б і N5/Б (латинська N), тож запит N1
 // має дати рівно дві: N10/Б і N11/Б.
 //
 // Контракт testID для екрана «Аудиторії» (src/app/(tabs)/rooms.tsx):
@@ -30,13 +30,22 @@ describe('F5: пошук аудиторій', () => {
     await byTestId('rooms-screen').waitForDisplayed({ timeout: 20000 });
   });
 
-  it('запит N1 знаходить N10/Б і N11/Б, а №9/Б ні', async () => {
+  it('запит N1 знаходить N10/Б і N11/Б, а N9/Б ні', async () => {
     await search('N1');
     await byTestId('room-item-N10-Б').waitForDisplayed({ timeout: 10000 });
     await byTestId('room-item-N11-Б').waitForDisplayed();
-    expect(await byTestId('room-item-№9-Б').isExisting()).toBe(false);
+    expect(await byTestId('room-item-N9-Б').isExisting()).toBe(false);
     const items = await allByTestId('room-item');
     expect(items.length).toBeLessThanOrEqual(20);
+  });
+
+  it('запит зі знаком № і запит «номер/корпус» знаходять аудиторію', async () => {
+    await search('№9');
+    await byTestId('room-item-N9-Б').waitForDisplayed({ timeout: 10000 });
+    await search('218/Т');
+    await byTestId('room-item-218-Т').waitForDisplayed({ timeout: 10000 });
+    await search('N1');
+    await byTestId('room-item-N10-Б').waitForDisplayed({ timeout: 10000 });
   });
 
   it('для кожної знайденої аудиторії видно корпус', async () => {

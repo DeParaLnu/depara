@@ -16,7 +16,8 @@ import type { Lesson, SubstitutionKind } from '../../api';
 import { StateView } from '../../components/StateView';
 import { addDays, dayMonth, fromIsoDate, mondayOf, toIsoDate, weekdayShort, weekdayShortCap } from '../../lib/date';
 import { errorCode, reportError } from '../../lib/errors';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 import { useClassrooms, useDebounce } from '../rooms/hooks';
 import { useGroups, useMe, useWeek } from '../schedule/hooks';
 import { lessonTypeLabel } from '../schedule/lesson';
@@ -51,6 +52,8 @@ const lessonSubtitle = (l: Lesson) => {
 
 // F6: форма «Нова заміна» (макет docs/design/15-new-substitution.png) і екран «Заміну збережено» (16)
 export function SubstitutionScreen({ date, lessonId, onClose }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const canManage = useCanManageSubstitutions();
   const me = useMe();
@@ -118,7 +121,7 @@ export function SubstitutionScreen({ date, lessonId, onClose }: Props) {
       <View style={[styles.screen, styles.savedScreen, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 }]}>
         <View style={styles.savedBody} testID="substitution-saved">
           <View style={styles.savedIcon}>
-            <Ionicons name="checkmark" size={64} color="#166534" />
+            <Ionicons name="checkmark" size={64} color={colors.success} />
           </View>
           <Text style={styles.savedTitle} accessibilityRole="header">
             Заміну збережено
@@ -276,7 +279,7 @@ export function SubstitutionScreen({ date, lessonId, onClose }: Props) {
             style={({ pressed }) => [styles.primary, pressed && styles.primaryPressed]}
           >
             {create.isPending ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={colors.onPrimary} />
             ) : (
               <Text style={styles.primaryText}>{groupCode ? `Надіслати групі ${groupCode}` : 'Зберегти заміну'}</Text>
             )}
@@ -334,6 +337,8 @@ export function SubstitutionScreen({ date, lessonId, onClose }: Props) {
 }
 
 function Header({ onBack }: { onBack: () => void }) {
+  const styles = useStyles();
+  const colors = useColors();
   return (
     <View style={styles.header}>
       <Pressable testID="substitution-back" accessibilityRole="button" accessibilityLabel="Назад" onPress={onBack} hitSlop={12}>
@@ -346,7 +351,10 @@ function Header({ onBack }: { onBack: () => void }) {
   );
 }
 
-const Label = ({ text }: { text: string }) => <Text style={styles.label}>{text.toUpperCase()}</Text>;
+function Label({ text }: { text: string }) {
+  const styles = useStyles();
+  return <Text style={styles.label}>{text.toUpperCase()}</Text>;
+}
 
 function Select({
   testID,
@@ -363,6 +371,8 @@ function Select({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const styles = useStyles();
+  const colors = useColors();
   return (
     <Pressable
       testID={testID}
@@ -396,6 +406,7 @@ function Chip({
   onPress: () => void;
   accessibilityLabel?: string;
 }) {
+  const styles = useStyles();
   return (
     <Pressable
       testID={testID}
@@ -410,7 +421,8 @@ function Chip({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   flex: { flex: 1 },
   screen: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 8 },
@@ -444,7 +456,7 @@ const styles = StyleSheet.create({
   },
   chipSelected: { backgroundColor: colors.primary },
   chipText: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: colors.textSecondary },
-  chipTextSelected: { color: '#FFFFFF' },
+  chipTextSelected: { color: colors.onPrimary },
   comment: {
     minHeight: 100,
     borderRadius: 14,
@@ -468,14 +480,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryPressed: { backgroundColor: colors.primaryDark },
-  primaryText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
+  primaryText: { fontSize: 17, fontWeight: '700', color: colors.onPrimary },
   savedScreen: { paddingHorizontal: 21 },
   savedBody: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
   savedIcon: {
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: '#DCFCE7',
+    backgroundColor: colors.successBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
@@ -492,4 +504,5 @@ const styles = StyleSheet.create({
   },
   secondaryPressed: { backgroundColor: colors.chip },
   secondaryText: { fontSize: 17, fontWeight: '700', color: colors.primary },
-});
+}),
+);

@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../../../theme';
+import { makeStyles } from '../../theme/useTheme';
 import { dayLabel, toIsoDate, weekdayShortCap } from '../../../lib/date';
 
 type Props = {
@@ -12,6 +12,7 @@ type Props = {
 };
 
 export function DayStrip({ days, selected, today, markedDates, onSelect }: Props) {
+  const styles = useStyles();
   const selectedIso = toIsoDate(selected);
   const todayIso = toIsoDate(today);
   return (
@@ -39,7 +40,8 @@ export function DayStrip({ days, selected, today, markedDates, onSelect }: Props
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   row: { flexDirection: 'row', gap: 4 },
   chip: {
     flex: 1,
@@ -55,6 +57,7 @@ const styles = StyleSheet.create({
   chipToday: { borderWidth: 1.5, borderColor: colors.primary },
   weekday: { fontSize: 13, lineHeight: 16, color: colors.textWeekday },
   date: { fontSize: 17, lineHeight: 20, fontWeight: '700', color: colors.text },
-  textSelected: { color: '#FFFFFF' },
+  textSelected: { color: colors.onPrimary },
   dot: { position: 'absolute', top: 6, right: 12, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.warning },
-});
+}),
+);

@@ -1,20 +1,26 @@
 // Кольори зняті з макетів Figma (файл «ДеПара», знімки в docs/design/). Значення з позначкою `~` не зустрілись
 // у макетах напряму і залишаються оціненими.
-export const colors = {
+export const lightColors = {
   primary: '#233F90',
   primaryDark: '#1B327A',
+  onPrimary: '#FFFFFF', // текст і іконки на primary та accent
   accent: '#2864EC', // рамка поточної пари, прогрес
   background: '#FFFFFF',
   surface: '#FFFFFF',
   surfaceSoft: '#F5F8FF', // фон поточної пари
   surfaceTint: '#DCEAFF', // залишок прогресу, кола з іконками
+  surfaceSelected: '#EEF5FF', // обраний рядок, кола станів
+  surfaceInfo: '#F8FAFC', // інформаційні блоки
   chip: '#F1F4F8', // неактивні дні, нейтральні бейджі
+  overlay: 'rgba(17,24,39,0.45)', // затемнення під нижніми листами
   text: '#111827',
+  textBody: '#374151', // варіанти вибору в онбордингу
   textMuted: '#667281', // викладач, підписи
   textSecondary: '#4F5E70', // аудиторія, нейтральні бейджі
   textTime: '#5C6875', // час пари
   textWeekday: '#627080', // день тижня в смузі
   tabInactive: '#667281',
+  chevron: '#C4CBD4', // декоративні стрілки в списках
   border: '#E7EBF1',
   borderStrong: '#8A94A3', // контури контролів (радіо): ≥3:1 на білому
   tagBlue: '#DFF3FD',
@@ -23,9 +29,55 @@ export const colors = {
   warningBg: '#FFF4C4',
   warningBadge: '#FEF3C7',
   warningText: '#92400E', // ~
+  success: '#166534',
+  successBg: '#DCFCE7',
   danger: '#B3261E',
   dangerBg: '#FDECEA', // ~
+  dangerSurface: '#FFF7F6', // кнопка виходу
+  dangerBorder: '#F5B5B0',
   error: '#B3261E',
+};
+
+export type Colors = typeof lightColors;
+
+// Темних макетів немає: палітра підібрана під ті самі ролі, контраст перевіряє theme.test.ts.
+// primary тут світлий, бо він ще й колір тексту, тому на ньому темний onPrimary, а не білий
+export const darkColors: Colors = {
+  primary: '#8FB4FF',
+  primaryDark: '#7BA3F2',
+  onPrimary: '#0B1A3D',
+  accent: '#7AA7FF',
+  background: '#0F141C',
+  surface: '#18202B',
+  surfaceSoft: '#1A2536',
+  surfaceTint: '#24344F',
+  surfaceSelected: '#1F2D45',
+  surfaceInfo: '#161D27',
+  chip: '#232C38',
+  overlay: 'rgba(0,0,0,0.6)',
+  text: '#F1F4F8',
+  textBody: '#D5DBE3',
+  textMuted: '#9BA7B5',
+  textSecondary: '#AEB8C4',
+  textTime: '#A3AEBB',
+  textWeekday: '#A3AEBB',
+  tabInactive: '#9BA7B5',
+  chevron: '#5D6876',
+  border: '#2A3441',
+  borderStrong: '#7C8898',
+  tagBlue: '#123548',
+  tagBlueText: '#9FDCF7',
+  warning: '#F59E0B',
+  warningBg: '#3A2E0F',
+  warningBadge: '#3D2F10',
+  warningText: '#FBD38D',
+  success: '#86EFAC',
+  successBg: '#14361F',
+  danger: '#FF8A80',
+  dangerBg: '#3A1D1B',
+  dangerSurface: '#2A1816',
+  dangerBorder: '#6E2F2A',
+  error: '#FF8A80',
 };
 
 // Повідомлення для кодів помилок бекенду

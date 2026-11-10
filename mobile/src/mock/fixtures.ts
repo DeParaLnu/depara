@@ -1,4 +1,4 @@
-import type { Building, Classroom, Group, LessonType, Substitution } from '../api';
+import type { Building, Group, LessonType, Room, Substitution } from '../api';
 
 // Мок-дані для розробки без бекенда і SSO (режим MOCK=1). Розклад взято з тестового тижня
 // backend/prisma/seed/schedule.seed.json (група ТЕСТ-31), а дати не фіксовані: у кожному тижні
@@ -25,7 +25,7 @@ export const MOCK_GROUPS: Group[] = [
 /** Розклад є лише в цієї групи. В інших груп тиждень порожній (так перевіряється порожній стан). */
 export const MOCK_SCHEDULE_GROUP_ID = 'mock-g-test-31';
 
-/** Корпуси з backend/prisma/seed/schedule.seed.json: за літерою з «номер/код корпусу» мок віддає building. */
+/** Корпуси з backend/prisma/seed/schedule.seed.json. */
 export const MOCK_BUILDINGS: Record<string, Building> = {
   Б: { code: 'Б', name: 'Корпус на Драгоманова', address: 'вул. Драгоманова, 50' },
   Т: { code: 'Т', name: 'Корпус на Тарнавського', address: 'вул. Генерала Тарнавського, 107' },
@@ -35,11 +35,11 @@ export const MOCK_BUILDINGS: Record<string, Building> = {
 };
 
 /** Аудиторії з seed для тестування пошуку (F5) */
-export const MOCK_CLASSROOMS: Classroom[] = [
+export const MOCK_CLASSROOMS: Room[] = [
   { id: 'mock-cr-1', number: '1', label: '1/Б', building: MOCK_BUILDINGS.Б },
   { id: 'mock-cr-3', number: '3', label: '3/Б', building: MOCK_BUILDINGS.Б },
-  { id: 'mock-cr-5', number: '№5', label: '№5/Б', building: MOCK_BUILDINGS.Б },
-  { id: 'mock-cr-9', number: '№9', label: '№9/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-5', number: 'N5', label: 'N5/Б', building: MOCK_BUILDINGS.Б },
+  { id: 'mock-cr-9', number: 'N9', label: 'N9/Б', building: MOCK_BUILDINGS.Б },
   { id: 'mock-cr-n10', number: 'N10', label: 'N10/Б', building: MOCK_BUILDINGS.Б },
   { id: 'mock-cr-n11', number: 'N11', label: 'N11/Б', building: MOCK_BUILDINGS.Б },
   { id: 'mock-cr-129a', number: '129а', label: '129а/Т', building: MOCK_BUILDINGS.Т },
@@ -64,8 +64,8 @@ export type MockLesson = {
   audience: 'STREAM' | 'COMBINED' | 'GROUP';
   subgroup: number;
   teacher: string | null;
-  room: string | null; // «номер/код корпусу»
-  substitution?: Omit<Substitution, 'id' | 'newBuilding'>;
+  room: string | null; // label аудиторії з MOCK_CLASSROOMS
+  substitution?: Omit<Substitution, 'id' | 'newRoom'> & { newRoom: string | null };
 };
 
 export const MOCK_LESSONS: MockLesson[] = [
@@ -75,7 +75,7 @@ export const MOCK_LESSONS: MockLesson[] = [
   { day: 0, pair: 3, subject: 'Оптоелектронна інформатика', type: 'LAB', audience: 'GROUP', subgroup: 1, teacher: 'Горон Богдан Ігорович', room: '218/Т' },
   { day: 0, pair: 3, subject: 'Операційні системи', type: 'LAB', audience: 'GROUP', subgroup: 2, teacher: 'Бойко Ярослав Васильович', room: 'N10/Б' },
   { day: 0, pair: 4, subject: 'Оптоелектронна інформатика', type: 'LECTURE', audience: 'STREAM', subgroup: 0, teacher: 'Корчак Юрій Михайлович', room: '1/Б' },
-  { day: 0, pair: 5, subject: 'Організація баз даних та знань', type: 'LAB', audience: 'COMBINED', subgroup: 0, teacher: 'Цибуляк Богдан Зіновійович', room: '№9/Б' },
+  { day: 0, pair: 5, subject: 'Організація баз даних та знань', type: 'LAB', audience: 'COMBINED', subgroup: 0, teacher: 'Цибуляк Богдан Зіновійович', room: 'N9/Б' },
   // Вівторок
   { day: 1, pair: 1, subject: 'Основи національного спротиву', type: 'OTHER', audience: 'GROUP', subgroup: 0, teacher: null, room: null },
   {
@@ -101,7 +101,7 @@ export const MOCK_LESSONS: MockLesson[] = [
   { day: 2, pair: 3, subject: 'Оптоелектронна інформатика', type: 'LAB', audience: 'GROUP', subgroup: 2, teacher: 'Русиняк Михайло Омелянович', room: '218/Т' },
   { day: 2, pair: 4, subject: 'Операційні системи', type: 'LAB', audience: 'GROUP', subgroup: 1, teacher: 'Бойко Ярослав Васильович', room: 'N10/Б' },
   { day: 2, pair: 4, subject: 'Веб програмування на стороні сервера', type: 'LAB', audience: 'GROUP', subgroup: 2, teacher: 'Чмихало Олександр Сергійович', room: 'N11/Б' },
-  { day: 2, pair: 5, subject: 'Організація баз даних та знань', type: 'LAB', audience: 'COMBINED', subgroup: 0, teacher: 'Галяткін Олександр Олександрович', room: '№5/Б' },
+  { day: 2, pair: 5, subject: 'Організація баз даних та знань', type: 'LAB', audience: 'COMBINED', subgroup: 0, teacher: 'Галяткін Олександр Олександрович', room: 'N5/Б' },
   // Четвер
   { day: 3, pair: 1, subject: 'Українська мова (за професійним спрямуванням)', type: 'LECTURE', audience: 'STREAM', subgroup: 0, teacher: 'Щепанська Христина Андріївна', room: '1/Б' },
   {

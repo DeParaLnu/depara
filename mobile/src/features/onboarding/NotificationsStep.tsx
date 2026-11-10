@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
 import { requestPermission } from '../reminders/notifications';
 import type { ReminderMinutes } from '../reminders/plan';
 import { ReminderPicker } from '../reminders/ReminderPicker';
@@ -16,6 +16,8 @@ type Props = { onDone: () => void };
 // Відмова в дозволі онбординг не зупиняє: увімкнути можна пізніше в профілі.
 // Токен пристрою реєструється вже у вкладках (features/push/usePush.ts).
 export function NotificationsStep({ onDone }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const { saveChoice, enable } = useApplyReminder();
   const [minutes, setMinutes] = useState<ReminderMinutes>(10);
@@ -57,7 +59,7 @@ export function NotificationsStep({ onDone }: Props) {
         style={({ pressed }) => [styles.primary, pressed && styles.primaryPressed]}
       >
         {asking ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={colors.onPrimary} />
         ) : (
           <Text style={styles.primaryText}>Дозволити сповіщення</Text>
         )}
@@ -76,7 +78,8 @@ export function NotificationsStep({ onDone }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background, paddingHorizontal: 20 },
   body: { flex: 1 },
   icon: {
@@ -100,7 +103,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryPressed: { backgroundColor: colors.primaryDark },
-  primaryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 17 },
+  primaryText: { color: colors.onPrimary, fontWeight: '700', fontSize: 17 },
   later: { alignSelf: 'center', minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, marginTop: 6 },
   laterText: { color: colors.textMuted, fontSize: 16 },
-});
+}),
+);

@@ -4,7 +4,8 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from '
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Group } from '../../api';
 import { errorCode } from '../../lib/errors';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 import { useSession } from '../auth/session';
 import { SUBGROUPS } from '../profile/group';
 import { useSetGroup } from '../profile/hooks';
@@ -38,6 +39,8 @@ type Props =
 // F2: факультет → група і підгрупа. Крок «спеціальність», код старости і дозвіл на сповіщення
 // додамо, коли для них зʼявиться підтримка в API. Той самий екран змінює групу з профілю (F9, mode="change").
 export function OnboardingScreen(props: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const changing = props.mode === 'change';
   const insets = useSafeAreaInsets();
   const finishOnboarding = useSession((s) => s.finishOnboarding);
@@ -282,7 +285,8 @@ export function OnboardingScreen(props: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingHorizontal: 20 },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   back: { width: 32, height: 32, justifyContent: 'center' },
@@ -301,14 +305,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  optionSelected: { backgroundColor: '#EEF5FF', borderBottomColor: 'transparent', borderRadius: 14 },
+  optionSelected: { backgroundColor: colors.surfaceSelected, borderBottomColor: 'transparent', borderRadius: 14 },
   optionText: { flex: 1, gap: 2 },
-  optionTitle: { flex: 1, fontSize: 17, lineHeight: 22, color: '#374151' },
+  optionTitle: { flex: 1, fontSize: 17, lineHeight: 22, color: colors.textBody },
   optionTitleSelected: { fontWeight: '700', color: colors.primary },
   optionMeta: { fontSize: 13, color: colors.textMuted },
   radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: colors.borderStrong, alignItems: 'center', justifyContent: 'center' },
   radioSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
-  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.onPrimary },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   errorBox: { gap: 12, alignItems: 'center', marginBottom: 12 },
   error: { fontSize: 15, color: colors.error, textAlign: 'center' },
@@ -324,7 +328,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   segmentSelected: { backgroundColor: colors.surface },
-  segmentText: { fontSize: 15, fontWeight: '600', color: '#374151' },
+  segmentText: { fontSize: 15, fontWeight: '600', color: colors.textBody },
   segmentTextSelected: { color: colors.primary, fontWeight: '700' },
   primary: {
     minHeight: 56,
@@ -336,4 +340,5 @@ const styles = StyleSheet.create({
   primaryDisabled: { opacity: 0.4 },
   primaryPressed: { backgroundColor: colors.primaryDark },
   primaryText: { color: colors.surface, fontWeight: '700', fontSize: 16 },
-});
+}),
+);

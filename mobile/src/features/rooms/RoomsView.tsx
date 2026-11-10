@@ -11,14 +11,15 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { Building, Classroom } from '../../api';
+import type { Building, Room } from '../../api';
 import { StateView } from '../../components/StateView';
 import { openRoute } from '../../lib/maps';
-import { colors, errorText } from '../../theme';
+import { makeStyles, useColors } from '../theme/useTheme';
+import { errorText } from '../../theme';
 
 export type RoomsState =
   | { kind: 'loading' }
-  | { kind: 'ready'; rooms: Classroom[] }
+  | { kind: 'ready'; rooms: Room[] }
   | { kind: 'error'; code: string };
 
 type Props = {
@@ -52,6 +53,8 @@ export function RoomsView({
   state,
   onRetry,
 }: Props) {
+  const styles = useStyles();
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const [isFocused, setIsFocused] = useState(false);
 
@@ -190,7 +193,7 @@ export function RoomsView({
                             Корпус {room.building.code} · {room.building.address}
                           </Text>
                         </View>
-                        <Ionicons name="chevron-forward" size={18} color="#C4CBD4" />
+                        <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
                       </View>
                     </TouchableOpacity>
                     {idx < state.rooms.length - 1 ? <View style={styles.separator} /> : null}
@@ -223,7 +226,7 @@ export function RoomsView({
                         <Text style={styles.itemTitle}>{building.name}</Text>
                         <Text style={styles.itemSubtitle}>{building.address}</Text>
                       </View>
-                      <Ionicons name="chevron-forward" size={18} color="#C4CBD4" />
+                      <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
                     </View>
                   </TouchableOpacity>
                   {idx < matchedBuildings.length - 1 ? <View style={styles.separator} /> : null}
@@ -237,7 +240,8 @@ export function RoomsView({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
   buildingsError: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingVertical: 4 },
   buildingsErrorText: { fontSize: 14, lineHeight: 19, color: colors.primary, fontWeight: '600' },
   screen: {
@@ -296,7 +300,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   chipTextActive: {
-    color: '#FFFFFF',
+    color: colors.onPrimary,
   },
   centerContainer: {
     flex: 1,
@@ -334,7 +338,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#EEF5FF',
+    backgroundColor: colors.surfaceSelected,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
@@ -356,4 +360,5 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.border,
   },
-});
+}),
+);

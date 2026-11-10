@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { adminToken, API, authHeaders, currentMonday, emptyGroup, loginRaw, send, setupStudent } from './helpers';
+import { adminToken, API, authHeaders, currentMonday, emptyGroup, loginRaw, send, setupStudent, type Room } from './helpers';
 
-type Lesson = { date: string; pairNumber: number; subgroup: number; room: string | null; subject: string };
+type Lesson = { date: string; pairNumber: number; subgroup: number; room: Room | null; subject: string };
 
 async function week(token: string): Promise<Lesson[]> {
   const res = await fetch(`${API}/schedule/week`, { headers: authHeaders(token) });
@@ -74,13 +74,13 @@ describe('F3: розклад на тиждень', () => {
     const lessons = await week(await setupStudent('f3.sub1@lnu.edu.ua', 1));
     expect(lessons.every((l) => l.subgroup === 0 || l.subgroup === 1)).toBe(true);
     const mondayPair2 = lessons.filter((l) => l.date === currentMonday() && l.pairNumber === 2);
-    expect(mondayPair2.map((l) => l.room)).toEqual(['406/Т']);
+    expect(mondayPair2.map((l) => l.room?.label)).toEqual(['406/Т']);
   });
 
   it('студент з підгрупою 0 бачить пари обох підгруп', async () => {
     const lessons = await week(await setupStudent('f3.suball@lnu.edu.ua', 0));
     const mondayPair2 = lessons.filter((l) => l.date === currentMonday() && l.pairNumber === 2);
-    expect(mondayPair2.map((l) => l.room).sort()).toEqual(['129а/Т', '406/Т']);
+    expect(mondayPair2.map((l) => l.room?.label).sort()).toEqual(['129а/Т', '406/Т']);
   });
 
   // Критерій: «порожній тиждень» і «розклад не опубліковано» розрізняються
@@ -113,16 +113,20 @@ describe('F3: розклад на тиждень', () => {
   });
 
   // Критерій: на екрані деталей видно корпус і адресу
-  it('пара з аудиторією містить корпус з адресою, пара без аудиторії дає building: null', async () => {
+  it('пара з аудиторією містить room з корпусом і адресою, пара без аудиторії дає room: null', async () => {
     const lessons = (await (
       await fetch(`${API}/schedule/week`, { headers: authHeaders(await setupStudent('f3.building@lnu.edu.ua')) })
-    ).json()) as { lessons: (Lesson & { building: { code: string; name: string; address: string } | null })[] };
+    ).json()) as { lessons: Lesson[] };
     const withRoom = lessons.lessons.filter((l) => l.room);
     expect(withRoom.length).toBeGreaterThan(0);
+    expect(withRoom.length).toBeLessThan(lessons.lessons.length);
     for (const l of withRoom) {
-      expect(l.building?.address, l.room!).toBeTruthy();
-      expect(l.room!.endsWith(`/${l.building!.code}`)).toBe(true);
+      const room = l.room!;
+      expect(room.id, room.label).toBeTruthy();
+      expect(room.building.address, room.label).toBeTruthy();
+      expect(room.label).toBe(`${room.number}/${room.building.code}`);
     }
-    for (const l of lessons.lessons.filter((x) => !x.room)) expect(l.building).toBeNull();
+    // Окремого поля building більше немає: усе в room
+    for (const l of lessons.lessons) expect(l).not.toHaveProperty('building');
   });
 });
