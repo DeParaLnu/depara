@@ -326,6 +326,14 @@ class Cases(unittest.TestCase):
             self.assertEqual(case["set"], "dev")
 
 
+class CompareMissing(unittest.TestCase):
+    def test_missing_run_is_a_message_not_a_traceback(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(run_eval.main(["--compare", "base", "немає-такого-прогону"], env={}), 2)
+        self.assertIn("немає-такого-прогону", err.getvalue())
+
+
 class Snapshot(unittest.TestCase):
     def test_whole_commit_is_extracted_even_when_run_from_a_folder_missing_in_it(self):
         import subprocess

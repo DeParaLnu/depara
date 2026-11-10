@@ -177,7 +177,7 @@ class ReviewTests(unittest.TestCase):
         self.assertNotIn("review: success", first[1]["content"])
         self.assertNotIn("package-lock.json b/", first[1]["content"].split("<diff>")[1])
         self.assertNotIn("службовий файл", first[1]["content"])  # у запит до моделі службові файли не попадають
-        self.assertIn("Службових файлів (лок-файли, зображення) не переглядаємо: 1.", posted)
+        self.assertIn("Службових файлів (лок-файли, зображення, дані вимірювання) не переглядаємо: 1.", posted)
         self.assertIn("### Охоплення\nПереглянуто всі файли: 1.", posted)
         self.assertNotIn("⚠️", posted)  # усе переглянуто: попередження зверху немає
         # результат інструмента повернувся до моделі

@@ -1495,7 +1495,7 @@ def render_coverage(cov: dict) -> tuple[str, str]:
     head = (f"Переглянуто всі файли: {total}." if not missing and not partial else
             f"Переглянуто {reviewed} з {total} файлів" + (f", з них частково: {len(partial)}." if partial else "."))
     if cov["service"]:
-        head += f" Службових файлів (лок-файли, зображення) не переглядаємо: {cov['service']}."
+        head += f" Службових файлів (лок-файли, зображення, дані вимірювання) не переглядаємо: {cov['service']}."
     section = "### Охоплення\n" + head + ("\n\n" + "\n".join(lines) if lines else "")
     warning = ""
     if missing or partial:

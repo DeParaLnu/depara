@@ -57,7 +57,7 @@ class Coverage(unittest.TestCase):
         self.assertTrue(out.startswith("> ⚠️ **Переглянуто 1 з 2 файлів.**"))
         self.assertIn("- **Не вмістились у ліміт ревʼю** (1): `backend/src/b.ts`", out)
         self.assertIn("AI_REVIEW_MAX_CHUNKS", out)
-        self.assertIn("Службових файлів (лок-файли, зображення) не переглядаємо: 1.", out)
+        self.assertIn("Службових файлів (лок-файли, зображення, дані вимірювання) не переглядаємо: 1.", out)
         self.assertIn("У переглянутих файлах суттєвих проблем не знайдено.", out)
         self.assertEqual(report["not_reviewed"], ["backend/src/b.ts"])
 

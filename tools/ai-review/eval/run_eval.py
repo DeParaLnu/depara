@@ -233,8 +233,15 @@ def line(name: str, s: dict) -> str:
 
 
 def show_compare(base_label: str, new_label: str) -> int:
-    base = json.loads((RESULTS / f"{base_label}.json").read_text("utf-8"))["summary"]
-    new = json.loads((RESULTS / f"{new_label}.json").read_text("utf-8"))["summary"]
+    summaries = []
+    for label in (base_label, new_label):
+        path = RESULTS / f"{label}.json"
+        try:
+            summaries.append(json.loads(path.read_text("utf-8"))["summary"])
+        except (OSError, ValueError, KeyError):
+            print(f"Немає результатів прогону «{label}» ({path.name}): спершу запустіть його з --label {label}.", file=sys.stderr)
+            return 2
+    base, new = summaries
     for key in score.METRICS:
         b, n = base[key], new[key]
         print(f"{key:<20} {b['mean']:>8.2f} [{b['min']:.2f}..{b['max']:.2f}]  →  {n['mean']:>8.2f} [{n['min']:.2f}..{n['max']:.2f}]")
