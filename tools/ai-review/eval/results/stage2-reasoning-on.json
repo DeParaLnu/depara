@@ -1,0 +1,72 @@
+{
+ "label": "e1-think-general",
+ "smoke": false,
+ "set": null,
+ "cases": [
+  100,
+  68,
+  71,
+  73,
+  80,
+  81,
+  83,
+  86,
+  87,
+  90,
+  93,
+  97,
+  99
+ ],
+ "runs": [
+  {
+   "cases": 13,
+   "real_total": 21,
+   "found": 0,
+   "recall": 0.0,
+   "killed": 1,
+   "false_known": 0,
+   "false_upper": 16,
+   "findings": 16,
+   "not_reviewed_share": 0.39285714285714285,
+   "failed_cases": 2,
+   "seconds_max": 419.6,
+   "seconds_total": 3033.3,
+   "cost_usd": 0.5458,
+   "truncated": 67
+  }
+ ],
+ "summary": {
+  "runs": 1,
+  "found": {
+   "mean": 0.0,
+   "min": 0.0,
+   "max": 0.0
+  },
+  "false_known": {
+   "mean": 0.0,
+   "min": 0.0,
+   "max": 0.0
+  },
+  "false_upper": {
+   "mean": 16.0,
+   "min": 16.0,
+   "max": 16.0
+  },
+  "not_reviewed_share": {
+   "mean": 0.39285714285714285,
+   "min": 0.39285714285714285,
+   "max": 0.39285714285714285
+  },
+  "seconds_max": {
+   "mean": 419.6,
+   "min": 419.6,
+   "max": 419.6
+  },
+  "cost_usd": {
+   "mean": 0.5458,
+   "min": 0.5458,
+   "max": 0.5458
+  }
+ },
+ "partial": false
+}
