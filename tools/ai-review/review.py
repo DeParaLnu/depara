@@ -88,7 +88,7 @@ class Config:
     max_steps: int = 7  # звернень до інструментів на один шматок diff
     max_diff_chars: int = 120_000  # загалом на PR
     chunk_chars: int = 9_000  # розмір одного шматка diff: малі моделі гірше тримають довгий контекст
-    max_chunks: int = 10  # реальну межу ставить часовий бюджет
+    max_chunks: int = 20  # реальну межу ставить часовий бюджет; без міркувань шматок займає секунди
     max_findings: int = 7  # скільки пунктів лишити в коментарі
     budget_seconds: int = 420  # після цього решта шматків пропускається (job має ліміт 10 хв)
     workers: int = 3  # запитів до моделі паралельно (шматки й перевірка пунктів)
@@ -383,11 +383,14 @@ def plan_chunks(diff: str, cfg: Config) -> tuple[list[list[tuple[str, str]]], li
     current: list[tuple[str, str]] = []
     size = total = 0
     dropped: list[str] = []
+    cut: list[str] = []
     for path, text in files:
         for piece in split_hunks(annotate_diff(text), cfg.chunk_chars):
             if total + len(piece) > cfg.max_diff_chars:
                 dropped.append(path)
                 continue
+            if TRUNCATION_MARKER in piece:
+                cut.append(path)  # блок змін, більший за шматок, обрізано: частину файла модель не бачить
             if current and size + len(piece) > cfg.chunk_chars:
                 groups.append(current)
                 current, size = [], 0
@@ -399,7 +402,7 @@ def plan_chunks(diff: str, cfg: Config) -> tuple[list[list[tuple[str, str]]], li
     kept, extra = groups[: cfg.max_chunks], groups[cfg.max_chunks:]
     dropped.extend(p for g in extra for p, _ in g)
     included = {p for g in kept for p, _ in g}
-    for path in dict.fromkeys(dropped):
+    for path in dict.fromkeys([*dropped, *cut]):
         skipped.append(f"{path} ({'переглянуто частково' if path in included else 'не вмістився в ліміт'})")
     return kept, skipped
 
@@ -1432,12 +1435,61 @@ def render_finding(f: Finding, note: str = "") -> str:
     return safe(f"- {icon} **{label}**, `{f.file}:{f.line}`, **{f.title}**{note}\n  {f.problem}{quote}{fix}")
 
 
-def render_review(summary: str, findings: list[Finding], stats: dict, notes: list[str]) -> str:
+# Чому файл не переглянуто: ключ → (заголовок, пояснення і що зробити). Порядок це порядок у коментарі.
+GAP_REASONS = {
+    "limit": ("Не вмістились у ліміт ревʼю", "PR більший за ліміт шматків чи символів. Розбийте PR на менші або збільште "
+                                              "`AI_REVIEW_MAX_CHUNKS` / `AI_REVIEW_MAX_DIFF_CHARS`."),
+    "partial": ("Переглянуто лише частково", "Великий блок змін обрізано або частина файла не вмістилась у ліміт: модель бачила не всі зміни."),
+    "budget": ("Не вистачило часу", "Вичерпано часовий бюджет ревʼю (`AI_REVIEW_BUDGET_SECONDS`). Перезапустіть job або розбийте PR."),
+    "truncated": ("Відповідь моделі обрізано", "Ліміт токенів відповіді вичерпано навіть після повтору меншими частинами "
+                                               "(`AI_REVIEW_MAX_TOKENS`)."),
+    "bad_json": ("Модель не дала придатної відповіді", "Відповідь не вдалося розібрати як JSON. Зазвичай допомагає перезапуск job."),
+    "error": ("Збій запиту до моделі", "Мережа, ліміт запитів чи помилка сервісу. Перезапустіть job."),
+}
+
+
+def new_coverage(total: int) -> dict:
+    return {"files_total": total, "gaps": {key: [] for key in GAP_REASONS}, "errors": [], "service": 0}
+
+
+def missing_files(cov: dict) -> list[str]:
+    """Файли, яких модель не бачила зовсім (частково переглянуті сюди не входять)."""
+    return list(dict.fromkeys(p for key, paths in cov["gaps"].items() if key != "partial" for p in paths))
+
+
+def render_coverage(cov: dict) -> tuple[str, str]:
+    """(попередження для початку коментаря, розділ «Охоплення»). Попередження порожнє, якщо переглянуто все:
+    без нього «проблем не знайдено» читається як «PR перевірено», навіть коли половину файлів пропущено."""
+    total, missing = cov["files_total"], missing_files(cov)
+    partial = [p for p in dict.fromkeys(cov["gaps"]["partial"]) if p not in missing]
+    reviewed = total - len(missing)
+    lines = []
+    for key, (title, hint) in GAP_REASONS.items():
+        paths = partial if key == "partial" else list(dict.fromkeys(cov["gaps"][key]))
+        if not paths:
+            continue
+        shown = ", ".join(f"`{p}`" for p in paths[:12]) + (f" і ще {len(paths) - 12}" if len(paths) > 12 else "")
+        detail = f" Помилка: {'; '.join(dict.fromkeys(cov['errors']))[:300]}." if key == "error" and cov["errors"] else ""
+        lines.append(f"- **{title}** ({len(paths)}): {shown}\n  {hint}{detail}")
+    head = (f"Переглянуто всі файли: {total}." if not missing and not partial else
+            f"Переглянуто {reviewed} з {total} файлів" + (f", з них частково: {len(partial)}." if partial else "."))
+    if cov["service"]:
+        head += f" Службових файлів (лок-файли, зображення) не переглядаємо: {cov['service']}."
+    section = "### Охоплення\n" + head + ("\n\n" + "\n".join(lines) if lines else "")
+    warning = ""
+    if missing or partial:
+        what = f"Переглянуто {reviewed} з {total} файлів" + (f" ({len(partial)} частково)" if partial else "")
+        warning = f"> ⚠️ **{what}.** Решту модель не бачила: причини в розділі «Охоплення» внизу."
+    return warning, safe(section)
+
+
+def render_review(summary: str, findings: list[Finding], stats: dict, notes: list[str], cov: dict | None = None) -> str:
     major = [f for f in findings if f.severity != "minor"]
     minor = [f for f in findings if f.severity == "minor"]
-    parts = ["### Підсумок", safe(summary) or "Підсумок недоступний.", "### Проблеми"]
+    warning, coverage = render_coverage(cov) if cov else ("", "")
+    parts = ([warning] if warning else []) + ["### Підсумок", safe(summary) or "Підсумок недоступний.", "### Проблеми"]
     if not findings:
-        parts.append("Суттєвих проблем не знайдено.")
+        parts.append("У переглянутих файлах суттєвих проблем не знайдено." if warning else "Суттєвих проблем не знайдено.")
     if major:
         parts.append("\n".join(render_finding(f) for f in major))
     if minor:
@@ -1449,6 +1501,8 @@ def render_review(summary: str, findings: list[Finding], stats: dict, notes: lis
               f"{stats['duplicates']} дублікатів, {stats['over_limit']} поза лімітом.")
     if len(findings) > shown:
         checks += f" Пунктів від правил без моделі: {len(findings) - shown}."
+    if coverage:
+        parts.append(coverage)
     parts.append(f"<sub>{checks}</sub>")
     parts.extend(f"<sub>{n}</sub>" for n in notes)
     return "\n\n".join(parts)
@@ -1493,6 +1547,12 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
     rejected: list[dict] = []
     failed_files: list[str] = []
     report.update(files_total=len(pr_files), chunks_total=len(chunks), chunks_failed=0, rejected=rejected, findings=[])
+    cov = new_coverage(len(pr_files))
+    cov["service"] = len(service)
+    for item in skipped:
+        path, reason = item.rsplit(" (", 1)
+        cov["gaps"]["partial" if "частково" in reason else "limit"].append(path)
+    report["coverage"] = cov
 
     stats = {"raw": 0, "no_evidence": 0, "refuted": 0, "duplicates": 0, "over_limit": 0, "unverified": 0}
     notes: list[str] = []
@@ -1546,14 +1606,13 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
             report["chunks_failed"] += 1
             continue
         except (RuntimeError, KeyError, ValueError, IndexError) as err:
-            notes.append(f"Частину файлів ({', '.join(names)}) не переглянуто: {err}")
+            cov["gaps"]["error"].extend(names)
+            cov["errors"].append(str(err))
             failed_files.extend(names)
             report["chunks_failed"] += 1
             continue
         if "findings" not in data and "summary" not in data:  # відповідь не вдалося розібрати навіть після повторів
-            reason = ("відповідь обрізано лімітом токенів навіть після повтору меншими частинами" if data.get("_truncated")
-                      else "модель не повернула коректний JSON")
-            notes.append(f"Частину файлів ({', '.join(names)}) не переглянуто: {reason}")
+            cov["gaps"]["truncated" if data.get("_truncated") else "bad_json"].extend(names)
             failed_files.extend(names)
             report["chunks_failed"] += 1
             continue
@@ -1568,12 +1627,12 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
         raw_findings.extend(parsed)
         stats["raw"] += len(items)
         stats["no_evidence"] += len(items) - len(parsed)  # без файла чи цитати
-    if budget_skipped:
-        notes.append("Не всі файли встигли переглянутись: вичерпано часовий бюджет. Пропущено: "
-                     + ", ".join(dict.fromkeys(budget_skipped)))
+    cov["gaps"]["budget"].extend(dict.fromkeys(budget_skipped))
     report["specs"] = sorted(feature.used) if feature else []
     report["not_reviewed"] = sorted({*failed_files, *budget_skipped, *(x.rsplit(" (", 1)[0] for x in skipped)})
-    report["notes"] = notes  # і коли не відповів жоден шматок: без цього причину збою не видно
+    # і коли не відповів жоден шматок: без цього причину збою в eval не видно
+    report["notes"] = [*notes, *(f"{GAP_REASONS[k][0]}: {', '.join(dict.fromkeys(v))}" for k, v in cov["gaps"].items() if v),
+                       *cov["errors"]]
     static = static_findings(cfg, diff_by_path, tools)
     if not summaries and not raw_findings:
         if not static:
@@ -1619,15 +1678,66 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
     rejected.extend(finding_dict(f, "over_limit") for f in confirmed[cfg.max_findings:])
     # правила без моделі не проходять перевірку моделлю й не займають місця в ліміті: їх мало і вони точні
     final = sorted([*static, *final], key=lambda x: SEVERITIES[x.severity][2])
-    report.update(findings=[finding_dict(f) for f in final], stats=stats, notes=notes)
-    if skipped:
-        notes.append("Не переглянуто: " + "; ".join(skipped))
-    if service:
-        notes.append(f"Службових файлів пропущено: {len(service)} (лок-файли, зображення).")
+    report.update(findings=[finding_dict(f) for f in final], stats=stats)
     if stats["unverified"]:
         notes.append(f"Другою перевіркою не охоплено пунктів: {stats['unverified']} (вичерпано часовий бюджет); "
                      "без перевірки показано лише критичні.")
-    return render_review(summarize(cfg, pr, summaries, budget), final, stats, notes)
+    return render_review(summarize(cfg, pr, summaries, budget), final, stats, notes, cov)
+
+
+def review_metrics(cfg: Config, report: dict, seconds: float) -> dict:
+    """Числа про роботу ревʼю для журналу: лише лічильники й назва моделі, без тексту diff, пунктів і ключів."""
+    cov = report.get("coverage") or new_coverage(int(report.get("files_total") or 0))
+    stats = report.get("stats") or {}
+    findings = report.get("findings") or []
+    rules: dict[str, int] = {}
+    for f in findings:
+        if f.get("rule"):
+            rules[f["rule"]] = rules.get(f["rule"], 0) + 1
+    return {
+        "model": cfg.model, "seconds": round(seconds, 1),
+        "files_total": cov["files_total"], "files_reviewed": cov["files_total"] - len(missing_files(cov)),
+        "files_partial": len(set(cov["gaps"]["partial"]) - set(missing_files(cov))),
+        "not_reviewed": {k: len(set(v)) for k, v in cov["gaps"].items() if v and k != "partial"},
+        "chunks_total": int(report.get("chunks_total") or 0), "chunks_failed": int(report.get("chunks_failed") or 0),
+        "chunks_retried": len(report.get("retried") or []),
+        "model_findings": int(stats.get("raw") or 0), "shown": sum(1 for f in findings if not f.get("rule")),
+        "rejected": {k: int(stats.get(k) or 0) for k in ("no_evidence", "refuted", "duplicates", "over_limit", "unverified")},
+        "rule_findings": rules, **cfg.usage.as_dict(),
+    }
+
+
+def log_metrics(cfg: Config, report: dict, seconds: float, failed: str = "") -> None:
+    """Метрики в журнал job (рядок для людей і рядок JSON для пошуку) і в підсумок кроку Actions, якщо він є."""
+    m = review_metrics(cfg, report, seconds)
+    if failed:
+        m["failed"] = failed[:200]
+    r = m["rejected"]
+    print(f"Метрики ревʼю: файлів {m['files_reviewed']}/{m['files_total']}, шматків {m['chunks_total']} "
+          f"(збоїв {m['chunks_failed']}, повторів {m['chunks_retried']}), пунктів від моделі {m['model_findings']}, показано {m['shown']} "
+          f"(без цитати {r['no_evidence']}, спростовано {r['refuted']}, дублікатів {r['duplicates']}, поза лімітом {r['over_limit']}, "
+          f"без перевірки {r['unverified']}), від правил {sum(m['rule_findings'].values())}, запитів {m['requests']}, "
+          f"токенів {m['prompt_tokens']} + {m['completion_tokens']}, обрізаних відповідей {m['truncated']}, {m['seconds']} с.")
+    print("AI_REVIEW_METRICS " + json.dumps(m, ensure_ascii=False, sort_keys=True))
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    rows = [("Файлів переглянуто", f"{m['files_reviewed']} з {m['files_total']}" + (f" ({m['files_partial']} частково)" if m["files_partial"] else "")),
+            ("Не переглянуто", ", ".join(f"{GAP_REASONS[k][0].lower()}: {n}" for k, n in m["not_reviewed"].items()) or "немає"),
+            ("Шматків", f"{m['chunks_total']}, збоїв {m['chunks_failed']}, повторів {m['chunks_retried']}"),
+            ("Пунктів від моделі", f"{m['model_findings']}, показано {m['shown']}"),
+            ("Відсіяно", f"без цитати {r['no_evidence']}, спростовано {r['refuted']}, дублікатів {r['duplicates']}, поза лімітом {r['over_limit']}"),
+            ("Пунктів від правил", ", ".join(f"{k}: {n}" for k, n in m["rule_findings"].items()) or "немає"),
+            ("Запитів до моделі", f"{m['requests']}, обрізаних відповідей {m['truncated']}"),
+            ("Токенів", f"{m['prompt_tokens']} на вхід, {m['completion_tokens']} на вихід"),
+            ("Час", f"{m['seconds']} с із {cfg.budget_seconds} с бюджету")]
+    if failed:
+        rows.append(("Збій", safe(m["failed"])))
+    try:
+        with open(path, "a", encoding="utf-8") as out:
+            out.write("### ШІ-ревʼю: метрики\n\n| Показник | Значення |\n|---|---|\n" + "".join(f"| {a} | {b} |\n" for a, b in rows))
+    except OSError:
+        pass  # підсумок кроку це зручність
 
 
 def main() -> int:
@@ -1638,11 +1748,14 @@ def main() -> int:
     if not (cfg.repo and cfg.pr_number and cfg.github_token):
         print("Потрібні GITHUB_REPOSITORY, PR_NUMBER і GITHUB_TOKEN.", file=sys.stderr)
         return 1
+    report: dict = {}
+    started = time.monotonic()
+    failed = ""
     try:
         gh = GitHub(cfg)
         pr = gh.pr()
         sha = pr.get("head", {}).get("sha", "")
-        review = run_review(cfg, pr, gh.diff(), gh.ci_summary(sha) if sha else "", RepoTools(cfg.repo_dir))
+        review = run_review(cfg, pr, gh.diff(), gh.ci_summary(sha) if sha else "", RepoTools(cfg.repo_dir), report)
         if review is None:
             print("Немає змін, які варто ревʼюити: пропущено.")
             return 0
@@ -1653,7 +1766,12 @@ def main() -> int:
             print(f"Коментар {gh.upsert_comment(comment)}.")
     except (RuntimeError, KeyError, ValueError) as err:
         # Збій ревʼюера не має блокувати PR: лише попередження в журналі
+        failed = str(err)
         print(f"::warning::ШІ-ревʼю не вдалося: {err}")
+    try:
+        log_metrics(cfg, report, time.monotonic() - started, failed)
+    except Exception as err:  # noqa: BLE001: метрики не мають ні зупинити ревʼю, ні зробити job червоним
+        print(f"::warning::Метрики ревʼю не записано: {type(err).__name__}")
     return 0
 
 

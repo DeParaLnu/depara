@@ -209,7 +209,7 @@ class TwoStage(unittest.TestCase):
         report: dict = {}
         out = self.run_review(api, big, report)
         self.assertIn("Неправильний підсумок c", out)
-        self.assertNotIn("не переглянуто", out)
+        self.assertIn("Переглянуто всі файли: 2.", out)
         self.assertEqual(report["not_reviewed"], [])
         self.assertEqual(report["retried"], [2])
 
@@ -228,8 +228,8 @@ class TwoStage(unittest.TestCase):
             ok("", finish="length"),
         ])
         out = self.run_review(api, big)
-        self.assertIn("обрізано лімітом токенів", out)
-        self.assertIn("backend/src/b.ts", out.split("обрізано лімітом токенів")[0].split("Частину файлів")[-1])
+        self.assertIn("- **Відповідь моделі обрізано** (1): `backend/src/b.ts`", out)
+        self.assertIn("AI_REVIEW_MAX_TOKENS", out)
 
     def test_empty_notes_are_not_a_crash(self):
         api = FakeApi([ok("")])

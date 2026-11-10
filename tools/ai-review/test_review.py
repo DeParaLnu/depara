@@ -177,7 +177,9 @@ class ReviewTests(unittest.TestCase):
         self.assertNotIn("review: success", first[1]["content"])
         self.assertNotIn("package-lock.json b/", first[1]["content"].split("<diff>")[1])
         self.assertNotIn("службовий файл", first[1]["content"])  # у запит до моделі службові файли не попадають
-        self.assertIn("Службових файлів пропущено: 1", posted)
+        self.assertIn("Службових файлів (лок-файли, зображення) не переглядаємо: 1.", posted)
+        self.assertIn("### Охоплення\nПереглянуто всі файли: 1.", posted)
+        self.assertNotIn("⚠️", posted)  # усе переглянуто: попередження зверху немає
         # результат інструмента повернувся до моделі
         tool_msgs = [m for m in Stub.state["chat_requests"][1]["messages"] if m["role"] == "tool"]
         self.assertIn("1: # Привіт", tool_msgs[0]["content"])
@@ -606,7 +608,10 @@ class ReviewTests(unittest.TestCase):
             del os.environ["AI_REVIEW_BUDGET_SECONDS"], os.environ["AI_REVIEW_CHUNK_CHARS"]
         posted = Stub.state["posted"]
         self.assertEqual(len(Stub.state["chat_requests"]), 1)
-        self.assertIn("вичерпано часовий бюджет. Пропущено: backend/src/b.ts", posted)
+        self.assertIn("- **Не вистачило часу** (1): `backend/src/b.ts`", posted)
+        self.assertIn("> ⚠️ **Переглянуто 1 з 2 файлів.**", posted)
+        self.assertLess(posted.index("⚠️"), posted.index("### Підсумок"))  # попередження вище за «проблем не знайдено»
+        self.assertIn("У переглянутих файлах суттєвих проблем не знайдено.", posted)
 
     # ---------- швидкість: паралельність і повтори ----------
 
@@ -698,8 +703,8 @@ class ReviewTests(unittest.TestCase):
         finally:
             del os.environ["AI_REVIEW_CHUNK_CHARS"]
         posted = Stub.state["posted"]
-        self.assertIn("не переглянуто: модель не повернула коректний JSON", posted)
-        self.assertIn("backend/src/b.ts", posted.split("не повернула коректний JSON")[0].split("Частину файлів")[-1])
+        self.assertIn("- **Модель не дала придатної відповіді** (1): `backend/src/b.ts`", posted)
+        self.assertIn("Переглянуто 1 з 2 файлів.", posted)
         self.assertIn("перший шматок", posted)
 
     def test_missing_ci_permission_does_not_break_review(self):
