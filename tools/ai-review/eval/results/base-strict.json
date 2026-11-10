@@ -1,0 +1,90 @@
+{
+ "label": "base-strict",
+ "smoke": false,
+ "set": null,
+ "cases": [
+  100,
+  68,
+  71,
+  73,
+  80,
+  81,
+  83,
+  86,
+  87,
+  90,
+  93,
+  97,
+  99
+ ],
+ "runs": [
+  {
+   "cases": 13,
+   "real_total": 21,
+   "found": 1,
+   "recall": 0.047619047619047616,
+   "killed": 3,
+   "false_known": 0,
+   "false_upper": 26,
+   "findings": 27,
+   "static": 0,
+   "not_reviewed_share": 0.3392857142857143,
+   "failed_cases": 1,
+   "seconds_max": 343.5,
+   "seconds_total": 2694.7,
+   "cost_usd": 0.4831,
+   "truncated": 66
+  },
+  {
+   "cases": 13,
+   "real_total": 21,
+   "found": 0,
+   "recall": 0.0,
+   "killed": 1,
+   "false_known": 1,
+   "false_upper": 23,
+   "findings": 23,
+   "static": 0,
+   "not_reviewed_share": 0.25595238095238093,
+   "failed_cases": 0,
+   "seconds_max": 376.2,
+   "seconds_total": 2507.9,
+   "cost_usd": 0.4063,
+   "truncated": 56
+  }
+ ],
+ "summary": {
+  "runs": 2,
+  "found": {
+   "mean": 0.5,
+   "min": 0.0,
+   "max": 1.0
+  },
+  "false_known": {
+   "mean": 0.5,
+   "min": 0.0,
+   "max": 1.0
+  },
+  "false_upper": {
+   "mean": 24.5,
+   "min": 23.0,
+   "max": 26.0
+  },
+  "not_reviewed_share": {
+   "mean": 0.2976190476190476,
+   "min": 0.25595238095238093,
+   "max": 0.3392857142857143
+  },
+  "seconds_max": {
+   "mean": 359.85,
+   "min": 343.5,
+   "max": 376.2
+  },
+  "cost_usd": {
+   "mean": 0.4447,
+   "min": 0.4063,
+   "max": 0.4831
+  }
+ },
+ "partial": false
+}
