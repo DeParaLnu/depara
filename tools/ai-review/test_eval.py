@@ -24,6 +24,16 @@ def finding(file="a.ts", line=11, title="t", problem="p"):
     return {"file": file, "line": line, "title": title, "problem": problem}
 
 
+class StaticRules(unittest.TestCase):
+    def test_rule_findings_are_counted_apart_from_model_guesses(self):
+        case = {"pr": 1, "issues": [ISSUE], "known_false": []}
+        report = {"findings": [{"file": "package.json", "line": 3, "title": "Нові залежності: zod", "problem": "", "pass": "static"},
+                               {"file": "b.ts", "line": 1, "title": "здогад моделі", "problem": ""}]}
+        s = score.score_case(case, report)
+        self.assertEqual((s["static"], s["unlabeled"], s["findings"]), (1, 1, 2))
+        self.assertEqual(score.aggregate([s])["static"], 1)
+
+
 class Matching(unittest.TestCase):
     def test_line_nearby_counts(self):
         self.assertTrue(score.matches(finding(line=15), ISSUE))

@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Правила без моделі на diff\'ах PR: без ключа й без мережі. Показує кожне спрацювання, щоб оцінити хибні.
+
+  python3 tools/ai-review/eval/check_rules.py                 # кейси eval
+  python3 tools/ai-review/eval/check_rules.py каталог/з/diff  # будь-які файли *.diff (напр. gh pr diff N > N.diff)
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import Counter
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+import checks  # noqa: E402
+import review  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    folder = Path(argv[0]) if argv else HERE / "cases"
+    totals: Counter = Counter()
+    paths = sorted(folder.glob("*.diff"))
+    for path in paths:
+        by_path = dict(review.split_diff(path.read_text("utf-8", "replace")))
+        for f in checks.run(review.changed_lines(by_path), lambda _path: None):
+            totals[f["rule"]] += 1
+            print(f"{path.stem} {f['rule']} {f['severity']} {f['file']}:{f['line']} | {f['title']} | {f['evidence'][:100]}")
+    print(f"Файлів diff: {len(paths)}. Спрацювань: {dict(totals) or 0}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -33,6 +33,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import checks
+
 MARKER = "<!-- depara-ai-review -->"
 USER_AGENT = "depara-ai-review"
 MAX_COMMENT_CHARS = 60_000  # ліміт коментаря GitHub ~65 тис. символів
@@ -100,6 +102,7 @@ class Config:
     usage: Usage = field(default_factory=Usage)
     two_stage: bool = False  # нотатки з інструментами, потім JSON за схемою без інструментів (з env: увімкнено)
     rejected_params: set = field(default_factory=set)  # що API відхилив (400): більше не надсилаємо
+    checks: bool = True  # перевірки без моделі (checks.py): секрети, формат помилки, маршрут без E2E, нові пакети
     passes: tuple = ()  # вузькі проходи (ключі з PASSES, AI_REVIEW_PASSES); порожньо: один загальний запит
 
     @classmethod
@@ -131,6 +134,7 @@ class Config:
             dry_run=e.get("DRY_RUN") == "1",
             two_stage=e.get("AI_REVIEW_TWO_STAGE") != "0",
             passes=parse_passes(e.get("AI_REVIEW_PASSES")),
+            checks=e.get("AI_REVIEW_CHECKS") != "0",
         )
 
 
@@ -207,7 +211,8 @@ class Finding:
     fix: str = ""
     unverified: bool = False  # друга перевірка не відбулась (вичерпано час)
     change: str = ""  # рядок цитати в diff: added, context чи removed (заповнює anchor_finding)
-    source: str = ""  # вузький прохід, що дав пункт (порожньо: загальний запит)
+    source: str = ""  # вузький прохід, що дав пункт (порожньо: загальний запит); «static»: перевірка без моделі
+    rule: str = ""  # назва правила для пунктів перевірок без моделі
 
 
 # ---------- HTTP ----------
@@ -898,6 +903,41 @@ def diff_candidates(chunk: str) -> tuple[list[tuple[int, str, str]], list[tuple[
     return present, removed
 
 
+def changed_lines(diff_by_path: dict[str, str]) -> dict[str, dict]:
+    """Для перевірок без моделі: шлях → додані рядки з номерами нової версії, видалені рядки, чи файл новий."""
+    out: dict[str, dict] = {}
+    for path, chunk in diff_by_path.items():
+        added, removed, new, in_hunk = [], [], 0, False
+        for raw in chunk.splitlines():
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)
+            if m:
+                new, in_hunk = int(m.group(1)), True
+            elif not in_hunk:
+                continue
+            elif raw.startswith("-"):
+                removed.append(raw[1:])
+            elif raw.startswith("+"):
+                added.append((new, raw[1:]))
+                new += 1
+            elif raw.startswith(" "):
+                new += 1
+        out[path] = {"added": added, "removed": removed, "new_file": bool(re.search(r"(?m)^new file mode", chunk))}
+    return out
+
+
+def static_findings(cfg: Config, diff_by_path: dict[str, str], tools: RepoTools) -> list[Finding]:
+    """Пункти перевірок без моделі. Збій правила не має зупиняти ревʼю."""
+    if not cfg.checks:
+        return []
+    try:
+        raw = checks.run(changed_lines(diff_by_path), tools.read_text)
+    except Exception as err:  # noqa: BLE001: правила це зручність, а не обовʼязкова частина
+        print(f"::warning::Перевірки без моделі не вдалися: {type(err).__name__}")
+        return []
+    return [Finding(r["file"], r["line"], r["severity"], r["title"], r["evidence"].strip()[:300], r["problem"], r["fix"],
+                    source="static", rule=r["rule"]) for r in raw]
+
+
 def anchor_finding(f: Finding, diff_by_path: dict[str, str]) -> bool:
     """Перевіряє, що цитата справді є серед рядків diff цього файла, і виправляє номер рядка.
 
@@ -1224,10 +1264,12 @@ def safe(text: str) -> str:
 
 def render_finding(f: Finding, note: str = "") -> str:
     icon, label, _ = SEVERITIES[f.severity]
-    evidence = f.evidence.splitlines()[0].strip().replace("`", "'")[:160]
+    evidence = f.evidence.splitlines()[0].strip().replace("`", "'")[:160] if f.evidence.strip() else ""
     fix = f"\n  Виправити: {f.fix}" if f.fix else ""
     note = note or (" ⚠️ _не перевірено другою перевіркою_" if f.unverified else "")
-    return safe(f"- {icon} **{label}**, `{f.file}:{f.line}`, **{f.title}**{note}\n  {f.problem}\n  > `{evidence}`{fix}")
+    note = note or (" ⚙️ _правило без моделі_" if f.source == "static" else "")
+    quote = f"\n  > `{evidence}`" if evidence else ""
+    return safe(f"- {icon} **{label}**, `{f.file}:{f.line}`, **{f.title}**{note}\n  {f.problem}{quote}{fix}")
 
 
 def render_review(summary: str, findings: list[Finding], stats: dict, notes: list[str]) -> str:
@@ -1241,9 +1283,12 @@ def render_review(summary: str, findings: list[Finding], stats: dict, notes: lis
     if minor:
         body = "\n".join(render_finding(f) for f in minor)
         parts.append(f"<details><summary>Дрібниці ({len(minor)})</summary>\n\n{body}\n\n</details>")
-    checks = (f"Пунктів від моделі: {stats['raw']}, показано: {len(findings)}. Відсіяно: "
+    shown = sum(f.source != "static" for f in findings)
+    checks = (f"Пунктів від моделі: {stats['raw']}, показано: {shown}. Відсіяно: "
               f"{stats['no_evidence']} без підтвердження цитатою, {stats['refuted']} спростовано чи не підтверджено перевіркою, "
               f"{stats['duplicates']} дублікатів, {stats['over_limit']} поза лімітом.")
+    if len(findings) > shown:
+        checks += f" Пунктів від правил без моделі: {len(findings) - shown}."
     parts.append(f"<sub>{checks}</sub>")
     parts.extend(f"<sub>{n}</sub>" for n in notes)
     return "\n\n".join(parts)
@@ -1263,6 +1308,8 @@ def finding_dict(f: Finding, reason: str = "") -> dict:
             "evidence": f.evidence.splitlines()[0].strip() if f.evidence.strip() else ""}
     if f.source:
         item["pass"] = f.source
+    if f.rule:
+        item["rule"] = f.rule
     return {**item, "reason": reason} if reason else item
 
 
@@ -1357,8 +1404,11 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
                      + ", ".join(dict.fromkeys(budget_skipped)))
     report["not_reviewed"] = sorted({*failed_files, *budget_skipped, *(x.rsplit(" (", 1)[0] for x in skipped)})
     report["notes"] = notes  # і коли не відповів жоден шматок: без цього причину збою не видно
+    static = static_findings(cfg, diff_by_path, tools)
     if not summaries and not raw_findings:
-        raise RuntimeError("модель не повернула жодної придатної відповіді")
+        if not static:
+            raise RuntimeError("модель не повернула жодної придатної відповіді")
+        notes.append("Модель не дала жодної придатної відповіді: нижче лише пункти правил без моделі.")
 
     anchored = []
     for f in raw_findings:
@@ -1397,6 +1447,8 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
     final = confirmed[: cfg.max_findings]
     stats["over_limit"] = len(confirmed) - len(final)
     rejected.extend(finding_dict(f, "over_limit") for f in confirmed[cfg.max_findings:])
+    # правила без моделі не проходять перевірку моделлю й не займають місця в ліміті: їх мало і вони точні
+    final = sorted([*static, *final], key=lambda x: SEVERITIES[x.severity][2])
     report.update(findings=[finding_dict(f) for f in final], stats=stats, notes=notes)
     if skipped:
         notes.append("Не переглянуто: " + "; ".join(skipped))

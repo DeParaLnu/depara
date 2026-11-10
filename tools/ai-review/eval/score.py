@@ -37,10 +37,13 @@ def score_case(case: dict, report: dict) -> dict:
     found: set[str] = set()
     false_known: list[dict] = []
     unlabeled: list[dict] = []
+    static = 0
     for f in report.get("findings", []):
         hits = [i["id"] for i in real if matches(f, i)]
         if hits:
             found.update(hits)  # кілька пунктів про одну проблему це не хибні пункти
+        elif f.get("pass") == "static":
+            static += 1  # правило без моделі: це факт про diff (напр. новий пакет), а не здогад; рахуємо окремо
         elif any(matches(f, k) for k in known_false):
             false_known.append(f)
         elif not any(matches(f, i) for i in pending):
@@ -52,7 +55,7 @@ def score_case(case: dict, report: dict) -> dict:
     return {
         "pr": case["pr"], "real_total": len(real), "found": sorted(found), "killed": sorted(killed),
         "false_known": len(false_known), "unlabeled": len(unlabeled), "unlabeled_items": unlabeled,
-        "findings": len(report.get("findings", [])), "files_total": files, "not_reviewed": missing,
+        "findings": len(report.get("findings", [])), "static": static, "files_total": files, "not_reviewed": missing,
         "failed": bool(report.get("error")),
     }
 
@@ -66,7 +69,7 @@ def aggregate(scored: list[dict]) -> dict:
         "cases": len(scored), "real_total": real, "found": found, "recall": found / real if real else 0.0,
         "killed": sum(len(s["killed"]) for s in scored), "false_known": sum(s["false_known"] for s in scored),
         "false_upper": sum(s["false_known"] + s["unlabeled"] for s in scored),
-        "findings": sum(s["findings"] for s in scored),
+        "findings": sum(s["findings"] for s in scored), "static": sum(s.get("static", 0) for s in scored),
         "not_reviewed_share": sum(s["not_reviewed"] for s in scored) / files if files else 0.0,
         "failed_cases": sum(s["failed"] for s in scored),
     }

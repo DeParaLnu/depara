@@ -220,7 +220,7 @@ def scrub(text: str, key: str) -> str:
 
 def line(name: str, s: dict) -> str:
     return (f"{name:<14} знайдено {s['found']}/{s['real_total']}, відкинуто реальних {s['killed']}, "
-            f"хибних {s['false_known']}..{s['false_upper']}, не переглянуто {s['not_reviewed_share']:.0%}, "
+            f"хибних {s['false_known']}..{s['false_upper']}, від правил {s.get('static', 0)}, не переглянуто {s['not_reviewed_share']:.0%}, "
             f"найдовше {s['seconds_max']:.0f} с, обрізань {s['truncated']}, {s['cost_usd']:.2f} $")
 
 
