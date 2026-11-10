@@ -34,6 +34,9 @@ class Matching(unittest.TestCase):
         self.assertFalse(score.matches(finding(file="b.ts"), ISSUE))
 
     def test_keyword_works_without_lines(self):
+        real = {**ISSUE, "keywords": ["регістр"]}  # реальна проблема з ключовими словами: сусіднього рядка мало
+        self.assertFalse(score.matches(finding(line=11, title="інше твердження про той самий блок"), real))
+        self.assertTrue(score.matches(finding(line=400, title="порівняння без урахування регістру"), real))
         label = {"file": "a.ts", "keywords": ["Інвалідац"]}
         self.assertTrue(score.matches(finding(line=400, title="немає інвалідації кешу"), label))
         self.assertFalse(score.matches(finding(line=400, title="інше"), label))

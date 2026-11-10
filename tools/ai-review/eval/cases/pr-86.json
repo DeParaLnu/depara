@@ -20,7 +20,12 @@
       ],
       "severity": "minor",
       "summary": "Normalize `groupId` before comparing it with the stored group.",
-      "keywords": [],
+      "keywords": [
+        "регістр",
+        "нормаліз",
+        "lowercase",
+        "trim"
+      ],
       "source": "CodeRabbit, автор виправив"
     }
   ],

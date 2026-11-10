@@ -20,7 +20,13 @@
       ],
       "severity": "minor",
       "summary": "Write the saved group and subgroup into `['me']` on success.",
-      "keywords": [],
+      "keywords": [
+        "кеш",
+        "setquerydata",
+        "['me']",
+        "invalidate",
+        "інвалід"
+      ],
       "source": "CodeRabbit, підтверджено вручну"
     }
   ],

@@ -20,7 +20,12 @@
       ],
       "severity": "minor",
       "summary": "Compare UUIDs case-insensitively.",
-      "keywords": [],
+      "keywords": [
+        "регістр",
+        "lowercase",
+        "case-insens",
+        "uuid"
+      ],
       "source": "CodeRabbit, підтверджено вручну"
     },
     {
@@ -33,7 +38,11 @@
       ],
       "severity": "important",
       "summary": "Create `ТЕСТ-32` in the E2E seed.",
-      "keywords": [],
+      "keywords": [
+        "тест-32",
+        "seed",
+        "сід"
+      ],
       "source": "CodeRabbit, підтверджено вручну"
     }
   ],

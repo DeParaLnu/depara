@@ -20,7 +20,11 @@
       ],
       "severity": "minor",
       "summary": "Return the salvaged result only when it contains at least one finding.",
-      "keywords": [],
+      "keywords": [
+        "salvage",
+        "порожн",
+        "жодного пункт"
+      ],
       "source": "CodeRabbit, перевірено вручну"
     }
   ],

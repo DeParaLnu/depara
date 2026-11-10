@@ -20,7 +20,12 @@
       ],
       "severity": "important",
       "summary": "Persist the notification-step transition after saving the group.",
-      "keywords": [],
+      "keywords": [
+        "перезапуск",
+        "збереж",
+        "persist",
+        "закри"
+      ],
       "source": "CodeRabbit, підтверджено вручну"
     },
     {

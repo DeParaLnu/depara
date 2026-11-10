@@ -20,7 +20,10 @@
       ],
       "severity": "minor",
       "summary": "Support settings-only PATCH requests in mock mode.",
-      "keywords": [],
+      "keywords": [
+        "mock",
+        "мок"
+      ],
       "source": "CodeRabbit, перевірено вручну"
     },
     {
@@ -33,7 +36,13 @@
       ],
       "severity": "important",
       "summary": "Send rapid choices to the server in order.",
-      "keywords": [],
+      "keywords": [
+        "порядк",
+        "швидк",
+        "гонк",
+        "race",
+        "послідовн"
+      ],
       "source": "CodeRabbit, перевірено вручну"
     },
     {
@@ -59,7 +68,12 @@
       ],
       "severity": "important",
       "summary": "Recheck permission when the app becomes active.",
-      "keywords": [],
+      "keywords": [
+        "дозв",
+        "appstate",
+        "активн",
+        "permission"
+      ],
       "source": "CodeRabbit, підтверджено вручну"
     },
     {
@@ -72,7 +86,9 @@
       ],
       "severity": "minor",
       "summary": "Correct the profile feature status.",
-      "keywords": [],
+      "keywords": [
+        "статус"
+      ],
       "source": "CodeRabbit, перевірено вручну"
     }
   ],

@@ -20,7 +20,11 @@
       ],
       "severity": "minor",
       "summary": "Document that the E2E admin comes from `E2E_ADMIN_EMAIL`, and that it must be listed in backend `ADMIN_EMAILS`.",
-      "keywords": [],
+      "keywords": [
+        "admin_emails",
+        "e2e_admin_email",
+        "адмін"
+      ],
       "source": "CodeRabbit, перевірено вручну"
     },
     {
@@ -33,7 +37,16 @@
       ],
       "severity": "minor",
       "summary": "Wait for the subgroup control to be enabled before clicking it.",
-      "keywords": [],
+      "keywords": [
+        "enabled",
+        "disabled",
+        "активн",
+        "доступн",
+        "зачека",
+        "wait",
+        "нестабільн",
+        "flaky"
+      ],
       "source": "CodeRabbit, перевірено вручну"
     }
   ],

@@ -13,9 +13,15 @@ LINE_MARGIN = 5  # модель і людина часто вказують су
 
 
 def matches(finding: dict, label: dict) -> bool:
-    """Той самий файл і або поруч за рядком, або в тексті є ключове слово мітки."""
+    """Той самий файл і або поруч за рядком, або в тексті є ключове слово мітки.
+
+    Для реальної проблеми з ключовими словами сусіднього рядка мало: модель часто пише інше твердження про той самий
+    блок коду, і за рядком воно зараховувалось як знахідка (12 із 13 збігів у перших прогонах були саме такими)."""
     if finding.get("file") != label.get("file"):
         return False
+    if label.get("real") is True and label.get("keywords"):
+        text = f"{finding.get('title', '')} {finding.get('problem', '')}".lower()
+        return any(k.lower() in text for k in label["keywords"])
     start, end = (label.get("lines") or [0, 0])[:2]
     if start and start - LINE_MARGIN <= int(finding.get("line") or 0) <= end + LINE_MARGIN:
         return True

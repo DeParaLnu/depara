@@ -20,7 +20,10 @@
       ],
       "severity": "minor",
       "summary": "Commit the EAS projectId so every builder uses one project.",
-      "keywords": [],
+      "keywords": [
+        "projectid",
+        "project id"
+      ],
       "source": "CodeRabbit, перевірено вручну"
     }
   ],

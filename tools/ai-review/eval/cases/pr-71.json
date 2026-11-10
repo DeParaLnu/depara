@@ -20,7 +20,11 @@
       ],
       "severity": "important",
       "summary": "Preserve corrected lesson data before deleting duplicate slots.",
-      "keywords": [],
+      "keywords": [
+        "дубл",
+        "видал",
+        "втрат"
+      ],
       "source": "CodeRabbit, автор виправив"
     },
     {
@@ -33,7 +37,11 @@
       ],
       "severity": "minor",
       "summary": "Map ioredis command timeouts to temporary unavailability.",
-      "keywords": [],
+      "keywords": [
+        "таймаут",
+        "тайм-аут",
+        "timeout"
+      ],
       "source": "CodeRabbit, автор виправив"
     },
     {
@@ -46,7 +54,13 @@
       ],
       "severity": "minor",
       "summary": "Truncate `REFRESH_REUSE_GRACE_SECONDS` to an integer.",
-      "keywords": [],
+      "keywords": [
+        "дроб",
+        "ціл",
+        "integer",
+        "trunc",
+        "float"
+      ],
       "source": "CodeRabbit, автор виправив"
     },
     {
@@ -59,7 +73,9 @@
       ],
       "severity": "minor",
       "summary": "Reject an explicit null `lessons` field.",
-      "keywords": [],
+      "keywords": [
+        "null"
+      ],
       "source": "CodeRabbit, автор виправив"
     },
     {
@@ -72,7 +88,13 @@
       ],
       "severity": "important",
       "summary": "Detect duplicate slots by resolved group identity.",
-      "keywords": [],
+      "keywords": [
+        "регістр",
+        "нормаліз",
+        "написан",
+        "та сама груп",
+        "тієї ж груп"
+      ],
       "source": "CodeRabbit, автор виправив"
     },
     {
@@ -85,7 +107,12 @@
       ],
       "severity": "minor",
       "summary": "Old session is lost if rotation fails after `GETDEL`.",
-      "keywords": [],
+      "keywords": [
+        "getdel",
+        "втрата сес",
+        "втрачає сес",
+        "втрачен"
+      ],
       "source": "CodeRabbit, автор виправив"
     },
     {
@@ -113,7 +140,13 @@
       ],
       "severity": "important",
       "summary": "Apply the 14-day limit to each persisted query.",
-      "keywords": [],
+      "keywords": [
+        "14 д",
+        "14-д",
+        "maxage",
+        "кожного запит",
+        "кожен запит"
+      ],
       "source": "CodeRabbit, автор виправив"
     }
   ],
