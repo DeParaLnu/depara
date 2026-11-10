@@ -44,6 +44,8 @@ MAX_TOOL_RESULT_CHARS = 12_000
 IGNORED_PATTERNS = (
     "*package-lock.json", "*.lock", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.ico", "*.svg",
     "mobile/android/*", "mobile/ios/*", "mobile/assets/*", ".agents/*", "*.min.js", "dist/*",
+    # дані для вимірювання ревʼюера: чужі diff і звіти прогонів. У PR #104 вони зайняли весь ліміт, і код лишився без ревʼю
+    "tools/ai-review/eval/cases/*", "tools/ai-review/eval/results/*", "*.snap",
 )
 DENIED_NAMES = (".git", "node_modules", ".expo", "dist")
 
@@ -86,7 +88,7 @@ class Config:
     pr_number: int = 0
     repo_dir: Path = field(default_factory=Path.cwd)
     max_steps: int = 7  # звернень до інструментів на один шматок diff
-    max_diff_chars: int = 120_000  # загалом на PR
+    max_diff_chars: int = 180_000  # загалом на PR: стільки вміщають 20 шматків по 9000
     chunk_chars: int = 9_000  # розмір одного шматка diff: малі моделі гірше тримають довгий контекст
     max_chunks: int = 20  # реальну межу ставить часовий бюджет; без міркувань шматок займає секунди
     max_findings: int = 7  # скільки пунктів лишити в коментарі
@@ -343,8 +345,9 @@ def _truncate(text: str, limit: int, marker: str = TRUNCATION_MARKER) -> str:
 def split_hunks(annotated: str, limit: int) -> list[str]:
     """Ділить пронумерований diff одного файла на частини не більші за limit.
 
-    Різати можна лише між блоками змін (@@), кожна частина починається із заголовка файла. Блок, що сам
-    більший за ліміт, обрізається з позначкою."""
+    Кожна частина починається із заголовка файла. Ріжемо між блоками змін (@@); блок, що сам більший за ліміт
+    (новий файл це один блок), ділиться за рядками: номери рядків уже стоять біля кожного, тож частини читаються окремо.
+    Обрізається з позначкою лише один рядок, довший за ліміт."""
     lines = annotated.splitlines(keepends=True)
     first = next((i for i, ln in enumerate(lines) if ln.startswith("@@")), len(lines))
     header = "".join(lines[:first])
@@ -357,14 +360,32 @@ def split_hunks(annotated: str, limit: int) -> list[str]:
         return [_truncate(header, limit)]
     pieces: list[str] = []
     current = header
-    for hunk in hunks:
-        hunk = _truncate(hunk, max(0, limit - len(header)))
+    room = max(0, limit - len(header))
+    for hunk in (part for h in hunks for part in _split_long_hunk(h, room)):
         if current != header and len(current) + len(hunk) > limit:
             pieces.append(current)
             current = header
         current += hunk
     pieces.append(current)
     return pieces
+
+
+CONTINUED = "@@ (продовження попереднього блоку змін) @@\n"
+
+
+def _split_long_hunk(hunk: str, room: int) -> list[str]:
+    """Блок змін у межах room лишається як є; довший ділиться за рядками на частини з позначкою продовження."""
+    if len(hunk) <= room:
+        return [hunk]
+    parts, current = [], ""
+    for line in hunk.splitlines(keepends=True):
+        line = _truncate(line, max(0, room - len(CONTINUED)))
+        if current and len(current) + len(line) > room:
+            parts.append(current)
+            current = CONTINUED
+        current += line
+    parts.append(current)
+    return parts
 
 
 def plan_chunks(diff: str, cfg: Config) -> tuple[list[list[tuple[str, str]]], list[str]]:
@@ -1593,6 +1614,7 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
         return data
 
     budget_skipped: list[str] = []
+    seen_files: set[str] = set()  # файли, хоча б одну частину яких модель переглянула
     pass_stats: dict[str, dict[str, int]] = {}  # прохід → скільки шматків відповіло, впало, не встигло
     report["passes"] = pass_stats
     with ThreadPoolExecutor(max_workers=cfg.workers) as pool:
@@ -1619,6 +1641,7 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
         for key, state in _pass_list(data.get("_passes")):
             pass_stats.setdefault(key, {}).setdefault(state, 0)
             pass_stats[key][state] += 1
+        seen_files.update(names)
         summaries.append(str(data.get("summary") or "").strip())
         items = data.get("findings") if isinstance(data.get("findings"), list) else []
         parsed = [f for f in map(parse_finding, items) if f]
@@ -1628,6 +1651,10 @@ def run_review(cfg: Config, pr: dict, diff: str, ci: str, tools: RepoTools, repo
         stats["raw"] += len(items)
         stats["no_evidence"] += len(items) - len(parsed)  # без файла чи цитати
     cov["gaps"]["budget"].extend(dict.fromkeys(budget_skipped))
+    for key in ("budget", "truncated", "bad_json", "error"):
+        # великий файл іде кількома шматками: якщо частину з них переглянуто, файл переглянуто частково, а не «ні»
+        cov["gaps"]["partial"].extend(p for p in cov["gaps"][key] if p in seen_files)
+        cov["gaps"][key] = [p for p in cov["gaps"][key] if p not in seen_files]
     report["specs"] = sorted(feature.used) if feature else []
     report["not_reviewed"] = sorted({*failed_files, *budget_skipped, *(x.rsplit(" (", 1)[0] for x in skipped)})
     # і коли не відповів жоден шматок: без цього причину збою в eval не видно

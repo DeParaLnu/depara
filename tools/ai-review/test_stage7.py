@@ -61,11 +61,40 @@ class Coverage(unittest.TestCase):
         self.assertIn("У переглянутих файлах суттєвих проблем не знайдено.", out)
         self.assertEqual(report["not_reviewed"], ["backend/src/b.ts"])
 
-    def test_truncated_big_hunk_counts_as_partially_reviewed(self):
+    def test_big_new_file_is_split_by_lines_and_reviewed_whole(self):
         self.cfg.chunk_chars = 400
-        out = self.run_review(FakeApi([ok("Проблем немає."), EMPTY]), diff_of("backend/src/big.ts", ["const a = 1; // " + "x" * 30] * 40))
+        lines = [f"const v{i} = {i}; // " + "x" * 30 for i in range(40)]
+        chunks, skipped = review.plan_chunks(diff_of("backend/src/big.ts", lines, new_file=True), self.cfg)
+        text = "".join(t for g in chunks for _, t in g)
+        self.assertEqual(skipped, [])
+        self.assertTrue(all(sum(len(t) for _, t in g) <= 400 for g in chunks))
+        for i, line in enumerate(lines, 1):
+            self.assertIn(f"{i:>4}| +{line}", text)  # жоден рядок не загубився, номери збережено
+        self.assertIn("продовження попереднього блоку змін", text)
+        out = self.run_review(FakeApi([ok("Проблем немає."), EMPTY] * len(chunks)), diff_of("backend/src/big.ts", lines, new_file=True))
+        self.assertIn("Переглянуто всі файли: 1.", out)
+
+    def test_one_overlong_line_is_cut_and_the_file_is_partial(self):
+        self.cfg.chunk_chars = 400
+        out = self.run_review(FakeApi([ok("Проблем немає."), EMPTY]), diff_of("web/app.js", ["var a=" + "x" * 3000 + ";"]))
         self.assertIn("> ⚠️ **Переглянуто 1 з 1 файлів (1 частково).**", out)
-        self.assertIn("- **Переглянуто лише частково** (1): `backend/src/big.ts`", out)
+        self.assertIn("- **Переглянуто лише частково** (1): `web/app.js`", out)
+
+    def test_file_with_one_failed_part_is_partial_not_missing(self):
+        self.cfg.chunk_chars = 400
+        lines = [f"const v{i} = {i}; // " + "x" * 30 for i in range(12)]
+        diff = diff_of("backend/src/big.ts", lines, new_file=True)
+        parts = len(review.plan_chunks(diff, self.cfg)[0])
+        api = FakeApi([ok("Проблем немає."), EMPTY] * (parts - 1) + [http_error(400, "bad request")])
+        out = self.run_review(api, diff)
+        self.assertIn("**Переглянуто 1 з 1 файлів (1 частково).**", out)
+        self.assertNotIn("Збій запиту до моделі", out)
+
+    def test_eval_fixtures_are_service_files(self):
+        diff = diff_of("tools/ai-review/eval/cases/pr-1.diff", ["x" * 50]) + diff_of("tools/ai-review/review.py", ["x = 1"])
+        chunks, skipped = review.plan_chunks(diff, self.cfg)
+        self.assertEqual([p for g in chunks for p, _ in g], ["tools/ai-review/review.py"])
+        self.assertEqual(skipped, ["tools/ai-review/eval/cases/pr-1.diff (службовий файл)"])
 
     def test_request_failure_names_files_and_the_error_once(self):
         self.cfg.chunk_chars = 200

@@ -222,7 +222,7 @@ class TwoStage(unittest.TestCase):
     def test_reason_in_comment_when_one_part_stays_truncated(self):
         big = DIFF + "diff --git a/backend/src/b.ts b/backend/src/b.ts\n--- a/backend/src/b.ts\n+++ b/backend/src/b.ts\n" \
                      "@@ -1 +1 @@\n+const b = 2;\n"
-        self.cfg.chunk_chars = 200  # кожен файл окремим шматком
+        self.cfg.chunk_chars = 260  # кожен файл окремим шматком
         api = FakeApi([
             ok("a.ts без проблем."), ok(json.dumps({"summary": "Перша частина.", "findings": []})),
             ok("", finish="length"),
