@@ -3,11 +3,15 @@
 
   python3 tools/ai-review/eval/check_rules.py                 # кейси eval
   python3 tools/ai-review/eval/check_rules.py каталог/з/diff  # будь-які файли *.diff (напр. gh pr diff N > N.diff)
+
+Для кейсів eval код і спеки беруться зі знімка коміту PR (якщо він уже є в .cache після прогону run_eval),
+для інших diff з поточного робочого каталогу: там правило про спеку лише наближене.
 """
 
 from __future__ import annotations
 
 import sys
+import json
 from collections import Counter
 from pathlib import Path
 
@@ -23,7 +27,13 @@ def main(argv: list[str]) -> int:
     paths = sorted(folder.glob("*.diff"))
     for path in paths:
         by_path = dict(review.split_diff(path.read_text("utf-8", "replace")))
-        for f in checks.run(review.changed_lines(by_path), lambda _path: None):
+        root = HERE.parents[2]
+        meta = path.with_suffix(".json")
+        if meta.is_file():
+            snap = HERE / ".cache" / json.loads(meta.read_text("utf-8")).get("head", "")
+            root = snap if snap.is_dir() and any(snap.iterdir()) else root
+        tools = review.RepoTools(root)
+        for f in checks.run(review.changed_lines(by_path), tools.read_text, review.specs_text(tools), review.backend_text(tools)):
             totals[f["rule"]] += 1
             print(f"{path.stem} {f['rule']} {f['severity']} {f['file']}:{f['line']} | {f['title']} | {f['evidence'][:100]}")
     print(f"Файлів diff: {len(paths)}. Спрацювань: {dict(totals) or 0}")

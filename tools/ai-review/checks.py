@@ -168,10 +168,54 @@ def check_dependencies(files: dict[str, dict], read_text) -> list[dict]:
     return out
 
 
-def run(files: dict[str, dict], read_text) -> list[dict]:
-    """Усі перевірки. files: шлях → {"added": [(номер, рядок)], "removed": [рядок], "new_file": bool}."""
+def check_spec_sync(files: dict[str, dict], spec_text: str | None, backend_text: str | None = None) -> list[dict]:
+    """PR робить те, що в спеці: новий код помилки чи маршрут бекенда має бути згаданий у specs/.
+    Порівнюється зі спеками гілки PR, тож якщо PR оновив спеку разом із кодом, зауваження не буде."""
+    if not spec_text:
+        return []
     out: list[dict] = []
-    for found in (check_secrets(files), check_error_format(files), check_routes_have_e2e(files), check_dependencies(files, read_text)):
+    gone = "\n".join(t for info in files.values() for t in info.get("removed", []))
+    fresh = "\n".join(t for p, info in files.items() if p.startswith("backend/src/") for _, t in info.get("added", []))
+    seen: set[str] = set()
+
+    def is_new(token: str) -> bool:
+        """Чи зʼявився рядок саме в цьому PR: його немає серед видалених і в коді бекенда він лише в доданих рядках."""
+        if token in gone:
+            return False
+        return backend_text is None or backend_text.count(token) <= fresh.count(token)
+
+    for path, info in files.items():
+        if not path.startswith("backend/src/") or not path.endswith(".ts") or TEST_PATH.search(path):
+            continue
+        for line, text in info.get("added", []):
+            if COMMENT.match(text):
+                continue
+            m = ERROR_VALUE.search(text)
+            code = m.group(2) if m and ERROR_CODE.match(m.group(2)) else ""
+            # код, який PR лише переніс з іншого рядка, не новий
+            if code and code not in seen and code not in spec_text and is_new(f"'{code}'"):
+                seen.add(code)
+                out.append(_finding("spec_sync", path, line, "minor", f"Код помилки {code} не описано в специфікації", text,
+                                    f"Бекенд тепер повертає {code}, але в specs/ такого коду немає: мобільний клієнт і тести пишуться за спекою і про нього не знатимуть.",
+                                    "Додати код і статус у розділ API відповідної спеки (або прибрати код, якщо він зайвий)."))
+            r = ROUTE_DEF.search(text) if ROUTE_FILE.match(path) else None
+            if r and r.group(2) not in spec_text and is_new(r.group(2)):
+                name = f"{r.group(1).upper()} {r.group(2)}"
+                if name not in seen:
+                    seen.add(name)
+                    out.append(_finding("spec_sync", path, line, "minor", f"Маршрут {name} не описано в специфікації"[:120], text,
+                                        f"PR додає {name}, але в specs/ цього шляху немає: за правилами проєкту спершу спека, потім код.",
+                                        "Додати рядок у таблицю API відповідної спеки."))
+    return out
+
+
+def run(files: dict[str, dict], read_text, spec_text: str | None = None, backend_text: str | None = None) -> list[dict]:
+    """Усі перевірки. files: шлях → {"added": [(номер, рядок)], "removed": [рядок], "new_file": bool}.
+    spec_text: текст усіх специфікацій гілки PR (None: перевірка відповідності спеці пропускається).
+    backend_text: увесь код backend/src гілки PR, щоб відрізнити новий код помилки від уже наявного деінде."""
+    out: list[dict] = []
+    for found in (check_secrets(files), check_error_format(files), check_routes_have_e2e(files),
+                  check_dependencies(files, read_text), check_spec_sync(files, spec_text, backend_text)):
         per_rule: dict[str, int] = {}
         for f in found:
             per_rule[f["rule"]] = per_rule.get(f["rule"], 0) + 1

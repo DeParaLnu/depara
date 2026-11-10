@@ -152,6 +152,40 @@ class Dependencies(unittest.TestCase):
         self.assertEqual([f["title"] for f in found], ["Нові залежності: zod"])
 
 
+class SpecSync(unittest.TestCase):
+    SPEC = "| `PATCH /me` | 403 `HEADMAN_GROUP_LOCKED`, 400 `GROUP_REQUIRED` |\n| `GET /groups` | список |"
+    BACKEND = "x = { error: 'UNAUTHORIZED' };\ny = { error: 'UNAUTHORIZED' };\nz = { error: 'PROFILE_CHANGED' };"
+
+    def check(self, *diffs, spec=SPEC, backend=BACKEND):
+        by_path = dict(review.split_diff("".join(diffs)))
+        return checks.run(review.changed_lines(by_path), lambda p: None, spec, backend)
+
+    def test_new_error_code_missing_from_spec(self):
+        found = self.check(diff_of("backend/src/routes/profile.ts", ["  return reply.code(409).send({ error: 'PROFILE_CHANGED' });",
+                                                                     "  return reply.code(403).send({ error: 'HEADMAN_GROUP_LOCKED' });"]),
+                           diff_of("backend/test/e2e/f9-profile.test.ts", ["x"]))
+        self.assertEqual([(f["rule"], f["severity"], f["title"]) for f in found],
+                         [("spec_sync", "minor", "Код помилки PROFILE_CHANGED не описано в специфікації")])
+
+    def test_code_documented_in_the_same_pr_or_used_before_is_fine(self):
+        added = diff_of("backend/src/routes/profile.ts", ["  return reply.code(409).send({ error: 'PROFILE_CHANGED' });",
+                                                          "  if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });"])
+        e2e = diff_of("backend/test/e2e/f9-profile.test.ts", ["x"])
+        self.assertEqual(self.check(added, e2e, spec=self.SPEC + " 409 `PROFILE_CHANGED`"), [])  # спеку оновили разом із кодом
+        moved = diff_of("backend/src/routes/profile.ts", ["  if (!u) return reply.code(409).send({ error: 'PROFILE_CHANGED' });"],
+                        removed=["  return reply.code(409).send({ error: 'PROFILE_CHANGED' });"])
+        self.assertEqual(self.check(moved, e2e), [])  # рядок лише перенесено
+
+    def test_new_route_missing_from_spec_and_known_route_is_fine(self):
+        found = self.check(diff_of("backend/src/routes/profile.ts", ["  app.get('/public/groups', { preHandler: guard }, list);",
+                                                                     "  app.get('/groups', { preHandler: requireAuth }, list);"]),
+                           diff_of("backend/test/e2e/f9-profile.test.ts", ["x"]))
+        self.assertEqual([f["title"] for f in found], ["Маршрут GET /public/groups не описано в специфікації"])
+
+    def test_without_specs_folder_the_rule_is_silent(self):
+        self.assertEqual(self.check(diff_of("backend/src/lib/x.ts", ["  return { error: 'BRAND_NEW' };"]), spec=None), [])
+
+
 class InReview(unittest.TestCase):
     DIFF = diff_of("backend/src/routes/profile.ts", ["  return reply.code(400).send({ error: 'Group not found' });"]) + \
         diff_of("backend/test/e2e/f9-profile.test.ts", ["it('x', () => {});"])
