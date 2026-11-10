@@ -326,5 +326,25 @@ class Cases(unittest.TestCase):
             self.assertEqual(case["set"], "dev")
 
 
+class Snapshot(unittest.TestCase):
+    def test_whole_commit_is_extracted_even_when_run_from_a_folder_missing_in_it(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            (repo / "src").mkdir(parents=True)
+            (repo / "src" / "a.ts").write_text("x")
+            run = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *a],  # noqa: E731
+                                            cwd=repo, check=True, capture_output=True)
+            run("init", "-q")
+            run("add", ".")
+            run("commit", "-q", "--no-verify", "-m", "one")
+            sha = run("rev-parse", "HEAD").stdout.decode().strip()
+            later = repo / "tools" / "eval"  # каталог, якого в тому коміті ще не було
+            later.mkdir(parents=True)
+            target = Path(tmp) / "snap"
+            run_eval.extract(sha, target, repo=later)
+            self.assertEqual((target / "src" / "a.ts").read_text(), "x")
+
+
 if __name__ == "__main__":
     unittest.main()

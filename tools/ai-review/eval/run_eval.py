@@ -73,16 +73,24 @@ def snapshot(case: dict) -> Path:
     """Код на момент ревʼю: багато проблем виправляли до злиття, у фінальному коміті їх уже немає."""
     sha = case["head"]
     target = CACHE / sha
-    if target.is_dir():
+    if target.is_dir() and any(target.iterdir()):
         return target
     git("fetch", "-q", "origin", f"pull/{case['pr']}/head")
-    target.mkdir(parents=True)
-    archive = subprocess.Popen(["git", "archive", sha], cwd=HERE, stdout=subprocess.PIPE)
+    extract(sha, target)
+    return target
+
+
+def extract(sha: str, target: Path, repo: Path = HERE) -> None:
+    """Розпаковує коміт у target. git archive з підкаталогу бере лише цей підкаталог (у старому коміті його може
+    не бути, і архів виходить порожнім без помилки), тому запускається з кореня репозиторію, а порожній знімок це збій:
+    на порожньому каталозі інструменти моделі нічого не читають, і ревʼю міряється не те."""
+    top = Path(git("rev-parse", "--show-toplevel", cwd=repo).stdout.decode().strip())
+    target.mkdir(parents=True, exist_ok=True)
+    archive = subprocess.Popen(["git", "archive", sha], cwd=top, stdout=subprocess.PIPE)
     subprocess.run(["tar", "-x", "-C", str(target)], stdin=archive.stdout, check=True)
     archive.stdout.close()
-    if archive.wait() != 0:
-        raise RuntimeError(f"не вдалося дістати коміт {sha}")
-    return target
+    if archive.wait() != 0 or not any(target.iterdir()):
+        raise RuntimeError(f"не вдалося дістати коміт {sha}: знімок порожній")
 
 
 class Spend:
