@@ -32,6 +32,9 @@ export const config = {
   rateLimitPerMinute: positiveInt(process.env.RATE_LIMIT_PER_MINUTE, 600),
   rateLimitAuthPerMinute: positiveInt(process.env.RATE_LIMIT_AUTH_PER_MINUTE, 300),
   rateLimitImportPerMinute: positiveInt(process.env.RATE_LIMIT_IMPORT_PER_MINUTE, 30),
+  // Створення замін (кожна це пуш групі), на користувача. Людина заповнює форму заміни десятки секунд,
+  // тож 10 на хвилину не заважає старості, але зупиняє спам пушами.
+  rateLimitSubstitutionsPerMinute: positiveInt(process.env.RATE_LIMIT_SUBSTITUTIONS_PER_MINUTE, 10),
   // Сторінки /privacy і /delete-account: контактна пошта для запитів про дані (обов'язкова для магазинів застосунків)
   // і хто обробляє дані. Без пошти сторінка відсилає до адміністраторів застосунку.
   privacyContactEmail: (process.env.PRIVACY_CONTACT_EMAIL ?? '').trim(),

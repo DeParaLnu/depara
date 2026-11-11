@@ -4,6 +4,7 @@ import { config } from '../config';
 import { prisma } from '../db';
 import { enqueueSubstitutionPush } from '../lib/push/queue';
 import { isIsoDate, isUuid } from '../lib/validation';
+import { substitutionRateLimit } from '../plugins/rateLimit';
 import { requireRole } from '../plugins/roles';
 
 const KINDS = Object.values(SubstitutionKind) as string[];
@@ -20,8 +21,10 @@ interface Body {
 }
 
 // F6: заміни (HEADMAN: лише своя група, ADMIN: будь-яка)
-export async function substitutionRoutes(app: FastifyInstance) {
-  app.post('/substitutions', { preHandler: requireRole('HEADMAN', 'ADMIN') }, async (req, reply) => {
+export async function substitutionRoutes(app: FastifyInstance, opts: { substitutionsPerMinute?: number } = {}) {
+  const limited = { config: { rateLimit: substitutionRateLimit(opts.substitutionsPerMinute ?? config.rateLimitSubstitutionsPerMinute) } };
+
+  app.post('/substitutions', { preHandler: requireRole('HEADMAN', 'ADMIN'), ...limited }, async (req, reply) => {
     const b = (req.body ?? {}) as Body;
     const user = req.currentUser!;
     const bad = (error: string) => reply.code(400).send({ error });
