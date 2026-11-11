@@ -7,6 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import { ImportError, importSchedule, validateImport } from '../../src/lib/scheduleImport';
 
+// Тестовий розклад перезаписує дзвінки (pair_times) і назви та адреси корпусів: на справжній базі це зіпсувало б реальні дані
+if (process.env.NODE_ENV === 'production') {
+  console.error('seed не запускається при NODE_ENV=production: це лише для тестової та локальної бази.');
+  process.exit(1);
+}
+
 const prisma = new PrismaClient();
 const here = dirname(fileURLToPath(import.meta.url));
 const raw = JSON.parse(readFileSync(join(here, 'schedule.seed.json'), 'utf8'));
