@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { log } from '../../lib/logger';
-import type { PlannedReminder } from './plan';
+import { ONCE_PREFIX, type PlannedReminder } from './plan';
 
 // F8: обгортка над expo-notifications для локальних нагадувань. У вебі планування сповіщень немає: усе no-op.
 export const notificationsSupported = Platform.OS === 'android' || Platform.OS === 'ios';
@@ -65,14 +65,13 @@ export async function requestPermission(): Promise<PermissionResult> {
   }
 }
 
-/** Прибрати всі нагадування про пари (інших запланованих сповіщень застосунок не має, але чіпаємо лише свої). */
-export async function cancelReminders(): Promise<void> {
+async function cancelByPrefix(prefixes: string[]): Promise<void> {
   if (!notificationsSupported) return;
   try {
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
     await Promise.all(
       scheduled
-        .filter((n) => n.identifier.startsWith(PREFIX))
+        .filter((n) => prefixes.some((p) => n.identifier.startsWith(p)))
         .map((n) => Notifications.cancelScheduledNotificationAsync(n.identifier)),
     );
   } catch (error) {
@@ -80,28 +79,65 @@ export async function cancelReminders(): Promise<void> {
   }
 }
 
+/** Прибрати загальні нагадування про пари (їх переплановує useReminderSync). Разові з деталей пари не чіпає. */
+export const cancelReminders = () => cancelByPrefix([PREFIX]);
+
+/** Прибрати всі нагадування, і разові теж (вихід з акаунта). */
+export const cancelAllReminders = () => cancelByPrefix([PREFIX, ONCE_PREFIX]);
+
+async function scheduleOne(r: PlannedReminder): Promise<void> {
+  await ensureChannels();
+  await Notifications.scheduleNotificationAsync({
+    identifier: r.id,
+    content: { title: r.title, body: r.body },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: r.at,
+      ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+    },
+  });
+}
+
+/** Разове нагадування про одну пару. false, якщо не вдалося запланувати. */
+export async function scheduleOnce(r: PlannedReminder): Promise<boolean> {
+  if (!notificationsSupported) return false;
+  try {
+    await scheduleOne(r);
+    return true;
+  } catch (error) {
+    warn('не вдалося запланувати разове нагадування', error);
+    return false;
+  }
+}
+
+export async function cancelOnce(id: string): Promise<void> {
+  if (!notificationsSupported) return;
+  try {
+    await Notifications.cancelScheduledNotificationAsync(id);
+  } catch (error) {
+    warn('не вдалося скасувати разове нагадування', error);
+  }
+}
+
+export async function isScheduled(id: string): Promise<boolean> {
+  if (!notificationsSupported) return false;
+  try {
+    return (await Notifications.getAllScheduledNotificationsAsync()).some((n) => n.identifier === id);
+  } catch (error) {
+    warn('не вдалося перевірити нагадування', error);
+    return false;
+  }
+}
+
 /** Замінити заплановані нагадування новим планом. */
 export async function scheduleReminders(plan: PlannedReminder[]): Promise<void> {
   if (!notificationsSupported) return;
   await cancelReminders();
-  try {
-    await ensureChannels();
-  } catch (error) {
-    warn('не вдалося створити канал сповіщень', error);
-  }
   // Помилка одного нагадування не зупиняє решту: краще пропустити одну пару, ніж усі наступні
   let failed = 0;
   for (const r of plan) {
     try {
-      await Notifications.scheduleNotificationAsync({
-        identifier: r.id,
-        content: { title: r.title, body: r.body },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: r.at,
-          ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
-        },
-      });
+      await scheduleOne(r);
     } catch (error) {
       failed += 1;
       if (failed === 1) warn('не вдалося запланувати нагадування', error);

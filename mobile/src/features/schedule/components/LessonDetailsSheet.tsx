@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Lesson } from '../../../api';
 import { dayMonth, fromIsoDate, weekdayShort } from '../../../lib/date';
 import { openRoute } from '../../../lib/maps';
 import { makeStyles, useColors } from '../../theme/useTheme';
+import { LessonReminderButton } from '../../reminders/LessonReminderButton';
 import { SubstitutionActions } from '../../substitutions/SubstitutionActions';
 import { audienceLabel, lessonDetails, lessonTypeLabel, substitutionBadge } from '../lesson';
 
@@ -24,10 +25,11 @@ function Row({ icon, text, testID }: { icon: ComponentProps<typeof Ionicons>['na
 
 // Деталі пари (макет «Деталі пари»): тип, підгрупа, час, викладач, корпус з адресою і «Прокласти маршрут».
 // Староста бачить тут ще «Додати заміну» або «Скасувати заміну» (F6, SubstitutionActions).
-// «Нагадати за 10 хв» зʼявиться разом із сповіщеннями (F8): без них кнопка нічого б не робила.
+// «Нагадати за 10 хв» ставить разове локальне нагадування про цю пару (LessonReminderButton).
 export function LessonDetailsSheet({ lesson, onClose }: Props) {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   const d = lesson ? lessonDetails(lesson) : null;
   const sub = lesson?.substitution ?? null;
   const date = lesson ? fromIsoDate(lesson.date) : null;
@@ -45,9 +47,10 @@ export function LessonDetailsSheet({ lesson, onClose }: Props) {
           testID="lesson-details-backdrop"
         />
         {lesson && d && date ? (
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]} testID="lesson-details">
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + 20, maxHeight: height * 0.9 }]} testID="lesson-details">
             <View style={styles.handle} />
-
+            {/* Три кнопки старости (маршрут, нагадування, заміна) можуть не вміститись на малому екрані: тоді вміст прокручується */}
+            <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.tags}>
               {type && (
                 <View style={[styles.tag, styles.tagBlue]}>
@@ -105,7 +108,9 @@ export function LessonDetailsSheet({ lesson, onClose }: Props) {
                 <Text style={styles.primaryText}>Прокласти маршрут</Text>
               </Pressable>
             ) : null}
+            <LessonReminderButton lesson={lesson} />
             <SubstitutionActions lesson={lesson} onClose={onClose} />
+            </ScrollView>
           </View>
         ) : null}
       </View>
@@ -124,6 +129,8 @@ const useStyles = makeStyles((colors) =>
     paddingTop: 12,
     gap: 4,
   },
+  scroll: { flexGrow: 0 },
+  content: { gap: 4 },
   handle: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: colors.border, marginBottom: 12 },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tag: { height: 28, justifyContent: 'center', borderRadius: 14, paddingHorizontal: 12, backgroundColor: colors.chip },

@@ -3,7 +3,7 @@ import { api, setSessionBridge, type Session } from '../../api';
 import { resetCaches } from '../../lib/cacheReset';
 import { clearPersistedQueries } from '../../lib/queryPersist';
 import { unregisterPushToken } from '../push/registration';
-import { cancelReminders } from '../reminders/notifications';
+import { cancelAllReminders } from '../reminders/notifications';
 import { useReminderSettings } from '../reminders/settings';
 import { getOrCreateDeviceId, loadStoredSession, saveStoredSession } from './storage';
 
@@ -70,7 +70,7 @@ export const useSession = create<SessionState>((set, get) => ({
     void saveStoredSession(null);
     void resetCaches().catch(() => {});
     // Нагадування про пари попереднього користувача не мають спрацювати після виходу
-    void cancelReminders();
+    void cancelAllReminders();
     useReminderSettings.getState().clear();
   },
 }));
