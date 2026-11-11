@@ -81,6 +81,19 @@ describe('F6: створення замін', () => {
     expect(missing.status).toBe(404);
   });
 
+  it('одночасні запити на одну пару: одна заміна (201), решта 409, без 500', async () => {
+    const lessonId = await freshLesson();
+    // подвійний тап старости: перевірка «заміни ще немає» проходить в усіх запитів, а create впирається в UNIQUE
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () => send('POST', '/substitutions', headman, { lessonId, kind: 'CANCELLED' })),
+    );
+    const statuses = responses.map((r) => r.status).sort();
+    expect(statuses).toEqual([201, 409, 409, 409, 409]);
+    for (const res of responses.filter((r) => r.status === 409)) {
+      expect(await errorOf(res)).toBe('SUBSTITUTION_EXISTS');
+    }
+  });
+
   it('на одну пару лише одна заміна (409), староста не чіпає чужу групу (403)', async () => {
     const lessonId = await freshLesson();
     expect((await send('POST', '/substitutions', headman, { lessonId, kind: 'CANCELLED' })).status).toBe(201);
