@@ -27,7 +27,7 @@ npm run dev                          # http://localhost:3000/health
 ```bash
 cd backend
 export NODE_ENV=test AUTH_MODE=fake ADMIN_EMAILS=e2e.admin@lnu.edu.ua CORS_ORIGINS=http://localhost:5173
-export RATE_LIMIT_IMPORT_PER_MINUTE=1000 RATE_LIMIT_AUTH_PER_MINUTE=5000   # E2E робить багато імпортів і входів з одного IP
+export RATE_LIMIT_IMPORT_PER_MINUTE=1000 RATE_LIMIT_AUTH_PER_MINUTE=5000 RATE_LIMIT_SUBSTITUTIONS_PER_MINUTE=1000   # E2E робить багато імпортів, входів і замін з одного IP і акаунта
 export EXPO_PUSH_URL=http://localhost:4010/push PUSH_RETRY_DELAY_MS=200     # підставний Expo Push для тестів F8
 npm run seed -- --shift-to-current-week
 npm run test:e2e

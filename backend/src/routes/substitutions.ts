@@ -2,8 +2,10 @@ import { Prisma, SubstitutionKind } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { prisma } from '../db';
+import { audit } from '../lib/audit';
 import { enqueueSubstitutionPush } from '../lib/push/queue';
 import { isIsoDate, isUuid } from '../lib/validation';
+import { substitutionRateLimit } from '../plugins/rateLimit';
 import { requireRole } from '../plugins/roles';
 
 const KINDS = Object.values(SubstitutionKind) as string[];
@@ -20,8 +22,10 @@ interface Body {
 }
 
 // F6: заміни (HEADMAN: лише своя група, ADMIN: будь-яка)
-export async function substitutionRoutes(app: FastifyInstance) {
-  app.post('/substitutions', { preHandler: requireRole('HEADMAN', 'ADMIN') }, async (req, reply) => {
+export async function substitutionRoutes(app: FastifyInstance, opts: { substitutionsPerMinute?: number } = {}) {
+  const limited = { config: { rateLimit: substitutionRateLimit(opts.substitutionsPerMinute ?? config.rateLimitSubstitutionsPerMinute) } };
+
+  app.post('/substitutions', { preHandler: requireRole('HEADMAN', 'ADMIN'), ...limited }, async (req, reply) => {
     const b = (req.body ?? {}) as Body;
     const user = req.currentUser!;
     const bad = (error: string) => reply.code(400).send({ error });
@@ -91,6 +95,8 @@ export async function substitutionRoutes(app: FastifyInstance) {
       }
       throw e;
     }
+    // Лише для створеної заміни: на 409 (програвший паралельний запит) заміни немає, тож і запису немає
+    audit(req, 'substitution.create', { target: sub.id, lessonId: lesson.id, groupId: lesson.groupId, kind });
     // F8: пуш групі. Збій черги (Redis) не скасовує заміну: вона вже в розкладі, пушу просто не буде
     if (config.pushEnabled) {
       await enqueueSubstitutionPush(sub.id).catch((err) =>
@@ -123,6 +129,7 @@ export async function substitutionRoutes(app: FastifyInstance) {
     }
 
     await prisma.substitution.delete({ where: { id } });
+    audit(req, 'substitution.delete', { target: id, lessonId: sub.lessonId, groupId: sub.lesson.groupId, kind: sub.kind });
     return reply.code(204).send();
   });
 }

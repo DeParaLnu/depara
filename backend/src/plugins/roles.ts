@@ -1,6 +1,7 @@
 import type { Role, User } from '@prisma/client';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db';
+import { audit } from '../lib/audit';
 import { requireAuth } from './auth';
 
 declare module 'fastify' {
@@ -14,8 +15,11 @@ export function requireRole(...roles: Role[]) {
   const check = async (req: FastifyRequest, reply: FastifyReply) => {
     const user = await prisma.user.findUnique({ where: { id: req.userId } });
     if (!user) return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    if (!roles.includes(user.role)) return reply.code(403).send({ error: 'FORBIDDEN' });
     req.currentUser = user;
+    if (!roles.includes(user.role)) {
+      audit(req, 'access.denied', { route: req.routeOptions.url }, 'warn');
+      return reply.code(403).send({ error: 'FORBIDDEN' });
+    }
   };
   return [requireAuth, check];
 }

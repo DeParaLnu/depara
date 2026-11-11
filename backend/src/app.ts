@@ -179,7 +179,7 @@ export function buildApp(
   app.register(scheduleRoutes);
   app.register(classroomRoutes);
   app.register(teacherRoutes);
-  app.register(substitutionRoutes);
+  app.register(substitutionRoutes, { substitutionsPerMinute: opts.rateLimit?.substitutionsPerMinute });
   app.register(adminRoutes);
 
   app.addHook('onClose', async () => {

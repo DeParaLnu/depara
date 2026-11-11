@@ -113,6 +113,27 @@ describe('ліміти запитів', () => {
     expect((await app.inject({ url: '/__ok', headers: as(b) })).statusCode).toBe(200);
   });
 
+  it('заміни: створення має суворий ліміт на користувача (кожна заміна це пуш усій групі)', async () => {
+    const app = make({ rateLimit: { perMinute: 1000, authPerMinute: 100, substitutionsPerMinute: 2, nameSpace: ns() } });
+    const as = (userId: string) => ({ authorization: `Bearer ${signAccessToken(userId)}` });
+    const post = (userId: string) => app.inject({ method: 'POST', url: '/substitutions', headers: as(userId), payload: {} });
+    const a = randomUUID();
+    const b = randomUUID();
+
+    // користувача немає в базі, тож запит доходить до перевірки ролі (401): лічильник рахує і такі запити
+    expect((await post(a)).statusCode).toBe(401);
+    expect((await post(a)).statusCode).toBe(401);
+    const limited = await post(a);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toEqual({ error: 'RATE_LIMITED', retryAfterSeconds: expect.any(Number) });
+    // інший користувач має власний лічильник
+    expect((await post(b)).statusCode).toBe(401);
+    // скасування заміни пуш не шле, тому його ліміт замін не зачіпає, як і решту маршрутів
+    const del = await app.inject({ method: 'DELETE', url: `/substitutions/${randomUUID()}`, headers: as(a) });
+    expect(del.statusCode).toBe(401);
+    expect((await app.inject({ url: '/__ok', headers: as(a) })).statusCode).toBe(200);
+  });
+
   it('без токена, або з підробленим, ліміт рахується на IP', async () => {
     const app = make({ rateLimit: { perMinute: 2, authPerMinute: 100, nameSpace: ns() } });
     const fake = { authorization: 'Bearer not-a-real-token' };

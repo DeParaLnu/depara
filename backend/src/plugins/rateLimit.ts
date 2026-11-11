@@ -7,6 +7,7 @@ import { redis, redisUsable } from '../redis';
 export interface RateLimitOptions {
   perMinute?: number;
   authPerMinute?: number;
+  substitutionsPerMinute?: number;
   /** Префікс ключів у Redis: тести беруть унікальний, щоб лічильники різних прогонів не змішувались */
   nameSpace?: string;
 }
@@ -30,6 +31,11 @@ export const authRateLimit = (max: number) => ({
   groupId: 'auth',
   keyGenerator: (req: FastifyRequest) => `ip:${req.ip}`,
 });
+
+// Створення замін: кожна заміна це пуш усій групі, тож без окремого ліміту староста (чи чужий скомпрометований акаунт)
+// циклом «створити, скасувати, створити» засипає групу сповіщеннями. Пуш викликає лише створення (скасування його не шле),
+// тому лімітуємо тільки POST. Лічильник на користувача: ключ береться з глобального keyGenerator, як в імпорту.
+export const substitutionRateLimit = (max: number) => ({ max, timeWindow: '1 minute' });
 
 // Ліміт запитів у Redis (спільний для перезапусків). Якщо Redis недоступний, запити пропускаються (skipOnError),
 // а не блокуються: ліміт це страховка, а не залежність, від якої має падати API.
