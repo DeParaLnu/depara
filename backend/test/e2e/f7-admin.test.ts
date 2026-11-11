@@ -49,6 +49,14 @@ describe('F7: пошук користувачів', () => {
     expect(users[0]).toMatchObject({ email: 'f7.findme@lnu.edu.ua', role: 'STUDENT' });
     expect((await send('GET', '/admin/users', student)).status).toBe(403);
   });
+
+  it('повторюваний чи задовгий q дає 400 INVALID_QUERY, а не 500', async () => {
+    const admin = await adminToken();
+    expect(await errorOf(await send('GET', '/admin/users?q=a&q=b', admin))).toBe('INVALID_QUERY');
+    expect(await errorOf(await send('GET', `/admin/users?q=${'a'.repeat(101)}`, admin))).toBe('INVALID_QUERY');
+    // межа: рівно 100 символів ще допустимо
+    expect((await send('GET', `/admin/users?q=${'a'.repeat(100)}`, admin)).status).toBe(200);
+  });
 });
 
 describe('F7: імпорт розкладу', () => {

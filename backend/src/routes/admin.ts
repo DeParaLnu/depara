@@ -5,7 +5,7 @@ import { prisma } from '../db';
 import { audit } from '../lib/audit';
 import { csvToLessons } from '../lib/csv';
 import { ImportError, importSchedule, validateImport } from '../lib/scheduleImport';
-import { isSubgroup, isUuid } from '../lib/validation';
+import { isSearchQuery, isSubgroup, isUuid } from '../lib/validation';
 import { requireRole } from '../plugins/roles';
 
 const ROLES = Object.values(Role) as string[];
@@ -18,8 +18,9 @@ export async function adminRoutes(app: FastifyInstance) {
   );
 
   // Пошук користувачів за поштою або ім'ям: потрібен, щоб знайти id для призначення ролі
-  app.get('/admin/users', { preHandler: requireRole('ADMIN') }, async (req) => {
-    const { q } = req.query as { q?: string };
+  app.get('/admin/users', { preHandler: requireRole('ADMIN') }, async (req, reply) => {
+    const { q } = req.query as { q?: unknown };
+    if (!isSearchQuery(q)) return reply.code(400).send({ error: 'INVALID_QUERY' });
     const users = await prisma.user.findMany({
       where: q
         ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { fullName: { contains: q, mode: 'insensitive' } }] }

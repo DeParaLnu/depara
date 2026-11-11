@@ -129,3 +129,17 @@ describe('F6: скасування заміни', () => {
 });
 
 
+
+describe('F6: довідник викладачів', () => {
+  it('пошук за іменем працює, а повторюваний чи задовгий q дає 400 INVALID_QUERY, а не 500', async () => {
+    const teacher = await first<{ fullName: string }>('/teachers', headman);
+    const found = await send('GET', `/teachers?q=${encodeURIComponent(teacher.fullName.slice(0, 3))}`, headman);
+    expect(found.status).toBe(200);
+    expect(((await found.json()) as { fullName: string }[]).some((t) => t.fullName === teacher.fullName)).toBe(true);
+
+    expect(await errorOf(await send('GET', '/teachers?q=a&q=b', headman))).toBe('INVALID_QUERY');
+    expect(await errorOf(await send('GET', `/teachers?q=${'a'.repeat(101)}`, headman))).toBe('INVALID_QUERY');
+    // межа: рівно 100 символів ще допустимо
+    expect((await send('GET', `/teachers?q=${'a'.repeat(100)}`, headman)).status).toBe(200);
+  });
+});
