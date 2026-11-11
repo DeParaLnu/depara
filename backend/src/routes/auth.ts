@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../config';
 import { authRateLimit } from '../plugins/rateLimit';
 import { prisma } from '../db';
+import { audit } from '../lib/audit';
 import { checkIdentity, verifyIdToken } from '../lib/microsoft';
 import {
   issueRefreshToken,
@@ -101,6 +102,13 @@ export async function authRoutes(app: FastifyInstance, opts: { authPerMinute?: n
       // Нова пошта вже належить іншому запису: не вгадуємо, хто з них хто
       if (isUniqueViolation(e)) return reply.code(409).send({ error: 'ACCOUNT_CONFLICT' });
       throw e;
+    }
+
+    // Найчутливіша зміна ролі відбувається без адміна, тому її обовʼязково пишемо в audit.
+    // Попередня роль це роль знайденого запису; для нового користувача її немає.
+    const previousRole = (byOid ?? byEmail)?.role ?? null;
+    if (isBootstrapAdmin && previousRole !== 'ADMIN') {
+      audit(req, 'user.role.bootstrap', { actor: 'ADMIN_EMAILS', target: user.id, from: previousRole, to: 'ADMIN' });
     }
 
     return {
