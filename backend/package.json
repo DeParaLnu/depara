@@ -16,7 +16,8 @@
     "seed:demo": "tsx prisma/seed/demo.ts",
     "start:test": "tsx src/server.ts",
     "test:e2e": "start-server-and-test start:test http://localhost:3000/health \"vitest run\"",
-    "loadtest": "node scripts/loadtest.mjs"
+    "loadtest": "node scripts/loadtest.mjs",
+    "bench:import": "node scripts/import-bench.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.1",
