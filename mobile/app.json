@@ -31,6 +31,12 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "07a86116-a745-47bc-9ef5-dc0a68dc8253"
+      }
+    },
+    "owner": "1nputlag"
   }
 }
