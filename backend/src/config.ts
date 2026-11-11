@@ -1,8 +1,25 @@
 // Секрет за замовчуванням дозволений лише в test і development. На сервері без JWT_SECRET
 // застосунок не стартує, бо відомий секрет дозволив би підробляти токени (зокрема адміна).
+//
+// Значення з прикладів конфігурації й дефолт для розробки в проді теж не приймаються: вони відомі всім, тож токени
+// з таким секретом можна підробити. Коротший за 32 символи секрет лише попереджає: зупинка старту через довжину
+// поклала б середовища, де секрет задано давно (CI використовує короткий).
+const PLACEHOLDER_SECRETS = new Set(['change-me-locally', 'змініть-мене', 'dev-only-secret']);
+const MIN_SECRET_LENGTH = 32;
+
 function resolveJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
-  if (secret) return secret;
+  if (secret) {
+    if (process.env.NODE_ENV === 'production') {
+      if (PLACEHOLDER_SECRETS.has(secret.trim().toLowerCase())) {
+        throw new Error('JWT_SECRET is a placeholder value. Generate a real one: openssl rand -hex 32');
+      }
+      if (secret.length < MIN_SECRET_LENGTH) {
+        console.warn(`JWT_SECRET коротший за ${MIN_SECRET_LENGTH} символи: згенеруйте новий (openssl rand -hex 32)`);
+      }
+    }
+    return secret;
+  }
   const env = process.env.NODE_ENV;
   if (env === 'test' || env === 'development') return 'dev-only-secret';
   throw new Error('JWT_SECRET is required. Set it in .env (див. .env.example).');
