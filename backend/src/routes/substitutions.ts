@@ -1,4 +1,4 @@
-import { SubstitutionKind } from '@prisma/client';
+import { Prisma, SubstitutionKind } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { prisma } from '../db';
@@ -82,9 +82,20 @@ export async function substitutionRoutes(app: FastifyInstance, opts: { substitut
     if (data.newClassroomId && !(await prisma.classroom.findUnique({ where: { id: data.newClassroomId } }))) return bad('CLASSROOM_NOT_FOUND');
     if (data.newPairNumber && !(await prisma.pairTime.findUnique({ where: { pairNumber: data.newPairNumber } }))) return bad('PAIR_NOT_FOUND');
 
-    const sub = await prisma.substitution.create({
-      data: { lessonId: lesson.id, kind, comment: (b.comment as string | null | undefined) ?? null, createdById: user.id, ...data },
-    });
+    let sub;
+    try {
+      sub = await prisma.substitution.create({
+        data: { lessonId: lesson.id, kind, comment: (b.comment as string | null | undefined) ?? null, createdById: user.id, ...data },
+      });
+    } catch (e) {
+      // Паралельний запит (подвійний тап) встиг створити заміну між перевіркою вище й цим create: UNIQUE на lesson_id
+      // є єдиним джерелом правди «одна заміна на пару», тож це не збій, а той самий 409. Пуш не ставимо: його вже поставив переможець.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        return reply.code(409).send({ error: 'SUBSTITUTION_EXISTS' });
+      }
+      throw e;
+    }
+    // Лише для створеної заміни: на 409 (програвший паралельний запит) заміни немає, тож і запису немає
     audit(req, 'substitution.create', { target: sub.id, lessonId: lesson.id, groupId: lesson.groupId, kind });
     // F8: пуш групі. Збій черги (Redis) не скасовує заміну: вона вже в розкладі, пушу просто не буде
     if (config.pushEnabled) {
