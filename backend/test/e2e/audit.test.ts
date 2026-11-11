@@ -12,7 +12,7 @@ const app = buildApp({
 });
 
 const login = async (email: string) => {
-  const res = await app.inject({ method: 'POST', url: '/auth/google', payload: { idToken: `test:${email}`, deviceId: 'audit-test' } });
+  const res = await app.inject({ method: 'POST', url: '/auth/microsoft', payload: { idToken: `test:${email}`, deviceId: 'audit-test' } });
   return (res.json() as { accessToken: string; user: { id: string } });
 };
 const auditLines = (action: string) => lines.filter((l) => l.audit?.action === action);
@@ -97,7 +97,7 @@ describe('audit trail', () => {
 
   it('audit лишається в лозі, навіть коли рівень логера warn', async () => {
     const loginQuiet = async (email: string) =>
-      (await quietApp.inject({ method: 'POST', url: '/auth/google', payload: { idToken: `test:${email}`, deviceId: 'audit-test' } })).json() as {
+      (await quietApp.inject({ method: 'POST', url: '/auth/microsoft', payload: { idToken: `test:${email}`, deviceId: 'audit-test' } })).json() as {
         accessToken: string;
         user: { id: string };
       };
