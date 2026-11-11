@@ -1,4 +1,4 @@
-"""Етап 2: міркування вимкнено для Qwen3.5, двоетапна схема (нотатки → JSON за схемою), відкат, якщо API відхиляє
+"""Міркування вимкнено для Qwen3.5, двоетапна схема (нотатки → JSON за схемою), відкат, якщо API відхиляє
 параметр, повтор обрізаного шматка меншими частинами, загальний дедлайн відповіді. Без мережі й без ключа."""
 
 import io
@@ -11,45 +11,9 @@ from pathlib import Path
 from unittest import mock
 
 import review
+from fakes import A_TS, DIFF, FakeApi, finding, http_error, no_network, ok
 
 REAL_REQUEST = review.request  # до запобіжника: тест дедлайну перевіряє саме її
-
-DIFF = """diff --git a/backend/src/a.ts b/backend/src/a.ts
---- a/backend/src/a.ts
-+++ b/backend/src/a.ts
-@@ -1,2 +1,3 @@
- import x from 'y';
--const total = 0;
-+const total = items.length;
-+export default total;
-"""
-A_TS = "import x from 'y';\nconst total = items.length;\nexport default total;\n"
-
-
-def ok(content="", finish="stop", tool_calls=None):
-    message = {"role": "assistant", "content": content}
-    if tool_calls:
-        message["tool_calls"] = tool_calls
-    return {"choices": [{"message": message, "finish_reason": finish}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
-
-
-class FakeApi:
-    """Підставний /chat/completions: відповіді по черзі, усі тіла запитів записуються."""
-
-    def __init__(self, replies):
-        self.replies, self.bodies = list(replies), []
-
-    def __call__(self, method, url, headers, body=None, timeout=60, deadline=None):
-        self.bodies.append(json.loads(json.dumps(body)))
-        reply = self.replies.pop(0)
-        if isinstance(reply, Exception):
-            raise reply
-        return json.dumps(reply), {}
-
-
-def no_network(*a, **k):
-    raise AssertionError("тест пішов у справжню мережу")
-
 
 def setUpModule():
     """Запобіжник: запит без підставного API падає одразу, а не йде в Together."""
@@ -60,16 +24,6 @@ def setUpModule():
 
 def tearDownModule():
     _guard.stop()
-
-
-def http_error(code, text):
-    return RuntimeError(f"POST https://api.together.xyz/v1/chat/completions → HTTP {code}: {text}")
-
-
-def finding(**over):
-    base = {"file": "backend/src/a.ts", "line": 2, "severity": "important", "title": "Порожній список ламає підсумок",
-            "evidence": "const total = items.length;", "problem": "items може бути undefined", "fix": "додати перевірку"}
-    return {**base, **over}
 
 
 class ReasoningDefault(unittest.TestCase):

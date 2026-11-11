@@ -6,6 +6,8 @@
 що в [гіді Together про coding agents](https://docs.together.ai/docs/how-to-build-coding-agents), але лише для читання:
 ревʼювер нічого не змінює в коді. Результат це **один коментар** у PR, який оновлюється після кожного нового коміту.
 
+Будова, схема потоку, кількість запитів і токенів на ревʼю: [ai-review-design.md](ai-review-design.md).
+
 ## Як він працює (і чому це надійніше за один запит)
 Невелика модель сама по собі багато вигадує, тому ревʼю йде конвеєром, де скрипт перевіряє модель:
 1. **Шматки.** Diff ділиться на частини за файлами (до 9 000 символів **разом із номерами рядків**, які бачить модель),
@@ -129,10 +131,13 @@ python3 tools/ai-review/review.py
 `tools/ai-review/eval/` ганяє ревʼюер на розмічених PR і нічого не публікує. Мітки й шаблон: `tools/ai-review/eval/README.md`.
 Кожну зміну ревʼюера лишаємо, лише якщо цифри не гірші за базу.
 ```bash
-python3 tools/ai-review/eval/run_eval.py --label base --runs 3      # база: 3 прогони, модель недетермінована
+python3 tools/ai-review/eval/run_eval.py --label my-base --runs 3   # своя база: 3 прогони, модель недетермінована
 python3 tools/ai-review/eval/run_eval.py --label my-change --smoke  # швидка перевірка кроку на короткому наборі
-python3 tools/ai-review/eval/run_eval.py --compare base my-change   # порівняння і рішення
+python3 tools/ai-review/eval/run_eval.py --compare current my-change   # порівняння з поточною версією і рішення
 ```
+- **Збережені результати** (`eval/results/*.json`): `baseline` версія до змін, `current` поточна, решта це окремі спроби
+  (`narrow-passes`, `spec-in-model-context`, `reasoning-on` вимкнено за цими цифрами). `baseline-first-session` міряний
+  ще на порожніх знімках коду й лишений лише для історії.
 - **Ключ** береться зі змінної `TOGETHER_API_KEY` або з кореневого `.env` (він у `.gitignore`) і нікуди не друкується.
 - **Правила без моделі** перевіряються без ключа: `python3 tools/ai-review/eval/check_rules.py [каталог з *.diff]` друкує кожне
   спрацювання. У метриках eval їхні пункти рахуються окремо («від правил») і не входять у хибні: це факт про diff, а не здогад.
