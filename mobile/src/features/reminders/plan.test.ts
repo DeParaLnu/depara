@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Lesson, Room, Substitution } from '../../api';
-import { isReminderMinutes, lessonStart, MAX_REMINDERS, planKey, planReminders } from './plan';
+import { isReminderMinutes, lessonStart, MAX_REMINDERS, ONCE_PREFIX, planKey, planLessonReminder, planReminders } from './plan';
 
 const room = (number: string, code: string): Room => ({
   id: `c-${number}`,
@@ -93,6 +93,26 @@ describe('planReminders', () => {
     const now = at('2026-11-04', 8, 0);
     expect(planKey(planReminders([lesson()], 10, now))).toBe(planKey(planReminders([lesson()], 10, at('2026-11-04', 9, 0))));
     expect(planKey(planReminders([lesson()], 10, now))).not.toBe(planKey(planReminders([lesson()], 15, now)));
+  });
+});
+
+describe('planLessonReminder (кнопка в деталях пари)', () => {
+  const now = at('2026-11-04', 8, 0);
+
+  it('ставить нагадування за 10 хв з окремим префіксом id', () => {
+    const r = planLessonReminder(lesson(), 10, now, ONCE_PREFIX);
+    expect(r).toMatchObject({ id: 'once-l1', title: 'Операційні системи через 10 хв' });
+    expect(r?.at).toEqual(at('2026-11-04', 11, 40));
+  });
+
+  it('без префікса id збігається з загальним нагадуванням', () => {
+    expect(planLessonReminder(lesson(), 10, now)?.id).toBe('lesson-l1');
+  });
+
+  it('скасована, перенесена або вже почата пара нагадування не отримує', () => {
+    expect(planLessonReminder(lesson({ substitution: sub({ kind: 'CANCELLED' }) }), 10, now)).toBeNull();
+    expect(planLessonReminder(lesson({ substitution: sub({ kind: 'MOVED' }) }), 10, now)).toBeNull();
+    expect(planLessonReminder(lesson(), 10, at('2026-11-04', 11, 45))).toBeNull();
   });
 });
 

@@ -5,6 +5,9 @@ import { roomLabel } from '../schedule/lesson';
 // F8: локальні нагадування перед парою. Чиста логіка без нативних модулів (її перевіряють юніт-тести):
 // які пари нагадати і коли. Саме планування сповіщень у notifications.ts.
 
+/** Нагадування з кнопки в деталях однієї пари: окремий префікс, щоб загальне планування його не скасовувало. */
+export const ONCE_PREFIX = 'once-';
+
 export const REMINDER_OPTIONS = [0, 10, 15] as const;
 export type ReminderMinutes = (typeof REMINDER_OPTIONS)[number];
 
@@ -23,6 +26,28 @@ export const lessonStart = (lesson: Lesson): Date => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(m / 60), m % 60);
 };
 
+/** Нагадування для однієї пари за `minutes` хв до початку; null, якщо нагадувати не треба (скасована, перенесена, початок уже минув). */
+export function planLessonReminder(
+  lesson: Lesson,
+  minutes: Exclude<ReminderMinutes, 0>,
+  now: Date,
+  idPrefix = 'lesson-',
+): PlannedReminder | null {
+  const kind = lesson.substitution?.kind;
+  if (kind === 'CANCELLED' || kind === 'MOVED') return null;
+  const at = new Date(lessonStart(lesson).getTime() - minutes * 60_000);
+  if (at.getTime() <= now.getTime()) return null;
+
+  const room = roomLabel(lesson.substitution?.newRoom ?? lesson.room);
+  const teacher = lesson.substitution?.newTeacher ?? lesson.teacher;
+  return {
+    id: `${idPrefix}${lesson.id}`,
+    at,
+    title: `${lesson.subject} через ${minutes} хв`,
+    body: [lesson.start, room, teacher].filter(Boolean).join(' · '),
+  };
+}
+
 /**
  * Нагадування для пар, що ще попереду: за `minutes` хвилин до початку.
  * Скасовані пари пропускаємо. Перенесені теж: їхній новий час розклад не віддає (лише дату й номер пари).
@@ -33,22 +58,10 @@ export function planReminders(lessons: Lesson[], minutes: ReminderMinutes, now: 
   const seen = new Set<string>();
   const planned: PlannedReminder[] = [];
   for (const lesson of lessons) {
-    const kind = lesson.substitution?.kind;
-    if (kind === 'CANCELLED' || kind === 'MOVED') continue;
     if (seen.has(lesson.id)) continue;
     seen.add(lesson.id);
-
-    const at = new Date(lessonStart(lesson).getTime() - minutes * 60_000);
-    if (at.getTime() <= now.getTime()) continue;
-
-    const room = roomLabel(lesson.substitution?.newRoom ?? lesson.room);
-    const teacher = lesson.substitution?.newTeacher ?? lesson.teacher;
-    planned.push({
-      id: `lesson-${lesson.id}`,
-      at,
-      title: `${lesson.subject} через ${minutes} хв`,
-      body: [lesson.start, room, teacher].filter(Boolean).join(' · '),
-    });
+    const reminder = planLessonReminder(lesson, minutes, now);
+    if (reminder) planned.push(reminder);
   }
   return planned.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, MAX_REMINDERS);
 }
