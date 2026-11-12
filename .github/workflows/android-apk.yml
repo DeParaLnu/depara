@@ -1,0 +1,119 @@
+name: android-apk
+
+# Збирає APK для встановлення напряму на телефон (без Google Play) і викладає його як artifact.
+# Запуск лише вручну: Actions → android-apk → Run workflow. Покрокова інструкція: docs/android-apk.md.
+# Змінні збірки (API_URL, PRIVACY_URL, MOCK) беруться з профілю в mobile/eas.json, окремо тут не дублюються.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Профіль із mobile/eas.json
+        type: choice
+        options: [preview, preview-mock]
+        default: preview
+      builder:
+        description: 'Де збирати: gradle (на runner, без секретів) або eas (хмара Expo, потрібен EXPO_TOKEN)'
+        type: choice
+        options: [gradle, eas]
+        default: gradle
+
+concurrency:
+  group: android-apk-${{ github.ref }}-${{ inputs.profile }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: apk (${{ inputs.profile }}, ${{ inputs.builder }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      PROFILE: ${{ inputs.profile }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+
+      # ---------- gradle: збірка на runner, секрети не потрібні ----------
+      - uses: actions/setup-java@v4
+        if: inputs.builder == 'gradle'
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Ті самі змінні, що EAS підставив би з профілю (з урахуванням extends)
+      - name: Змінні профілю з eas.json
+        if: inputs.builder == 'gradle'
+        run: |
+          node -e '
+            const profiles = require("./eas.json").build;
+            const env = (name) => (name ? { ...env(profiles[name].extends), ...profiles[name].env } : {});
+            for (const [key, value] of Object.entries(env(process.argv[1]))) console.log(`${key}=${value}`);
+          ' "$PROFILE" | tee -a "$GITHUB_ENV"
+
+      # android/ не зберігається в git: prebuild генерує його з app.json (Continuous Native Generation).
+      # Release підписується debug-ключем із шаблону Expo: для роздачі команді цього досить, для Google Play ні.
+      - name: Зібрати release APK (gradle)
+        if: inputs.builder == 'gradle'
+        env:
+          NODE_ENV: production
+        run: |
+          npx expo prebuild --platform android --no-install
+          cd android && ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/app.apk"
+
+      # ---------- eas: збірка в хмарі Expo ----------
+      # Токен береться лише із секретів репозиторію.
+      - name: Зібрати APK (EAS Build)
+        if: inputs.builder == 'eas'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::Немає секрету EXPO_TOKEN. Додайте його в Settings → Secrets and variables → Actions або оберіть builder=gradle."
+            exit 1
+          fi
+          npx --yes eas-cli@latest build -p android --profile "$PROFILE" --non-interactive --wait --json > "$RUNNER_TEMP/eas.json"
+          url=$(jq -r '.[0].artifacts.applicationArchiveUrl // .[0].artifacts.buildUrl // empty' "$RUNNER_TEMP/eas.json")
+          if [ -z "$url" ]; then echo "::error::EAS не повернув посилання на APK"; exit 1; fi
+          curl -fsSL -o "$RUNNER_TEMP/app.apk" "$url"
+
+      # ---------- спільне: назва, перевірка, викладання ----------
+      - name: Назвати й перевірити APK
+        id: apk
+        run: |
+          version=$(node -p 'require("./app.json").expo.version')
+          name="depara-$PROFILE-$version-$(git rev-parse --short HEAD).apk"
+          mkdir -p "$RUNNER_TEMP/out" && mv "$RUNNER_TEMP/app.apk" "$RUNNER_TEMP/out/$name"
+          cd "$RUNNER_TEMP/out"
+
+          size=$(stat -c %s "$name")
+          # Порожній або обрізаний файл не має пройти як успішна збірка
+          if [ "$size" -lt 10000000 ]; then echo "::error::APK підозріло малий: $size байтів"; exit 1; fi
+          sha=$(sha256sum "$name" | cut -d' ' -f1)
+          aapt2=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2
+          badging=$("$aapt2" dump badging "$name" | head -1)
+          echo "$badging" | grep -q "name='ua.lnu.depara'" || { echo "::error::Неочікуваний пакет: $badging"; exit 1; }
+
+          {
+            echo "### $name"
+            echo "- Розмір: $(numfmt --to=iec-i --suffix=B "$size") ($size байтів)"
+            echo "- SHA-256: \`$sha\`"
+            echo "- \`$badging\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ runner.temp }}/out/*.apk
+          if-no-files-found: error
+          retention-days: 14
