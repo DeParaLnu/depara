@@ -103,6 +103,88 @@ jobs:
       - run: npm run seed -- --shift-to-current-week
       - run: npm run test:e2e
 
+  # Звіти покриття тестами (artifact coverage-reports і таблиця в Summary). Інформаційний job: continue-on-error,
+  # щоб його падіння не робило CI червоним і не зупиняло деплой. Обовʼязковою перевіркою в ruleset не робимо.
+  coverage:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: depara_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/depara_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/depara_test
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      AUTH_MODE: fake
+      ADMIN_EMAILS: e2e.admin@lnu.edu.ua
+      CORS_ORIGINS: http://localhost:5173
+      RATE_LIMIT_IMPORT_PER_MINUTE: 1000
+      RATE_LIMIT_AUTH_PER_MINUTE: 5000
+      RATE_LIMIT_SUBSTITUTIONS_PER_MINUTE: 1000
+      JWT_SECRET: ci-only-secret
+      EXPO_PUSH_URL: http://localhost:4010/push
+      PUSH_RETRY_DELAY_MS: 200
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            mobile/package-lock.json
+      - name: Покриття backend
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+          npm run seed -- --shift-to-current-week
+          npm run test:coverage
+      - name: Покриття mobile
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run test:coverage
+      - name: Таблиця покриття в Summary
+        run: |
+          node -e '
+            console.log("| Частина | Рядки | Гілки | Функції |\n|---|---|---|---|");
+            for (const [name, file] of [["backend", "backend/coverage/report"], ["mobile", "mobile/coverage"]]) {
+              const t = require(`./${file}/coverage-summary.json`).total;
+              const cell = (m) => `${m.pct}% (${m.covered}/${m.total})`;
+              console.log(`| ${name} | ${cell(t.lines)} | ${cell(t.branches)} | ${cell(t.functions)} |`);
+            }
+          ' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            backend/coverage/report/
+            mobile/coverage/
+          if-no-files-found: error
+          retention-days: 14
+
   # Мобільні E2E на PR: стартують лише після зеленого backend-e2e, бо застосунок ходить у той самий API.
   # Вимкнені, доки змінна репозиторію MOBILE_E2E_ON_PR не дорівнює 'true' (ставимо, коли сценарії
   # стабільно зелені кілька запусків поспіль). Спершу НЕ робимо їх обов'язковою перевіркою в ruleset.

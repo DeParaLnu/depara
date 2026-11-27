@@ -28,6 +28,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/react": "~19.3.0",
+    "@vitest/coverage-v8": "^5.1.0",
     "@wdio/appium-service": "^10.0.2",
     "@wdio/cli": "^10.0.2",
     "@wdio/globals": "^10.0.2",
@@ -44,7 +45,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
     "e2e": "wdio run e2e/wdio.conf.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "private": true
 }

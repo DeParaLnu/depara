@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "test", "prisma/seed", "vitest.config.ts"]
+  "include": ["src", "test", "prisma/seed", "vitest.config.ts", "vitest.coverage.config.ts"]
 }

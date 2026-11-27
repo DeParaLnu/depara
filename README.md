@@ -20,6 +20,16 @@ npm run dev                          # http://localhost:3000/health
 
 Скрипти (`backend/`): `npm run lint`, `npm run typecheck`, `npm run test:e2e`.
 
+### Покриття тестами (code coverage)
+
+```bash
+cd backend && npm run test:coverage   # ті самі змінні, що для E2E; сервер окремо запускати не треба, порт 3000 вільний
+cd mobile && npm run test:coverage
+```
+
+HTML-звіти: `backend/coverage/report/index.html` і `mobile/coverage/index.html`. У CI їх збирає job `coverage`
+(artifact `coverage-reports`, таблиця в Summary).
+
 ### Вхід за паролем
 
 ```bash
