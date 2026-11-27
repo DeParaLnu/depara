@@ -231,3 +231,28 @@ describe('тиждень з ETag (F3)', () => {
     await expect(api.week('tok', '2026-11-02', { ...week, etag: '"v1"' } as never)).rejects.toBeInstanceOf(ApiError);
   });
 });
+
+describe('loginWithPassword', () => {
+  it('шле пошту, пароль і deviceId на /auth/login без токена', async () => {
+    fetchMock.mockResolvedValueOnce(json(200, { accessToken: 'a', refreshToken: 'r', needsOnboarding: false }));
+
+    await expect(api.loginWithPassword('student@lnu.edu.ua', 'example-password', 'device-1')).resolves.toMatchObject({
+      accessToken: 'a',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/auth/login');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ email: 'student@lnu.edu.ua', password: 'example-password', deviceId: 'device-1' });
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+
+  it('хибний пароль віддає кодом і не запускає refresh', async () => {
+    fetchMock.mockResolvedValueOnce(json(401, { error: 'INVALID_CREDENTIALS' }));
+    await expect(api.loginWithPassword('student@lnu.edu.ua', 'example-bad', 'device-1')).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+      status: 401,
+    });
+    expect(callsTo('/auth/refresh')).toHaveLength(0);
+  });
+});

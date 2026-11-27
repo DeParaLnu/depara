@@ -74,7 +74,7 @@ export async function mockFetch(path: string, init: RequestInit = {}): Promise<R
   const authorization = (init.headers as Record<string, string> | undefined)?.Authorization;
   const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : {};
 
-  if (method === 'POST' && route === '/auth/microsoft') {
+  if (method === 'POST' && (route === '/auth/microsoft' || route === '/auth/login')) {
     state = INITIAL_STATE;
     createdSubs.clear();
     removedSubs.clear();

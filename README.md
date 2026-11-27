@@ -20,6 +20,12 @@ npm run dev                          # http://localhost:3000/health
 
 Скрипти (`backend/`): `npm run lint`, `npm run typecheck`, `npm run test:e2e`.
 
+### Вхід за паролем
+
+```bash
+cd backend && npm run set-password -- student@lnu.edu.ua --name "Тестовий Студент"   # пароль вводиться з клавіатури
+```
+
 ### E2E-тести
 
 Тести ходять в API по HTTP, тому потрібні запущена база й seed з прив'язкою до поточного тижня:

@@ -48,6 +48,8 @@ export const config = {
   // це страховка від зловживань, а не обмеження звичайного використання.
   rateLimitPerMinute: positiveInt(process.env.RATE_LIMIT_PER_MINUTE, 600),
   rateLimitAuthPerMinute: positiveInt(process.env.RATE_LIMIT_AUTH_PER_MINUTE, 300),
+  // Спроби входу за паролем на пару «IP + пошта» за хвилину (захист від перебору); на один IP удесятеро більше
+  rateLimitPasswordPerMinute: positiveInt(process.env.RATE_LIMIT_PASSWORD_PER_MINUTE, 10),
   rateLimitImportPerMinute: positiveInt(process.env.RATE_LIMIT_IMPORT_PER_MINUTE, 30),
   // Створення замін (кожна це пуш групі), на користувача. Людина заповнює форму заміни десятки секунд,
   // тож 10 на хвилину не заважає старості, але зупиняє спам пушами.

@@ -172,7 +172,10 @@ export function buildApp(
     app.get('/', async (_req, reply) => reply.redirect('/dev'));
   }
 
-  app.register(authRoutes, { authPerMinute: opts.rateLimit?.authPerMinute });
+  app.register(authRoutes, {
+    authPerMinute: opts.rateLimit?.authPerMinute,
+    passwordPerMinute: opts.rateLimit?.passwordPerMinute,
+  });
   app.register(profileRoutes);
   app.register(pushTokenRoutes);
   app.register(legalRoutes);

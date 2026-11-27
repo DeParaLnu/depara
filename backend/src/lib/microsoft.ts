@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { config } from '../config';
+import { isAllowedEmail } from './email';
 
 export interface MicrosoftIdentity {
   oid: string; // стабільний id користувача в тенанті (sub у Entra різний для кожного застосунку)
@@ -62,8 +63,5 @@ export async function verifyIdToken(idToken: string): Promise<MicrosoftIdentity>
 export function checkIdentity(id: MicrosoftIdentity): 'NON_LNU_EMAIL' | null {
   const tenant = config.microsoftTenantId || (config.fakeAuth ? FAKE_TENANT : '');
   if (!tenant || id.tid !== tenant) return 'NON_LNU_EMAIL';
-  // Рівно одна @, і весь домен після неї збігається (відсікає "x@evil.com@lnu.edu.ua" і lnu.edu.ua.evil.com)
-  const at = id.email.lastIndexOf('@');
-  if (at < 1 || id.email.indexOf('@') !== at) return 'NON_LNU_EMAIL';
-  return id.email.slice(at + 1) === config.allowedEmailDomain ? null : 'NON_LNU_EMAIL';
+  return isAllowedEmail(id.email) ? null : 'NON_LNU_EMAIL';
 }

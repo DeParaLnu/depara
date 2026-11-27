@@ -226,6 +226,8 @@ async function fetchWeek(token: string, date?: string, cached?: WeekSchedule): P
 export const api = {
   loginWithMicrosoft: (idToken: string, deviceId: string) =>
     request<Session>('/auth/microsoft', { method: 'POST', body: JSON.stringify({ idToken, deviceId }) }),
+  loginWithPassword: (email: string, password: string, deviceId: string) =>
+    request<Session>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, deviceId }) }),
   refresh: (refreshToken: string, deviceId: string) =>
     request<{ accessToken: string; refreshToken: string }>('/auth/refresh', {
       method: 'POST',

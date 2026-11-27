@@ -94,3 +94,11 @@ describe('мок: заміни (F6)', () => {
     expect((await call('/me/push-token', { method: 'DELETE', body: token })).status).toBe(204);
   });
 });
+
+describe('мок: вхід за паролем', () => {
+  it('приймає пошту й пароль і веде на онбординг, як вхід через Microsoft', async () => {
+    const res = await call('/auth/login', { method: 'POST', body: JSON.stringify({ email: 'a@lnu.edu.ua', password: 'example' }) });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ needsOnboarding: true, accessToken: expect.any(String) });
+  });
+});

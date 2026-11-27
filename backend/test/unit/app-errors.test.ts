@@ -198,3 +198,33 @@ describe('GET /health/ready', () => {
     expect(res.json()).toEqual({ status: 'ok' });
   });
 });
+
+describe('ліміт входу за паролем', () => {
+  const attempt = (app: ReturnType<typeof appWith>, email: string) =>
+    app.inject({ method: 'POST', url: '/auth/login', payload: { email, password: 'example-wrong-password', deviceId: 'd' } });
+  const limitedApp = (passwordPerMinute: number) => {
+    const app = appWith({ rateLimit: { perMinute: 1000, authPerMinute: 1000, passwordPerMinute, nameSpace: `rl-test-${randomUUID()}:` } });
+    apps.push(app);
+    return app;
+  };
+
+  it('перебір пароля однієї пошти зупиняється, інші пошти з того ж IP входити можуть', async () => {
+    const app = limitedApp(2);
+    const victim = `${randomUUID()}@lnu.edu.ua`;
+    expect((await attempt(app, victim)).statusCode).toBe(401);
+    // регістр і пробіли не дають нового лічильника
+    expect((await attempt(app, ` ${victim.toUpperCase()}`)).statusCode).toBe(401);
+    const limited = await attempt(app, victim);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toEqual({ error: 'RATE_LIMITED', retryAfterSeconds: expect.any(Number) });
+    expect((await attempt(app, `${randomUUID()}@lnu.edu.ua`)).statusCode).toBe(401);
+  });
+
+  it('одна адреса не може перебирати багато пошт: ліміт на IP удесятеро вищий', async () => {
+    const app = limitedApp(1);
+    for (let i = 0; i < 10; i++) expect((await attempt(app, `${randomUUID()}@lnu.edu.ua`)).statusCode).toBe(401);
+    const limited = await attempt(app, `${randomUUID()}@lnu.edu.ua`);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toEqual({ error: 'RATE_LIMITED', retryAfterSeconds: expect.any(Number) });
+  });
+});

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { afterAll, describe, expect, it } from 'vitest';
+import { PasswordSetupError, setUserPassword } from '../../src/lib/userPassword';
 import { API, authHeaders, DEVICE, loginRaw, postJson, setupStudent } from './helpers';
 
 interface LoginBody {
@@ -267,5 +268,74 @@ describe('F1: прив\'язка акаунта до oid', () => {
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
     const bound = (await prisma.user.findUniqueOrThrow({ where: { email } })).microsoftOid;
     expect(oids).toContain(bound);
+  });
+});
+
+describe('F1: вхід за поштою й паролем', () => {
+  const db = new PrismaClient();
+  afterAll(() => db.$disconnect());
+  const run = Date.now();
+  const mail = (name: string) => `f1.pw.${name}.${run}@lnu.edu.ua`;
+  const password = 'example-password-1';
+  const loginWith = (email: string, pass: string, deviceId = DEVICE) => postJson('/auth/login', { email, password: pass, deviceId });
+
+  it('акаунт із паролем входить, отримує робочі токени й проходить онбординг', async () => {
+    await setUserPassword(db, { email: mail('ok'), password, name: 'Тестовий Студент' });
+    const res = await loginWith(mail('ok').toUpperCase(), password);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as LoginBody;
+    expect(body.user).toMatchObject({ email: mail('ok'), role: 'STUDENT' });
+    expect(body.needsOnboarding).toBe(true);
+    expect(JSON.stringify(body)).not.toContain('scrypt');
+
+    const me = await fetch(`${API}/me`, { headers: authHeaders(body.accessToken) });
+    expect(me.status).toBe(200);
+    expect(await me.text()).not.toMatch(/password|scrypt/i);
+    expect((await postJson('/auth/refresh', { refreshToken: body.refreshToken, deviceId: DEVICE })).status).toBe(200);
+  });
+
+  it('хибний пароль, невідома пошта й акаунт без пароля дають однакову відповідь', async () => {
+    await setUserPassword(db, { email: mail('wrong'), password });
+    await login(mail('sso-only'));
+    const attempts = [
+      [mail('wrong'), 'example-password-2'],
+      [mail('nobody'), password],
+      [mail('sso-only'), password],
+      [mail('wrong'), 'x'.repeat(10_000)],
+    ];
+    for (const [email, pass] of attempts) {
+      const res = await loginWith(email, pass);
+      expect([res.status, await res.json()]).toEqual([401, { error: 'INVALID_CREDENTIALS' }]);
+    }
+  });
+
+  it('без пошти, пароля чи deviceId повертає 400', async () => {
+    for (const body of [{ password, deviceId: DEVICE }, { email: mail('x'), deviceId: DEVICE }, { email: 1, password: [], deviceId: DEVICE }]) {
+      const res = await postJson('/auth/login', body);
+      expect([res.status, await errorOf(res)]).toEqual([400, 'EMAIL_AND_PASSWORD_REQUIRED']);
+    }
+    const res = await postJson('/auth/login', { email: mail('x'), password });
+    expect([res.status, await errorOf(res)]).toEqual([400, 'DEVICE_ID_REQUIRED']);
+  });
+
+  it('новий пароль замінює старий, а роль задається разом із паролем', async () => {
+    await setUserPassword(db, { email: mail('change'), password });
+    await setUserPassword(db, { email: mail('change'), password: 'changeme-new-password', role: 'HEADMAN' });
+    expect((await loginWith(mail('change'), password)).status).toBe(401);
+    const res = await loginWith(mail('change'), 'changeme-new-password');
+    expect(((await res.json()) as LoginBody).user.role).toBe('HEADMAN');
+  });
+
+  it('пароль для чужого домену чи закороткий не задається', async () => {
+    await expect(setUserPassword(db, { email: `x.${run}@gmail.com`, password })).rejects.toThrow(PasswordSetupError);
+    await expect(setUserPassword(db, { email: `x.${run}@lnu.edu.ua.evil.com`, password })).rejects.toThrow(PasswordSetupError);
+    await expect(setUserPassword(db, { email: mail('short'), password: 'example' })).rejects.toThrow(PasswordSetupError);
+    expect(await db.user.findUnique({ where: { email: mail('short') } })).toBeNull();
+  });
+
+  it('вхід через Microsoft з тією самою поштою потрапляє в той самий акаунт', async () => {
+    const created = await setUserPassword(db, { email: mail('link'), password });
+    expect((await login(mail('link'))).user.id).toBe(created.id);
+    expect((await loginWith(mail('link'), password)).status).toBe(200);
   });
 });

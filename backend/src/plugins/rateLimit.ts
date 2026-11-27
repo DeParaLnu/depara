@@ -8,6 +8,7 @@ export interface RateLimitOptions {
   perMinute?: number;
   authPerMinute?: number;
   substitutionsPerMinute?: number;
+  passwordPerMinute?: number;
   /** Префікс ключів у Redis: тести беруть унікальний, щоб лічильники різних прогонів не змішувались */
   nameSpace?: string;
 }
@@ -30,6 +31,26 @@ export const authRateLimit = (max: number) => ({
   timeWindow: '1 minute',
   groupId: 'auth',
   keyGenerator: (req: FastifyRequest) => `ip:${req.ip}`,
+});
+
+// Вхід за паролем. Ключ «IP + пошта»: перебір одного акаунта зупиняється швидко, а студенти за спільним IP кампусу
+// не заважають одне одному. Пошта є лише в тілі запиту, тому перевірка після його розбору (preHandler).
+export const passwordRateLimit = (max: number) => ({
+  max,
+  timeWindow: '1 minute',
+  groupId: 'password',
+  hook: 'preHandler' as const,
+  keyGenerator: (req: FastifyRequest) => {
+    const email = (req.body as { email?: unknown } | null | undefined)?.email;
+    return `pw:${req.ip}:${typeof email === 'string' ? email.trim().toLowerCase().slice(0, 254) : ''}`;
+  },
+});
+
+// Другий лічильник того ж маршруту: одна адреса не перебирає багато різних пошт
+export const passwordIpRateLimit = (perAccount: number) => ({
+  max: perAccount * 10,
+  timeWindow: '1 minute',
+  keyGenerator: (req: FastifyRequest) => `pw-ip:${req.ip}`,
 });
 
 // Створення замін: кожна заміна це пуш усій групі, тож без окремого ліміту староста (чи чужий скомпрометований акаунт)

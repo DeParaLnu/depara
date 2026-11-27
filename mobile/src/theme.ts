@@ -84,6 +84,8 @@ export const darkColors: Colors = {
 export const errorMessages: Record<string, string> = {
   NETWORK_ERROR: 'Немає зв’язку із сервером. Перевірте інтернет і спробуйте ще раз.',
   NON_LNU_EMAIL: 'Увійти можна лише з пошти @lnu.edu.ua.',
+  INVALID_CREDENTIALS: 'Невірна пошта або пароль.',
+  EMAIL_AND_PASSWORD_REQUIRED: 'Введіть пошту й пароль.',
   INVALID_TOKEN: 'Не вдалося підтвердити вхід через Microsoft.',
   AUTH_NOT_CONFIGURED: 'Вхід тимчасово недоступний.',
   GROUP_NOT_SET: 'Спершу оберіть свою групу.',

@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx prisma/seed/seed.ts",
     "seed:demo": "tsx prisma/seed/demo.ts",
+    "set-password": "tsx --env-file-if-exists=../.env src/cli/setPassword.ts",
     "start:test": "tsx src/server.ts",
     "test:e2e": "start-server-and-test start:test http://localhost:3000/health \"vitest run\"",
     "loadtest": "node scripts/loadtest.mjs",
