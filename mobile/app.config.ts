@@ -2,6 +2,8 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 import { withAndroidManifest, type ConfigPlugin } from 'expo/config-plugins';
 
 const e2e = process.env.E2E === '1';
+// Збірка для знімків екранів (workflow app-screenshots) теж ходить у локальний бекенд по http, але без E2E-кнопок
+const allowHttp = e2e || process.env.ALLOW_HTTP === '1';
 
 // E2E-збірка (release APK, щоб JS був усередині) ходить у тестовий бекенд по http://10.0.2.2:3000,
 // а release-збірки Android блокують HTTP без TLS. Дозволяємо його лише в збірці з E2E=1.
@@ -24,5 +26,5 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       privacyUrl: process.env.PRIVACY_URL,
     },
   };
-  return e2e ? withE2eCleartext(expoConfig) : expoConfig;
+  return allowHttp ? withE2eCleartext(expoConfig) : expoConfig;
 };
