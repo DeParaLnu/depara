@@ -57,10 +57,11 @@ E2E=1 API_URL=http://localhost:3000 npx expo start     # локальний бе
 ```bash
 cd mobile
 npx eas-cli@latest login                                  # акаунт Expo, один раз
-npx eas-cli@latest init                                   # лише вперше: привʼязує проєкт (додає projectId в app.json)
 npx eas-cli@latest build -p android --profile preview      # прод API https://api.depara.me
 npx eas-cli@latest build -p android --profile preview-mock # вбудовані дані (MOCK=1), для демо без входу
 ```
+
+Без акаунта Expo APK збирається локально (prebuild і Gradle) або вручну через GitHub Actions (workflow `android-apk`): покрокова інструкція в [docs/android-apk.md](docs/android-apk.md).
 
 Після збірки EAS дає посилання і QR-код на APK. Поки на проді немає входу через Microsoft (#37), збірка `preview` доходить лише до екрана входу, тож для показу використовуйте `preview-mock`.
 
