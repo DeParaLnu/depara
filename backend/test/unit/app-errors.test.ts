@@ -128,7 +128,7 @@ describe('ліміти запитів', () => {
     expect(limited.json()).toEqual({ error: 'RATE_LIMITED', retryAfterSeconds: expect.any(Number) });
     // інший користувач має власний лічильник
     expect((await post(b)).statusCode).toBe(401);
-    // скасування заміни пуш не шле, тому його ліміт замін не зачіпає, як і решту маршрутів
+    // ліміт замін не зачіпає скасування (виправити помилку можна завжди), як і решту маршрутів
     const del = await app.inject({ method: 'DELETE', url: `/substitutions/${randomUUID()}`, headers: as(a) });
     expect(del.statusCode).toBe(401);
     expect((await app.inject({ url: '/__ok', headers: as(a) })).statusCode).toBe(200);

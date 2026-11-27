@@ -12,6 +12,8 @@ export interface PushMessage {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  collapseId?: string; // новий пуш із тим самим ключем заміняє попередній (iOS), на Android лише ще не доставлений
+  tag?: string; // Android: заміняє вже показане сповіщення з тим самим тегом
 }
 
 export interface SendResult {

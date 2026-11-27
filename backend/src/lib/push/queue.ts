@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { config } from '../../config';
 import { redis } from '../../redis';
-import { deliverSubstitutionPush } from './substitutionPush';
+import { rememberDelivered } from './delivered';
+import { deliverRetractionPush, deliverSubstitutionPush } from './substitutionPush';
 
 // Невелика черга пушів у Redis (на проді з appendonly, тож переживає перезапуск). Розрахована на один екземпляр
 // бекенду: задача на час обробки лежить у PROCESSING, а при старті все звідти повертається в чергу.
@@ -19,12 +20,17 @@ export interface PushJob {
   substitutionId: string;
   attempt: number;
   tokens?: string[]; // повтор лише для токенів, яким не вдалося відправити
+  retraction?: { lessonId: string }; // є лише в задачі «заміну скасовано»: запису заміни в базі вже нема
 }
 
-export async function enqueueSubstitutionPush(substitutionId: string): Promise<void> {
-  const job: PushJob = { id: randomUUID(), substitutionId, attempt: 0 };
-  await redis.lpush(QUEUE, JSON.stringify(job));
+async function enqueue(job: Omit<PushJob, 'id' | 'attempt'>): Promise<void> {
+  await redis.lpush(QUEUE, JSON.stringify({ id: randomUUID(), attempt: 0, ...job } satisfies PushJob));
 }
+
+export const enqueueSubstitutionPush = (substitutionId: string): Promise<void> => enqueue({ substitutionId });
+
+export const enqueueRetractionPush = (substitutionId: string, lessonId: string): Promise<void> =>
+  enqueue({ substitutionId, retraction: { lessonId } });
 
 type Deliver = typeof deliverSubstitutionPush;
 
@@ -34,7 +40,7 @@ async function scheduleRetry(job: PushJob, tokens: string[] | undefined, log: Fa
     log.warn({ substitutionId: job.substitutionId, tokens: tokens?.length }, 'пуш про заміну не відправлено: вичерпано спроби');
     return;
   }
-  const next: PushJob = { id: randomUUID(), substitutionId: job.substitutionId, attempt, ...(tokens ? { tokens } : {}) };
+  const next: PushJob = { ...job, id: randomUUID(), attempt, ...(tokens ? { tokens } : {}) };
   await redis.zadd(DELAYED, Date.now() + config.pushRetryDelayMs * 2 ** job.attempt, JSON.stringify(next));
 }
 
@@ -47,14 +53,22 @@ export async function processJob(raw: string, log: FastifyBaseLogger, deliver: D
     return;
   }
   try {
-    const result = await deliver(job.substitutionId, job.tokens);
+    const result = job.retraction
+      ? await deliverRetractionPush({ substitutionId: job.substitutionId, lessonId: job.retraction.lessonId }, job.tokens)
+      : await deliver(job.substitutionId, job.tokens);
     if (!result) return;
+    if (!job.retraction) {
+      // Збій запису не привід слати пуш повторно: втрачається лише можливість прибрати його після скасування
+      await rememberDelivered(job.substitutionId, result.sent).catch((err) =>
+        log.warn({ err, substitutionId: job.substitutionId }, 'не збережено, кому дійшов пуш про заміну'),
+      );
+    }
     if (result.errors.length > 0) {
       log.warn({ substitutionId: job.substitutionId, errors: result.errors.slice(0, 5) }, 'помилки відправки пушу');
     }
     log.info(
       { substitutionId: job.substitutionId, sent: result.sent.length, invalid: result.invalid.length, retry: result.retry.length, failed: result.failed.length },
-      'пуш про заміну',
+      job.retraction ? 'пуш про скасування заміни' : 'пуш про заміну',
     );
     if (result.retry.length > 0) await scheduleRetry(job, result.retry, log);
   } catch (err) {

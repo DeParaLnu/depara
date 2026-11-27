@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { prisma } from '../db';
 import { audit } from '../lib/audit';
-import { enqueueSubstitutionPush } from '../lib/push/queue';
+import { enqueueRetractionPush, enqueueSubstitutionPush } from '../lib/push/queue';
 import { isIsoDate, isUuid } from '../lib/validation';
 import { substitutionRateLimit } from '../plugins/rateLimit';
 import { requireRole } from '../plugins/roles';
@@ -128,8 +128,16 @@ export async function substitutionRoutes(app: FastifyInstance, opts: { substitut
       return reply.code(403).send({ error: 'FORBIDDEN_GROUP' });
     }
 
-    await prisma.substitution.delete({ where: { id } });
+    // Паралельні скасування (подвійний тап): видаляє лише один запит, тож і audit, і пуш будуть по одному
+    const { count } = await prisma.substitution.deleteMany({ where: { id } });
+    if (count === 0) return reply.code(404).send({ error: 'SUBSTITUTION_NOT_FOUND' });
     audit(req, 'substitution.delete', { target: id, lessonId: sub.lessonId, groupId: sub.lesson.groupId, kind: sub.kind });
+    // F8: прибрати пуш про скасовану заміну. Збій черги не повертає заміну: розклад уже звичайний
+    if (config.pushEnabled) {
+      await enqueueRetractionPush(id, sub.lessonId).catch((err) =>
+        req.log.warn({ err, substitutionId: id }, 'пуш про скасування заміни не поставлено в чергу'),
+      );
+    }
     return reply.code(204).send();
   });
 }

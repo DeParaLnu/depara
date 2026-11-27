@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EXPO_CHUNK, isExpoPushToken, sendExpoPush, type PushMessage } from '../../src/lib/push/expo';
-import { substitutionMessage } from '../../src/lib/push/substitutionMessage';
+import { retractionMessage, substitutionMessage } from '../../src/lib/push/substitutionMessage';
 
 const tok = (i: number | string) => `ExponentPushToken[token-${i}-abcdefgh]`;
 const msg = (to: string): PushMessage => ({ to, title: 't', body: 'b' });
@@ -100,5 +100,27 @@ describe('substitutionMessage', () => {
     expect(m.title.endsWith('…')).toBe(true);
     expect(m.body).toContain('пари не буде. Хвороба x');
     expect(m.body.length).toBeLessThanOrEqual(300);
+  });
+});
+
+describe('retractionMessage', () => {
+  it('каже, яку заміну скасовано і що пара за розкладом', () => {
+    expect(
+      retractionMessage({
+        subject: 'Програмування',
+        date: new Date('2026-11-06T00:00:00Z'),
+        pairNumber: 2,
+        startTime: new Date('1970-01-01T10:10:00Z'),
+      }),
+    ).toEqual({
+      title: 'Заміну скасовано: Програмування',
+      body: 'пт, 06.11, 2 пара о 10:10: пара за звичайним розкладом.',
+    });
+  });
+
+  it('довгий предмет обрізається', () => {
+    const m = retractionMessage({ subject: 'П'.repeat(200), date: new Date('2026-11-06T00:00:00Z'), pairNumber: 1 });
+    expect(m.title.length).toBeLessThanOrEqual(80);
+    expect(m.title.endsWith('…')).toBe(true);
   });
 });

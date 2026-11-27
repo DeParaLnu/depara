@@ -5,7 +5,14 @@ import { adminToken, API, emptyGroup, loginToken, send, setupStudent, uniqueSlot
 // Підставний Expo Push: сервер E2E запущено з EXPO_PUSH_URL на нього (див. ci.yml). Токени з «GONE» відповідають
 // DeviceNotRegistered, перший запит з «FLAKY» отримує 503 (тимчасовий збій, має бути повтор).
 const PUSH_URL = new URL(process.env.EXPO_PUSH_URL ?? 'http://localhost:4010/push');
-type Pushed = { to: string; title: string; body: string; data: { lessonId: string; type: string } };
+type Pushed = {
+  to: string;
+  title: string;
+  body: string;
+  collapseId?: string;
+  tag?: string;
+  data: { lessonId: string; type: string; retracted?: boolean };
+};
 const received: Pushed[] = [];
 let flakyFailed = false;
 let stub: Server;
@@ -137,5 +144,65 @@ describe('F8: пуш про заміну', () => {
     expect((await send('POST', '/substitutions', head, { lessonId: lesson2.id, kind: 'CANCELLED' })).status).toBe(201);
     const pushes2 = await pushesFor(lesson2.id, [token('FLAKY')]);
     expect(pushes2.map((p) => p.to)).not.toContain(token('GONE'));
+  });
+});
+
+describe('F8: скасування заміни прибирає пуш', () => {
+  it('тим, хто отримав пуш, приходить «Заміну скасовано» з тим самим ключем заміщення', async () => {
+    const admin = await adminToken();
+    const head = await headman(admin, 'retract-head');
+    const got = await setupStudent(`f8.retract.got.${run}@lnu.edu.ua`);
+    const late = await setupStudent(`f8.retract.late.${run}@lnu.edu.ua`);
+    const muted = await setupStudent(`f8.retract.muted.${run}@lnu.edu.ua`);
+    expect((await register(got, token('rgot'))).status).toBe(204);
+    expect((await register(muted, token('rmuted'))).status).toBe(204);
+
+    const subject = `E2E скасування ${run}`;
+    const slot = await importLessonFor(admin, subject, 0);
+    const lesson = (await weekLessons(head, slot.date)).find((l) => l.date === slot.date && l.pairNumber === slot.pair)!;
+    const created = await send('POST', '/substitutions', head, { lessonId: lesson.id, kind: 'CANCELLED' });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    // у групі є й пристрої з попередніх тестів файлу: порівнюємо отримувачів обох пушів між собою
+    const originals = await pushesFor(lesson.id, [token('rgot'), token('rmuted')]);
+    const original = originals.find((p) => p.to === token('rgot'))!;
+
+    // пристрій зареєстрували вже після пушу, а інший студент встиг вимкнути сповіщення: їм нема чого прибирати
+    expect((await register(late, token('rlate'))).status).toBe(204);
+    expect((await send('PATCH', '/me', muted, { notifySubstitutions: false })).status).toBe(200);
+    received.length = 0;
+
+    expect((await send('DELETE', `/substitutions/${id}`, head)).status).toBe(204);
+    const retraction = await pushesFor(lesson.id, [token('rgot')]);
+
+    const recipients = retraction.map((p) => p.to);
+    expect(recipients).not.toContain(token('rlate'));
+    expect(recipients).not.toContain(token('rmuted'));
+    expect(recipients.sort()).toEqual(originals.map((p) => p.to).filter((to) => to !== token('rmuted')).sort());
+    const mine = retraction.find((p) => p.to === token('rgot'))!;
+    expect(mine.title).toBe(`Заміну скасовано: ${subject}`);
+    expect(mine.body).toContain('за звичайним розкладом');
+    expect(mine.data).toMatchObject({ type: 'substitution', lessonId: lesson.id, retracted: true });
+    expect(original.collapseId).toBe(`substitution-${lesson.id}`);
+    expect([mine.collapseId, mine.tag]).toEqual([original.collapseId, original.tag]);
+  });
+
+  it('повторне скасування дає 404, а паралельні запити не шлють другий пуш', async () => {
+    const admin = await adminToken();
+    const head = await headman(admin, 'retract-head2');
+    const student = await setupStudent(`f8.retract.twice.${run}@lnu.edu.ua`);
+    expect((await register(student, token('rtwice'))).status).toBe(204);
+
+    const slot = await importLessonFor(admin, `E2E двічі ${run}`, 0);
+    const lesson = (await weekLessons(head, slot.date)).find((l) => l.date === slot.date && l.pairNumber === slot.pair)!;
+    const created = await send('POST', '/substitutions', head, { lessonId: lesson.id, kind: 'CANCELLED' });
+    const { id } = (await created.json()) as { id: string };
+    await pushesFor(lesson.id, [token('rtwice')]);
+    received.length = 0;
+
+    const results = await Promise.all([1, 2, 3].map(() => send('DELETE', `/substitutions/${id}`, head)));
+    expect(results.map((r) => r.status).sort()).toEqual([204, 404, 404]);
+    expect((await send('DELETE', `/substitutions/${id}`, head)).status).toBe(404);
+    expect((await pushesFor(lesson.id, [token('rtwice')])).filter((p) => p.to === token('rtwice'))).toHaveLength(1);
   });
 });

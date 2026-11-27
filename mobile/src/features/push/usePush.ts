@@ -3,10 +3,28 @@ import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
+import type { WeekSchedule } from '../../api';
+import { log } from '../../lib/logger';
 import { useSession } from '../auth/session';
 import { notificationsSupported } from '../reminders/notifications';
 import { syncPushToken } from './registration';
-import { parsePushTarget } from './target';
+import { parsePushTarget, staleSubstitutionNotifications } from './target';
+
+// Прибрати з центру сповіщень пуші про заміни, яких у свіжому розкладі вже немає. Це друга лінія після пушу
+// «Заміну скасовано»: він міг не дійти (вимкнена мережа, ліміти Expo).
+async function dismissStalePushes(week: WeekSchedule, loadedAt: number) {
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    const stale = staleSubstitutionNotifications(
+      presented.map((n) => ({ identifier: n.request.identifier, date: n.date, data: n.request.content.data })),
+      week,
+      loadedAt,
+    );
+    await Promise.all(stale.map((id) => Notifications.dismissNotificationAsync(id)));
+  } catch (error) {
+    log.warn('push', 'не вдалося прибрати застарілі сповіщення', { error });
+  }
+}
 
 /**
  * F8: пуші про заміни, поки користувач у застосунку (монтується у вкладках, тобто він увійшов і має групу).
@@ -27,6 +45,15 @@ export function usePush() {
     });
     return () => sub.remove();
   }, []);
+
+  // Лише після успішної відповіді сервера: розклад, відновлений з диска, може бути старішим за пуш
+  useEffect(() => {
+    if (!notificationsSupported) return;
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'success' || event.query.queryKey[0] !== 'week') return;
+      void dismissStalePushes(event.query.state.data as WeekSchedule, event.query.state.dataUpdatedAt);
+    });
+  }, [queryClient]);
 
   useEffect(() => {
     if (!notificationsSupported) return;

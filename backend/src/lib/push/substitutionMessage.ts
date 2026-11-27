@@ -57,3 +57,13 @@ export function substitutionMessage(i: SubstitutionPushInput): { title: string; 
   if (comment) body += ` ${cut(comment.replace(/\s+/g, ' '), 120)}`;
   return { title: cut(`${TITLES[i.kind]}: ${i.subject}`, 80), body: cut(body, 300) };
 }
+
+// Пуш замість попереднього, коли заміну прибрали: пара знову йде за розкладом.
+export function retractionMessage(
+  i: Pick<SubstitutionPushInput, 'subject' | 'date' | 'pairNumber' | 'startTime'>,
+): { title: string; body: string } {
+  return {
+    title: cut(`Заміну скасовано: ${i.subject}`, 80),
+    body: `${slot(i.date, i.pairNumber, i.startTime)}: пара за звичайним розкладом.`,
+  };
+}
