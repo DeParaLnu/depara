@@ -220,6 +220,30 @@ describe('ліміт входу за паролем', () => {
     expect((await attempt(app, `${randomUUID()}@lnu.edu.ua`)).statusCode).toBe(401);
   });
 
+  const attemptFrom = (app: ReturnType<typeof appWith>, email: string, remoteAddress: string) =>
+    app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      remoteAddress,
+      payload: { email, password: 'example-wrong-password', deviceId: 'd' },
+    });
+
+  it('перебір однієї пошти з багатьох адрес теж зупиняється: ліміт на акаунт утричі вищий', async () => {
+    const app = limitedApp(1);
+    const victim = `${randomUUID()}@lnu.edu.ua`;
+    for (let i = 1; i <= 3; i++) expect((await attemptFrom(app, victim, `198.51.100.${i}`)).statusCode).toBe(401);
+    const limited = await attemptFrom(app, victim, '198.51.100.99');
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toEqual({ error: 'RATE_LIMITED', retryAfterSeconds: expect.any(Number) });
+  });
+
+  it('адреси однієї мережі IPv6 /64 ділять лічильник', async () => {
+    const app = limitedApp(1);
+    const email = `${randomUUID()}@lnu.edu.ua`;
+    expect((await attemptFrom(app, email, '2001:db8:7:7::1')).statusCode).toBe(401);
+    expect((await attemptFrom(app, email, '2001:db8:7:7::2')).statusCode).toBe(429);
+  });
+
   it('одна адреса не може перебирати багато пошт: ліміт на IP удесятеро вищий', async () => {
     const app = limitedApp(1);
     for (let i = 0; i < 10; i++) expect((await attempt(app, `${randomUUID()}@lnu.edu.ua`)).statusCode).toBe(401);

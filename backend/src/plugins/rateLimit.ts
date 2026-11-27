@@ -1,6 +1,7 @@
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { config } from '../config';
+import { clientNetwork } from '../lib/network';
 import { verifyAccessToken } from '../lib/tokens';
 import { redis, redisUsable } from '../redis';
 
@@ -33,24 +34,41 @@ export const authRateLimit = (max: number) => ({
   keyGenerator: (req: FastifyRequest) => `ip:${req.ip}`,
 });
 
-// Вхід за паролем. Ключ «IP + пошта»: перебір одного акаунта зупиняється швидко, а студенти за спільним IP кампусу
-// не заважають одне одному. Пошта є лише в тілі запиту, тому перевірка після його розбору (preHandler).
+// Ліміти входу за паролем, на відміну від решти, відмовляють, коли сховище лічильників не відповідає (503):
+// перебір без обмеження небезпечніший за тимчасово недоступний вхід
+const failClosed = { skipOnError: false, allowList: [] as string[] };
+
+const emailOf = (req: FastifyRequest): string => {
+  const email = (req.body as { email?: unknown } | null | undefined)?.email;
+  return typeof email === 'string' ? email.trim().toLowerCase().slice(0, 254) : '';
+};
+
+// Вхід за паролем. Ключ «мережа + пошта»: перебір одного акаунта зупиняється швидко, а студенти за спільним IP
+// кампусу не заважають одне одному. Пошта є лише в тілі запиту, тому перевірка після його розбору (preHandler).
 export const passwordRateLimit = (max: number) => ({
+  ...failClosed,
   max,
   timeWindow: '1 minute',
   groupId: 'password',
   hook: 'preHandler' as const,
-  keyGenerator: (req: FastifyRequest) => {
-    const email = (req.body as { email?: unknown } | null | undefined)?.email;
-    return `pw:${req.ip}:${typeof email === 'string' ? email.trim().toLowerCase().slice(0, 254) : ''}`;
-  },
+  keyGenerator: (req: FastifyRequest) => `pw:${clientNetwork(req.ip)}:${emailOf(req)}`,
 });
 
-// Другий лічильник того ж маршруту: одна адреса не перебирає багато різних пошт
+// Другий лічильник того ж маршруту: одна мережа не перебирає багато різних пошт
 export const passwordIpRateLimit = (perAccount: number) => ({
+  ...failClosed,
   max: perAccount * 10,
   timeWindow: '1 minute',
-  keyGenerator: (req: FastifyRequest) => `pw-ip:${req.ip}`,
+  keyGenerator: (req: FastifyRequest) => `pw-ip:${clientNetwork(req.ip)}`,
+});
+
+// Третій: на сам акаунт з будь-яких адрес, інакше багато адрес разом обходили б перші два. Вікно коротке, щоб
+// чужий перебір не відрізав власника від входу надовго (вхід через Microsoft цим лімітом не зачеплений)
+export const passwordAccountRateLimit = (perAccount: number) => ({
+  ...failClosed,
+  max: perAccount * 3,
+  timeWindow: '15 minutes',
+  keyGenerator: (req: FastifyRequest) => `pw-account:${emailOf(req)}`,
 });
 
 // Створення замін: кожна заміна це пуш усій групі, тож без окремого ліміту староста (чи чужий скомпрометований акаунт)

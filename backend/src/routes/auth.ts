@@ -1,9 +1,10 @@
 import { Prisma } from '@prisma/client';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../config';
-import { authRateLimit, passwordIpRateLimit, passwordRateLimit } from '../plugins/rateLimit';
+import { authRateLimit, passwordAccountRateLimit, passwordIpRateLimit, passwordRateLimit } from '../plugins/rateLimit';
 import { prisma } from '../db';
 import { audit } from '../lib/audit';
+import { BusyError, limitConcurrency } from '../lib/concurrency';
 import { checkIdentity, verifyIdToken } from '../lib/microsoft';
 import { dummyHash, PASSWORD_MAX_LENGTH, verifyPassword } from '../lib/password';
 import {
@@ -33,7 +34,11 @@ function publicUser(u: { id: string; email: string; role: string; groupId: strin
 export async function authRoutes(app: FastifyInstance, opts: { authPerMinute?: number; passwordPerMinute?: number } = {}) {
   const limited = { config: { rateLimit: authRateLimit(opts.authPerMinute ?? config.rateLimitAuthPerMinute) } };
   const passwordPerMinute = opts.passwordPerMinute ?? config.rateLimitPasswordPerMinute;
-  const checkPasswordIpLimit = app.createRateLimit(passwordIpRateLimit(passwordPerMinute));
+  const extraPasswordLimits = [passwordIpRateLimit, passwordAccountRateLimit].map((limit) =>
+    app.createRateLimit(limit(passwordPerMinute)),
+  );
+  // Перевірка scrypt займає потік libuv: не більше двох одночасно, щоб входи не гальмували решту застосунку
+  const passwordCheck = limitConcurrency(2, 50);
 
   app.post('/auth/login', { config: { rateLimit: passwordRateLimit(passwordPerMinute) } }, async (req, reply) => {
     const { email, password, deviceId } = (req.body ?? {}) as { email?: unknown; password?: unknown; deviceId?: unknown };
@@ -41,17 +46,27 @@ export async function authRoutes(app: FastifyInstance, opts: { authPerMinute?: n
       return reply.code(400).send({ error: 'EMAIL_AND_PASSWORD_REQUIRED' });
     }
     if (!isNonEmptyString(deviceId)) return reply.code(400).send({ error: 'DEVICE_ID_REQUIRED' });
-    const ipLimit = await checkPasswordIpLimit(req);
-    if (!ipLimit.isAllowed && ipLimit.isExceeded) {
-      return reply.code(429).send({ error: 'RATE_LIMITED', retryAfterSeconds: ipLimit.ttlInSeconds });
-    }
+    const unavailable = () => reply.code(503).send({ error: 'TEMPORARILY_UNAVAILABLE', requestId: req.id });
     // Без Redis не діють ліміти й нікуди записати сесію. Відмова до перевірки пароля: інакше 401 проти 503
     // підказувало б, чи пароль правильний, а кількість спроб ніхто не обмежував би
-    if (!redisUsable()) return reply.code(503).send({ error: 'TEMPORARILY_UNAVAILABLE', requestId: req.id });
+    if (!redisUsable()) return unavailable();
+    for (const checkLimit of extraPasswordLimits) {
+      const limit = await checkLimit(req);
+      if (!limit.isAllowed && limit.isExceeded) {
+        return reply.code(429).send({ error: 'RATE_LIMITED', retryAfterSeconds: limit.ttlInSeconds });
+      }
+    }
 
     const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
-    const matches =
-      password.length <= PASSWORD_MAX_LENGTH && (await verifyPassword(password, user?.passwordHash ?? (await dummyHash())));
+    let matches: boolean;
+    try {
+      matches =
+        password.length <= PASSWORD_MAX_LENGTH &&
+        (await passwordCheck(async () => verifyPassword(password, user?.passwordHash ?? (await dummyHash()))));
+    } catch (e) {
+      if (e instanceof BusyError) return unavailable();
+      throw e;
+    }
     // Одна відповідь на невідому пошту, акаунт без пароля й хибний пароль: не підказуємо, які пошти зареєстровані
     if (!user?.passwordHash || !matches) {
       audit(req, 'auth.password.denied', { target: user?.id }, 'warn');
