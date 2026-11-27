@@ -6,7 +6,7 @@ const e2e = process.env.E2E === '1';
 const allowHttp = e2e || process.env.ALLOW_HTTP === '1';
 
 // E2E-збірка (release APK, щоб JS був усередині) ходить у тестовий бекенд по http://10.0.2.2:3000,
-// а release-збірки Android блокують HTTP без TLS. Дозволяємо його лише в збірці з E2E=1.
+// а release-збірки Android блокують HTTP без TLS. Дозволяємо його лише в збірках з E2E=1 або ALLOW_HTTP=1.
 const withE2eCleartext: ConfigPlugin = (cfg) =>
   withAndroidManifest(cfg, (mod) => {
     const app = mod.modResults.manifest.application?.[0];
