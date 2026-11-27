@@ -3,6 +3,8 @@
 Скрипт, який на кожен PR питає модель Together AI про проблеми в diff, відсіює непідтверджене, додає правила без моделі
 й лишає один коментар.
 
+**Зараз вимкнено:** workflow `ai-review.yml` не стартує на PR. Як увімкнути знову: [docs/ai-review.md](../../docs/ai-review.md).
+
 - Будова і схема потоку: [docs/ai-review-design.md](../../docs/ai-review-design.md)
 - Увімкнення, налаштування, запуск: [docs/ai-review.md](../../docs/ai-review.md)
 - Вимірювання якості: [eval/README.md](eval/README.md)

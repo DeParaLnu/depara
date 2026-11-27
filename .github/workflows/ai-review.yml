@@ -1,11 +1,14 @@
 name: ai-review
 
-# ШІ-ревʼю кожного PR: модель Together AI читає diff і файли репозиторію й лишає один коментар.
-# Вимкнено, доки в репозиторії не задано змінну AI_REVIEW_ENABLED=true і секрет TOGETHER_API_KEY.
-# Налаштування й обмеження: docs/ai-review.md.
+# ШІ-ревʼю PR: модель Together AI читає diff і файли репозиторію й лишає один коментар.
+# ВИМКНЕНО ПОВНІСТЮ: тригера pull_request немає, тож на PR workflow не стартує, а job має `if: false`.
+# Код (tools/ai-review) і документація (docs/ai-review.md) лишаються. Як увімкнути знову: docs/ai-review.md.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  # GitHub вимагає хоча б один тригер. Ручний запуск нічого не робить, доки job вимкнено.
+  workflow_dispatch:
+  # Було до вимкнення:
+  # pull_request:
+  #   types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -20,11 +23,12 @@ jobs:
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Лише PR із цього ж репозиторію: у PR із форків секретів немає, і код скрипта не довіряємо
-    if: >-
-      vars.AI_REVIEW_ENABLED == 'true'
-      && github.event.pull_request.draft == false
-      && github.event.pull_request.head.repo.full_name == github.repository
+    # Вимкнено. Умова до вимкнення (лише PR із цього ж репозиторію: у PR із форків секретів немає,
+    # і код скрипта не довіряємо):
+    #   vars.AI_REVIEW_ENABLED == 'true'
+    #   && github.event.pull_request.draft == false
+    #   && github.event.pull_request.head.repo.full_name == github.repository
+    if: false
     steps:
       - uses: actions/checkout@v4
         with:
